@@ -192,9 +192,14 @@ class PID {
 }
 ```
 
-- **Joints:** PID output drives joint velocity integrated into `robot.setJointValue(name, angle)`.
-  Tunable Kp/Ki/Kd per joint; a slider sets the setpoint and the joint visibly overshoots and
-  settles — the course's PID lesson made physical.
+- **Joints:** PID output is a **torque on a unit-inertia joint** — ẍ = τ, integrated twice into
+  `robot.setJointValue(name, angle)`, with hard stops at the URDF limits. (Resolved during M2: an
+  earlier draft said the output drives joint *velocity*, but velocity-mode P control is a
+  first-order lag that cannot overshoot, and Kd would *increase* overshoot in that form. The
+  torque form matches the taught equation τ = Kp·e + Ki·∫e + Kd·ė and gives ζ ≈ Kd/(2·√Kp), so
+  small Kd visibly overshoots — the behavior the lesson needs.) Tunable Kp/Ki/Kd per joint; a
+  slider sets the setpoint and the joint visibly overshoots and settles — the course's PID lesson
+  made physical.
 - **Camera:** spring-damper on position and look-at target; ζ exposed to demo under-/critically-/
   over-damped camera moves.
 - **UI micro-interactions:** the same spring-damper on knobs and panel slides for physical feel.

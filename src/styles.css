@@ -49,6 +49,48 @@ body {
   color: #9aa0a6;
 }
 
+.panel h2:not(:first-child) {
+  margin-top: 16px;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.button-row button {
+  flex: 1;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: #e8eaed;
+  background: #2a2f36;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.button-row button:hover {
+  background: #343a43;
+}
+
+.badge {
+  margin-top: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  text-align: center;
+  border-radius: 999px;
+  background: rgba(240, 162, 74, 0.15);
+  color: #f0a24a;
+  transition: background 0.2s, color 0.2s;
+}
+
+.badge.settled {
+  background: rgba(87, 171, 90, 0.15);
+  color: #7fc982;
+}
+
 .widget-slider {
   display: grid;
   grid-template-columns: 1fr auto;
