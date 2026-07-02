@@ -1,0 +1,73 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #14161a;
+  color: #e8eaed;
+}
+
+#scene-layer,
+#overlay-layer {
+  position: fixed;
+  inset: 0;
+}
+
+#scene-layer canvas {
+  display: block;
+}
+
+/* Overlay never blocks scene interaction except inside its own widgets */
+#overlay-layer {
+  pointer-events: none;
+}
+
+.panel {
+  pointer-events: auto;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 280px;
+  padding: 14px 16px;
+  background: rgba(22, 25, 30, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9aa0a6;
+}
+
+.widget-slider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.widget-slider label {
+  color: #c6c9ce;
+}
+
+.widget-slider output {
+  font-variant-numeric: tabular-nums;
+  color: #f0a24a;
+}
+
+.widget-slider input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #f0a24a;
+}

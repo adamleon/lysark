@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<!-- Dev-stand 3-DOF arm, primitive geometry only (no mesh assets). -->
+<robot name="lysark-arm">
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.03"/>
+      <geometry><cylinder radius="0.14" length="0.06"/></geometry>
+      <material name="graphite"><color rgba="0.22 0.24 0.28 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="joint1" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder"/>
+    <origin xyz="0 0 0.06"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.1416" upper="3.1416" effort="50" velocity="3"/>
+  </joint>
+
+  <link name="shoulder">
+    <visual>
+      <origin xyz="0 0 0.055"/>
+      <geometry><cylinder radius="0.09" length="0.11"/></geometry>
+      <material name="signal"><color rgba="0.95 0.50 0.12 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="joint2" type="revolute">
+    <parent link="shoulder"/>
+    <child link="upper_arm"/>
+    <origin xyz="0 0 0.11"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.9" upper="1.9" effort="50" velocity="3"/>
+  </joint>
+
+  <link name="upper_arm">
+    <visual>
+      <origin xyz="0 0 0.16"/>
+      <geometry><box size="0.09 0.09 0.32"/></geometry>
+      <material name="steel"><color rgba="0.70 0.72 0.75 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0.32" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.06" length="0.13"/></geometry>
+      <material name="signal2"><color rgba="0.95 0.50 0.12 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="joint3" type="revolute">
+    <parent link="upper_arm"/>
+    <child link="forearm"/>
+    <origin xyz="0 0 0.32"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.4" upper="2.4" effort="50" velocity="3"/>
+  </joint>
+
+  <link name="forearm">
+    <visual>
+      <origin xyz="0 0 0.14"/>
+      <geometry><box size="0.07 0.07 0.28"/></geometry>
+      <material name="steel2"><color rgba="0.70 0.72 0.75 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="ee_fixed" type="fixed">
+    <parent link="forearm"/>
+    <child link="end_effector"/>
+    <origin xyz="0 0 0.28"/>
+  </joint>
+
+  <link name="end_effector">
+    <visual>
+      <geometry><sphere radius="0.045"/></geometry>
+      <material name="signal3"><color rgba="0.95 0.50 0.12 1"/></material>
+    </visual>
+  </link>
+</robot>
