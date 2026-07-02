@@ -23,12 +23,16 @@ controls.enableDamping = true
 const cameraCtl = new CameraController(sceneLayer.camera, motion, controls.target.clone())
 
 function flyTo(position: THREE.Vector3, look: THREE.Vector3): void {
-  // flush frozen orbit damping so residual flick inertia can't replay after
-  // the flight; the non-damping update applies and zeroes it in one call
-  controls.enableDamping = false
-  controls.update()
-  controls.enableDamping = true
-  controls.enabled = false
+  if (!cameraCtl.active) {
+    // flush frozen orbit damping so residual flick inertia can't replay after
+    // the flight; the non-damping update applies and zeroes it in one call.
+    // Skipped mid-flight: controls are already disabled and this update()
+    // would lookAt the stale pre-flight target, snapping the view.
+    controls.enableDamping = false
+    controls.update()
+    controls.enableDamping = true
+    controls.enabled = false
+  }
   cameraCtl.moveTo(position, look, controls.target)
 }
 

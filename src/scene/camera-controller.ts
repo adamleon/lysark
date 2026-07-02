@@ -46,13 +46,19 @@ export class CameraController {
   }
 
   moveTo(position: THREE.Vector3, look: THREE.Vector3, fromLook: THREE.Vector3): void {
-    const c = this.camera.position
-    this.pos[0].reset(c.x)
-    this.pos[1].reset(c.y)
-    this.pos[2].reset(c.z)
-    this.look[0].reset(fromLook.x)
-    this.look[1].reset(fromLook.y)
-    this.look[2].reset(fromLook.z)
+    if (!this.active) {
+      // idle → flight: seed from the live externally-driven pose. Mid-flight
+      // re-targets skip this — the channels already hold the current pose AND
+      // velocity, so the new flight blends continuously instead of snapping
+      // back to the stale pre-flight framing.
+      const c = this.camera.position
+      this.pos[0].reset(c.x)
+      this.pos[1].reset(c.y)
+      this.pos[2].reset(c.z)
+      this.look[0].reset(fromLook.x)
+      this.look[1].reset(fromLook.y)
+      this.look[2].reset(fromLook.z)
+    }
     this.pos[0].target = position.x
     this.pos[1].target = position.y
     this.pos[2].target = position.z
