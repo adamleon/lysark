@@ -45,12 +45,16 @@ export class PidChannel implements Channel {
     const a = this.pid.step(this.x, this.setpoint, dt)
     this.v += a * dt
     this.x += this.v * dt
+    // hard stops: kill velocity AND integral, or the controller grinds a
+    // wound-up integral into the stop indefinitely
     if (this.x < this.min) {
       this.x = this.min
       this.v = 0
+      this.pid.resetIntegral()
     } else if (this.x > this.max) {
       this.x = this.max
       this.v = 0
+      this.pid.resetIntegral()
     }
     this.apply?.(this.x)
   }

@@ -201,7 +201,13 @@ class PID {
   slider sets the setpoint and the joint visibly overshoots and settles — the course's PID lesson
   made physical.
 - **Camera:** spring-damper on position and look-at target; ζ exposed to demo under-/critically-/
-  over-damped camera moves.
+  over-damped camera moves. Two constraints found during M2 review: (1) large moves with ζ below
+  ~0.4 can swing the look point past the camera mid-flight (the view whips); the runtime enforces
+  a minimum camera-to-look distance and the demo floors ζ at 0.4 — deck choreography that needs
+  deeper underdamping must spring in look-relative coordinates instead. (2) Gains satisfying
+  Ki ≥ Kd·Kp make the joint loop closed-loop unstable (Routh–Hurwitz on s³ + Kd·s² + Kp·s + Ki) —
+  deliberately reachable as a teaching moment, surfaced in the UI rather than prevented, and one
+  more reason the PDF exporter's per-slide settle wait needs its hard timeout (§9c).
 - **UI micro-interactions:** the same spring-damper on knobs and panel slides for physical feel.
 - All parameters live in per-widget config so the lecturer can tune feel per slide.
 - **Settle detection:** the system is settled when every active channel has |x − target| < ε and

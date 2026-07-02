@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 
 /**
- * Owns the single WebGLRenderer + canvas for the whole session (spec §4).
- * Scene graphs come and go; the renderer never does.
+ * Owns ONLY the persistent pieces (spec §4): the single WebGLRenderer +
+ * canvas, the camera, and an empty Scene with a background color. All world
+ * content — lights, ground, robots — belongs to scene modules (§7) so M4's
+ * suspend/dispose contract can free every scene-owned GPU resource.
  */
 export class SceneLayer {
   readonly renderer: THREE.WebGLRenderer
@@ -28,38 +30,13 @@ export class SceneLayer {
     )
     this.camera.position.set(1.4, 1.1, 1.4)
 
-    const hemi = new THREE.HemisphereLight(0xdfe6f0, 0x30343a, 0.9)
-    const key = new THREE.DirectionalLight(0xffffff, 2.2)
-    key.position.set(2.5, 4, 1.5)
-    key.castShadow = true
-    key.shadow.mapSize.set(2048, 2048)
-    key.shadow.camera.near = 0.5
-    key.shadow.camera.far = 12
-    key.shadow.camera.left = -3
-    key.shadow.camera.right = 3
-    key.shadow.camera.top = 3
-    key.shadow.camera.bottom = -3
-    key.shadow.bias = -0.0002
-    key.shadow.normalBias = 0.02
-    this.scene.add(hemi, key)
-
-    const grid = new THREE.GridHelper(5, 25, 0x3a4048, 0x272c33)
-    this.scene.add(grid)
-
-    // shadow catcher just below the grid to avoid z-fighting
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 10),
-      new THREE.ShadowMaterial({ opacity: 0.35 }),
-    )
-    ground.rotation.x = -Math.PI / 2
-    ground.position.y = -0.001
-    ground.receiveShadow = true
-    this.scene.add(ground)
-
     window.addEventListener('resize', this.onResize)
   }
 
   private onResize = () => {
+    // re-read DPR: the window may have moved to a monitor with a different
+    // scale factor (laptop ↔ projector), or browser zoom changed
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.camera.aspect = window.innerWidth / window.innerHeight
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(window.innerWidth, window.innerHeight)

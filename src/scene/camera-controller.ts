@@ -5,15 +5,22 @@ import { MotionSystem, SpringChannel } from '../engine/motion-system'
 /**
  * Spring-damper camera (spec §5): six channels — position xyz, look-at xyz —
  * sharing one SpringDamper so ω/ζ are live-tunable for the damping demo.
- * While inactive the channels shadow the externally-driven camera (orbit
- * controls) so a moveTo never starts from stale state.
+ *
+ * Handoff discipline (from the M2 review): moveTo re-seeds the channels from
+ * the LIVE camera pose synchronously at call time, so a flight never starts
+ * from the one-frame-stale idle shadow; syncIdle shadows the externally-driven
+ * camera and must be called AFTER orbit controls update, not before.
  */
 export class CameraController {
   readonly spring = new SpringDamper({ omega: 4, zeta: 1 })
   active = false
 
+  /** camera never gets closer to the look point than this (lookAt degeneracy guard) */
+  static readonly MIN_LOOK_DISTANCE = 0.1
+
   private readonly pos: [SpringChannel, SpringChannel, SpringChannel]
   private readonly look: [SpringChannel, SpringChannel, SpringChannel]
+  private readonly lastDir = new THREE.Vector3(0, 0, 1)
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -38,26 +45,57 @@ export class CameraController {
     return new THREE.Vector3(this.look[0].x, this.look[1].x, this.look[2].x)
   }
 
-  moveTo(position: THREE.Vector3, look: THREE.Vector3): void {
-    const pt = [position.x, position.y, position.z]
-    const lt = [look.x, look.y, look.z]
-    this.pos.forEach((ch, i) => (ch.target = pt[i]))
-    this.look.forEach((ch, i) => (ch.target = lt[i]))
+  moveTo(position: THREE.Vector3, look: THREE.Vector3, fromLook: THREE.Vector3): void {
+    const c = this.camera.position
+    this.pos[0].reset(c.x)
+    this.pos[1].reset(c.y)
+    this.pos[2].reset(c.z)
+    this.look[0].reset(fromLook.x)
+    this.look[1].reset(fromLook.y)
+    this.look[2].reset(fromLook.z)
+    this.pos[0].target = position.x
+    this.pos[1].target = position.y
+    this.pos[2].target = position.z
+    this.look[0].target = look.x
+    this.look[1].target = look.y
+    this.look[2].target = look.z
     this.active = true
   }
 
+  /** abort mid-flight, freezing at the current pose */
+  cancel(): void {
+    if (!this.active) return
+    this.active = false
+    for (const ch of [...this.pos, ...this.look]) ch.reset(ch.x)
+  }
+
   /**
-   * Call once per frame after MotionSystem.step. While active, writes the
-   * camera from the channels and self-deactivates on settle; while inactive,
-   * shadows the camera so channel state stays current.
+   * Active path — call once per frame after MotionSystem.step. Writes the
+   * camera from the channels; returns true on the frame the flight settles.
    */
-  update(externalLook: THREE.Vector3): void {
-    if (this.active) {
-      this.camera.position.set(this.pos[0].x, this.pos[1].x, this.pos[2].x)
-      this.camera.lookAt(this.look[0].x, this.look[1].x, this.look[2].x)
-      if (this.settledNow()) this.active = false
-      return
+  drive(): boolean {
+    if (!this.active) return false
+    const look = new THREE.Vector3(this.look[0].x, this.look[1].x, this.look[2].x)
+    const pos = new THREE.Vector3(this.pos[0].x, this.pos[1].x, this.pos[2].x)
+    const offset = pos.clone().sub(look)
+    if (offset.length() < CameraController.MIN_LOOK_DISTANCE) {
+      // underdamped overshoot can carry the camera through the look point
+      const dir = offset.lengthSq() > 1e-12 ? offset.normalize() : this.lastDir
+      pos.copy(look).addScaledVector(dir, CameraController.MIN_LOOK_DISTANCE)
+    } else {
+      this.lastDir.copy(offset.normalize())
     }
+    this.camera.position.copy(pos)
+    this.camera.lookAt(look)
+    if (this.settledNow()) {
+      this.active = false
+      return true
+    }
+    return false
+  }
+
+  /** idle path — call once per frame AFTER orbit controls have updated */
+  syncIdle(externalLook: THREE.Vector3): void {
     this.pos[0].reset(this.camera.position.x)
     this.pos[1].reset(this.camera.position.y)
     this.pos[2].reset(this.camera.position.z)

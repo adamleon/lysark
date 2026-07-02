@@ -91,6 +91,11 @@ body {
   color: #7fc982;
 }
 
+.badge.unstable {
+  background: rgba(214, 92, 92, 0.18);
+  color: #e58a8a;
+}
+
 .widget-slider {
   display: grid;
   grid-template-columns: 1fr auto;

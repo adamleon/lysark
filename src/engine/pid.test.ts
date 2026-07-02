@@ -48,4 +48,35 @@ describe('PID torque on a unit-inertia joint (ζ ≈ Kd / 2√Kp)', () => {
     }
     expect(channel.x).toBeCloseTo(0.5, 6)
   })
+
+  it('a session driven with Ki=0 does not lurch when Ki is raised live', () => {
+    const pid = new PID({ kp: 12, ki: 0, kd: 2.5, outMin: -60, outMax: 60 })
+    const channel = new PidChannel({ x0: 0, pid, min: -2.4, max: 2.4 })
+    const dt = 1 / 240
+    for (const sp of [1.5, -1.0, 0.5, 2.0]) {
+      channel.setpoint = sp
+      for (let t = 0; t < 8; t += dt) channel.step(dt)
+    }
+    expect(Math.abs(channel.x - 2.0)).toBeLessThan(1e-3) // at rest on target
+    pid.ki = 20 // the "now add some Ki" lesson beat
+    let maxDeviation = 0
+    for (let t = 0; t < 2; t += dt) {
+      channel.step(dt)
+      maxDeviation = Math.max(maxDeviation, Math.abs(channel.x - 2.0))
+    }
+    // pre-fix, dormant integral history lurched the joint 0.4 rad into its stop
+    expect(maxDeviation).toBeLessThan(5e-3)
+  })
+
+  it('recovers cleanly after saturating against a stop (anti-windup)', () => {
+    const pid = new PID({ kp: 40, ki: 20, kd: 2.5, outMin: -60, outMax: 60 })
+    const channel = new PidChannel({ x0: -1.9, pid, min: -1.9, max: 1.9 })
+    const dt = 1 / 240
+    channel.setpoint = 1.9 // full-range slam into the stop
+    for (let t = 0; t < 10; t += dt) channel.step(dt)
+    expect(channel.x).toBeCloseTo(1.9, 3)
+    channel.setpoint = 0 // the return move must not carry hidden integral
+    for (let t = 0; t < 10; t += dt) channel.step(dt)
+    expect(Math.abs(channel.x)).toBeLessThan(1e-2)
+  })
 })

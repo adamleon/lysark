@@ -5,37 +5,15 @@ import { SceneLayer } from './scene/scene-layer'
 import { CameraController } from './scene/camera-controller'
 import { buildArmScene } from './scenes/arm'
 import { createSlider } from './overlay/widgets/slider'
-import { MotionSystem, PidChannel } from './engine/motion-system'
-import { PID } from './engine/pid'
+import { MotionSystem } from './engine/motion-system'
 
 const sceneLayer = new SceneLayer(document.getElementById('scene-layer')!)
 const arm = buildArmScene()
 sceneLayer.scene.add(arm.root)
 
-// starting pose so the arm isn't a straight vertical stick
-arm.setJoint('joint2', 0.6)
-arm.setJoint('joint3', -1.0)
-
 const motion = new MotionSystem()
-
-// per-joint PID torque channels; gains shared across joints for the demo panel
-const pids: PID[] = []
-const jointChannels = new Map<string, PidChannel>()
-for (const name of arm.jointNames) {
-  const pid = new PID({ kp: 12, ki: 0, kd: 2.5, outMin: -60, outMax: 60 })
-  pids.push(pid)
-  const { lower, upper } = arm.jointLimits(name)
-  const channel = motion.add(
-    `joint.${name}`,
-    new PidChannel({
-      x0: arm.getJoint(name),
-      pid,
-      min: lower,
-      max: upper,
-      apply: (x) => arm.setJoint(name, x),
-    }),
-  )
-  jointChannels.set(name, channel)
+for (const [name, channel] of Object.entries(arm.channels)) {
+  motion.add(`${arm.id}.${name}`, channel)
 }
 
 const controls = new OrbitControls(sceneLayer.camera, sceneLayer.renderer.domElement)
@@ -44,6 +22,24 @@ controls.enableDamping = true
 
 const cameraCtl = new CameraController(sceneLayer.camera, motion, controls.target.clone())
 
+function flyTo(position: THREE.Vector3, look: THREE.Vector3): void {
+  // flush frozen orbit damping so residual flick inertia can't replay after
+  // the flight; the non-damping update applies and zeroes it in one call
+  controls.enableDamping = false
+  controls.update()
+  controls.enableDamping = true
+  controls.enabled = false
+  cameraCtl.moveTo(position, look, controls.target)
+}
+
+// clicking the scene cancels an active flight instead of locking input out
+sceneLayer.renderer.domElement.addEventListener('pointerdown', () => {
+  if (!cameraCtl.active) return
+  cameraCtl.cancel()
+  controls.target.copy(cameraCtl.lookTarget)
+  controls.enabled = true
+})
+
 // ---------------------------------------------------------------------------
 // Debug/demo panel (M2) — becomes real overlay content in M3
 // ---------------------------------------------------------------------------
@@ -51,24 +47,24 @@ const cameraCtl = new CameraController(sceneLayer.camera, motion, controls.targe
 const panel = document.createElement('div')
 panel.className = 'panel'
 
-function section(title: string): HTMLElement {
+function section(title: string): void {
   const h = document.createElement('h2')
   h.textContent = title
   panel.appendChild(h)
-  return h
 }
 
 section('Joint setpoints (PID)')
 for (const name of arm.jointNames) {
   const { lower, upper } = arm.jointLimits(name)
+  const channel = arm.channels[name]
   const slider = createSlider({
     label: name,
     min: lower,
     max: upper,
-    value: arm.getJoint(name),
+    value: channel.x,
     format: (v) => `${v.toFixed(2)} rad`,
     onInput: (v) => {
-      jointChannels.get(name)!.setpoint = v
+      channel.setpoint = v
     },
   })
   panel.appendChild(slider.el)
@@ -76,9 +72,9 @@ for (const name of arm.jointNames) {
 
 section('PID gains (all joints)')
 const gainDefs: Array<[label: string, min: number, max: number, value: number, set: (v: number) => void]> = [
-  ['Kp', 0.5, 40, 12, (v) => pids.forEach((p) => (p.kp = v))],
-  ['Ki', 0, 20, 0, (v) => pids.forEach((p) => (p.ki = v))],
-  ['Kd', 0, 10, 2.5, (v) => pids.forEach((p) => (p.kd = v))],
+  ['Kp', 0.5, 40, 12, (v) => arm.pids.forEach((p) => (p.kp = v))],
+  ['Ki', 0, 20, 0, (v) => arm.pids.forEach((p) => (p.ki = v))],
+  ['Kd', 0, 10, 2.5, (v) => arm.pids.forEach((p) => (p.kd = v))],
 ]
 for (const [label, min, max, value, set] of gainDefs) {
   panel.appendChild(createSlider({ label, min, max, value, onInput: set }).el)
@@ -96,8 +92,10 @@ panel.appendChild(
 )
 panel.appendChild(
   createSlider({
+    // ζ < ~0.4 can swing the look point past the camera on large moves
+    // (verified in review); real decks spring look-relative if they need more
     label: 'ζ',
-    min: 0.15,
+    min: 0.4,
     max: 2,
     value: cameraCtl.spring.zeta,
     onInput: (v) => (cameraCtl.spring.zeta = v),
@@ -113,12 +111,12 @@ function poseButton(label: string, go: () => void): void {
   buttonRow.appendChild(b)
 }
 poseButton('Overview', () => {
-  cameraCtl.moveTo(new THREE.Vector3(1.9, 1.2, 1.9), new THREE.Vector3(0, 0.45, 0))
+  flyTo(new THREE.Vector3(1.9, 1.2, 1.9), new THREE.Vector3(0, 0.45, 0))
 })
 poseButton('End effector', () => {
   const ee = new THREE.Vector3()
-  arm.robot.links['end_effector'].getWorldPosition(ee)
-  cameraCtl.moveTo(ee.clone().add(new THREE.Vector3(0.35, 0.2, 0.45)), ee)
+  arm.anchors.end_effector.getWorldPosition(ee)
+  flyTo(ee.clone().add(new THREE.Vector3(0.35, 0.2, 0.45)), ee)
 })
 panel.appendChild(buttonRow)
 
@@ -134,7 +132,6 @@ document.getElementById('overlay-layer')!.appendChild(panel)
   arm,
   controls,
   motion,
-  jointChannels,
   cameraCtl,
 }
 
@@ -147,21 +144,29 @@ const tick = (now: number) => {
   motion.step((now - last) / 1000)
   last = now
 
-  cameraCtl.update(controls.target)
   if (cameraCtl.active) {
-    controls.enabled = false
-  } else {
-    if (!controls.enabled) {
-      // hand the settled pose back to the orbit camera
+    if (cameraCtl.drive()) {
+      // settled this frame — hand the pose back to the orbit camera
       controls.target.copy(cameraCtl.lookTarget)
       controls.enabled = true
     }
+  } else {
     controls.update()
+    cameraCtl.syncIdle(controls.target)
   }
 
+  // Ki ≥ Kd·Kp is closed-loop unstable for ẍ = τ (Routh–Hurwitz) — reachable
+  // from the gain sliders on purpose; the badge names it instead of hiding it
+  const { kp, ki, kd } = arm.pids[0]
+  const unstable = ki > 0 && ki >= kd * kp
   const settled = motion.settled()
-  badge.textContent = settled ? 'settled' : 'moving'
-  badge.classList.toggle('settled', settled)
+  badge.textContent = unstable
+    ? 'unstable gains: Ki ≥ Kd·Kp'
+    : settled
+      ? 'settled'
+      : 'moving'
+  badge.classList.toggle('settled', settled && !unstable)
+  badge.classList.toggle('unstable', unstable)
 
   sceneLayer.render()
   requestAnimationFrame(tick)
