@@ -3,6 +3,8 @@ import URDFLoader from 'urdf-loader'
 import urdfSrc from '../assets/arm.urdf?raw'
 import { PID } from '../engine/pid'
 import { PidChannel } from '../engine/motion-system'
+import type { SlideTargets } from '../engine/slide-types'
+import type { GainDefaults } from '../engine/slide-engine'
 
 export type ArmRobot = ReturnType<URDFLoader['parse']>
 
@@ -28,6 +30,9 @@ export interface ArmScene {
   anchors: Record<string, THREE.Object3D>
   channels: Record<string, PidChannel>
   pids: PID[]
+  /** effective-target base for slide 1 of the scene's range (spec §4.3/§7) */
+  defaults: SlideTargets
+  defaultGains: Record<string, GainDefaults>
   jointNames: string[]
   jointLimits(name: string): { lower: number; upper: number }
   serialize(): ArmSceneState
@@ -87,8 +92,10 @@ export function buildArmScene(): ArmScene {
 
   const pids: PID[] = []
   const channels: Record<string, PidChannel> = {}
+  const defaultGains: Record<string, GainDefaults> = {}
   for (const name of jointNames) {
-    const pid = new PID({ kp: 12, ki: 0, kd: 2.5, outMin: -60, outMax: 60 })
+    defaultGains[name] = { kp: 12, ki: 0, kd: 2.5 }
+    const pid = new PID({ ...defaultGains[name], outMin: -60, outMax: 60 })
     pids.push(pid)
     const joint = robot.joints[name]
     channels[name] = new PidChannel({
@@ -110,6 +117,11 @@ export function buildArmScene(): ArmScene {
     },
     channels,
     pids,
+    defaults: {
+      joints: { joint1: 0, joint2: 0.6, joint3: -1.0 },
+      camera: { lookAt: [0, 0.45, 0], offset: [1.4, 0.65, 1.4] },
+    },
+    defaultGains,
     jointNames,
     jointLimits(name) {
       const joint = robot.joints[name]

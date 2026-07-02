@@ -1,11 +1,16 @@
 import './styles.css'
+import 'katex/dist/katex.min.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { SceneLayer } from './scene/scene-layer'
 import { CameraController } from './scene/camera-controller'
 import { buildArmScene } from './scenes/arm'
 import { createSlider } from './overlay/widgets/slider'
+import { Overlay } from './overlay/overlay'
 import { MotionSystem } from './engine/motion-system'
+import { SlideEngine } from './engine/slide-engine'
+import type { CameraTargetSpec, WidgetSpec } from './engine/slide-types'
+import slides from './content/slides.md'
 
 const sceneLayer = new SceneLayer(document.getElementById('scene-layer')!)
 const arm = buildArmScene()
@@ -39,17 +44,117 @@ function flyTo(position: THREE.Vector3, look: THREE.Vector3): void {
 // clicking the scene cancels an active flight instead of locking input out
 sceneLayer.renderer.domElement.addEventListener('pointerdown', () => {
   if (!cameraCtl.active) return
+  cameraTrack = null
   cameraCtl.cancel()
   controls.target.copy(cameraCtl.lookTarget)
   controls.enabled = true
 })
 
 // ---------------------------------------------------------------------------
-// Debug/demo panel (M2) — becomes real overlay content in M3
+// Slide deck (M3)
+// ---------------------------------------------------------------------------
+
+function resolveCameraPose(spec: CameraTargetSpec): { position: THREE.Vector3; look: THREE.Vector3 } | null {
+  let look: THREE.Vector3
+  if (typeof spec.lookAt === 'string') {
+    const anchor = arm.anchors[spec.lookAt]
+    if (!anchor) {
+      console.warn(`camera lookAt: unknown anchor '${spec.lookAt}'`)
+      return null
+    }
+    look = anchor.getWorldPosition(new THREE.Vector3())
+  } else if (Array.isArray(spec.lookAt)) {
+    look = new THREE.Vector3(...spec.lookAt)
+  } else {
+    look = cameraCtl.lookTarget
+  }
+
+  let position: THREE.Vector3
+  if (spec.offset) {
+    position = look.clone().add(new THREE.Vector3(...spec.offset))
+  } else if (spec.distance !== undefined) {
+    const dir = sceneLayer.camera.position.clone().sub(look)
+    if (dir.lengthSq() < 1e-9) dir.set(1, 0.5, 1)
+    position = look.clone().addScaledVector(dir.normalize(), spec.distance)
+  } else {
+    position = sceneLayer.camera.position.clone()
+  }
+  return { position, look }
+}
+
+// anchor-based camera targets track the anchor while the flight is active —
+// a slide that moves both joints and camera must settle on where the anchor
+// ENDS UP, not where it was at slide entry
+let cameraTrack: CameraTargetSpec | null = null
+
+function applyCameraSpec(spec: CameraTargetSpec): void {
+  if (spec.spring?.omega !== undefined) cameraCtl.spring.omega = spec.spring.omega
+  if (spec.spring?.zeta !== undefined) cameraCtl.spring.zeta = spec.spring.zeta
+  const pose = resolveCameraPose(spec)
+  if (!pose) return
+  cameraTrack = typeof spec.lookAt === 'string' ? spec : null
+  flyTo(pose.position, pose.look)
+}
+
+const overlay = new Overlay(document.getElementById('overlay-layer')!)
+
+function createWidget(spec: WidgetSpec): HTMLElement | null {
+  const channel = arm.channels[spec.bind]
+  if (!channel) {
+    console.warn(`widget bind: unknown channel '${spec.bind}'`)
+    return null
+  }
+  const limits = spec.range ?? [
+    arm.jointLimits(spec.bind).lower,
+    arm.jointLimits(spec.bind).upper,
+  ]
+  return createSlider({
+    label: spec.label ?? spec.bind,
+    min: limits[0],
+    max: limits[1],
+    value: channel.setpoint,
+    format: (v) => `${v.toFixed(2)} rad`,
+    onInput: (v) => {
+      channel.setpoint = v
+    },
+  }).el
+}
+
+const engine = new SlideEngine({
+  slides,
+  scene: { channels: arm.channels, defaultGains: arm.defaultGains, defaults: arm.defaults },
+  overlay,
+  overlayCtx: { createWidget },
+  applyCamera: applyCameraSpec,
+})
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+    e.preventDefault()
+    engine.next()
+  } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+    e.preventDefault()
+    engine.prev()
+  } else if (e.key === 'd') {
+    panel.classList.toggle('hidden')
+  }
+})
+
+// deep link: #3 opens slide 3 (works under file://, spec §6)
+const initialSlide = Math.max(1, Number(window.location.hash.slice(1)) || 1)
+window.addEventListener('hashchange', () => {
+  const n = Number(window.location.hash.slice(1))
+  if (Number.isInteger(n) && n >= 1 && n <= engine.slideCount && n - 1 !== engine.currentIndex) {
+    engine.goTo(n - 1, 'forward')
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Debug panel — hidden by default, toggled with 'd'
 // ---------------------------------------------------------------------------
 
 const panel = document.createElement('div')
-panel.className = 'panel'
+panel.className = 'panel hidden'
 
 function section(title: string): void {
   const h = document.createElement('h2')
@@ -106,24 +211,6 @@ panel.appendChild(
   }).el,
 )
 
-const buttonRow = document.createElement('div')
-buttonRow.className = 'button-row'
-function poseButton(label: string, go: () => void): void {
-  const b = document.createElement('button')
-  b.textContent = label
-  b.addEventListener('click', go)
-  buttonRow.appendChild(b)
-}
-poseButton('Overview', () => {
-  flyTo(new THREE.Vector3(1.9, 1.2, 1.9), new THREE.Vector3(0, 0.45, 0))
-})
-poseButton('End effector', () => {
-  const ee = new THREE.Vector3()
-  arm.anchors.end_effector.getWorldPosition(ee)
-  flyTo(ee.clone().add(new THREE.Vector3(0.35, 0.2, 0.45)), ee)
-})
-panel.appendChild(buttonRow)
-
 const badge = document.createElement('div')
 badge.className = 'badge'
 panel.appendChild(badge)
@@ -137,6 +224,7 @@ document.getElementById('overlay-layer')!.appendChild(panel)
   controls,
   motion,
   cameraCtl,
+  engine,
 }
 
 // ---------------------------------------------------------------------------
@@ -149,8 +237,14 @@ const tick = (now: number) => {
   last = now
 
   if (cameraCtl.active) {
+    if (cameraTrack) {
+      // follow the anchor while joints are still moving (mid-flight re-target)
+      const pose = resolveCameraPose(cameraTrack)
+      if (pose) cameraCtl.moveTo(pose.position, pose.look, controls.target)
+    }
     if (cameraCtl.drive()) {
       // settled this frame — hand the pose back to the orbit camera
+      cameraTrack = null
       controls.target.copy(cameraCtl.lookTarget)
       controls.enabled = true
     }
@@ -176,3 +270,5 @@ const tick = (now: number) => {
   requestAnimationFrame(tick)
 }
 requestAnimationFrame(tick)
+
+engine.start(initialSlide - 1)
