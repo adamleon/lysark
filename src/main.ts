@@ -28,15 +28,20 @@ controls.enableDamping = true
 
 const cameraCtl = new CameraController(sceneLayer.camera, motion, controls.target.clone())
 
+// flush frozen orbit damping so residual flick inertia can't replay after a
+// flight or over a boundary snap; the non-damping update applies and zeroes
+// it in one call
+function flushOrbitInertia(): void {
+  controls.enableDamping = false
+  controls.update()
+  controls.enableDamping = true
+}
+
 function flyTo(position: THREE.Vector3, look: THREE.Vector3): void {
   if (!cameraCtl.active) {
-    // flush frozen orbit damping so residual flick inertia can't replay after
-    // the flight; the non-damping update applies and zeroes it in one call.
-    // Skipped mid-flight: controls are already disabled and this update()
-    // would lookAt the stale pre-flight target, snapping the view.
-    controls.enableDamping = false
-    controls.update()
-    controls.enableDamping = true
+    // Skipped mid-flight: controls are already disabled and the flush's
+    // update() would lookAt the stale pre-flight target, snapping the view.
+    flushOrbitInertia()
     controls.enabled = false
   }
   cameraCtl.moveTo(position, look, controls.target)
@@ -55,9 +60,17 @@ sceneLayer.renderer.domElement.addEventListener('pointerdown', () => {
 // Camera spec resolution (anchors come from the ACTIVE scene)
 // ---------------------------------------------------------------------------
 
-function resolveCameraPose(
-  spec: CameraTargetSpec,
-): { position: THREE.Vector3; look: THREE.Vector3 } | null {
+interface CameraPose {
+  position: THREE.Vector3
+  look: THREE.Vector3
+}
+
+/**
+ * seed replaces the live camera as the reference for position-less specs
+ * (distance / lookAt-only) — on scene boundaries the live camera still holds
+ * the OUTGOING scene's pose, which must not leak across (§4.1).
+ */
+function resolveCameraPose(spec: CameraTargetSpec, seed?: CameraPose): CameraPose | null {
   let look: THREE.Vector3
   if (typeof spec.lookAt === 'string') {
     const anchor = sceneManager.active?.anchors[spec.lookAt]
@@ -69,18 +82,19 @@ function resolveCameraPose(
   } else if (Array.isArray(spec.lookAt)) {
     look = new THREE.Vector3(...spec.lookAt)
   } else {
-    look = cameraCtl.lookTarget
+    look = seed?.look ?? cameraCtl.lookTarget
   }
 
+  const reference = seed?.position ?? sceneLayer.camera.position
   let position: THREE.Vector3
   if (spec.offset) {
     position = look.clone().add(new THREE.Vector3(...spec.offset))
   } else if (spec.distance !== undefined) {
-    const dir = sceneLayer.camera.position.clone().sub(look)
+    const dir = reference.clone().sub(look)
     if (dir.lengthSq() < 1e-9) dir.set(1, 0.5, 1)
     position = look.clone().addScaledVector(dir.normalize(), spec.distance)
   } else {
-    position = sceneLayer.camera.position.clone()
+    position = reference.clone()
   }
   return { position, look }
 }
@@ -94,15 +108,36 @@ let cameraTrack: CameraTargetSpec | null = null
 // defaultGains pattern for PID, keeping backward navigation reversible (§4.3)
 const springDefaults = { omega: cameraCtl.spring.omega, zeta: cameraCtl.spring.zeta }
 
-function applyCameraSpec(spec: CameraTargetSpec, { snap }: { snap: boolean }): void {
+function applyCameraSpec(
+  spec: CameraTargetSpec,
+  { snap, sceneDefaults }: { snap: boolean; sceneDefaults?: CameraTargetSpec },
+): void {
+  cameraTrack = null // never leave a previous slide's anchor spec live
   cameraCtl.spring.omega = spec.spring?.omega ?? springDefaults.omega
   cameraCtl.spring.zeta = spec.spring?.zeta ?? springDefaults.zeta
-  const pose = resolveCameraPose(spec)
-  if (!pose) return
+
+  // boundary entries must not depend on the outgoing scene's pose (§4.1):
+  // seed position-less specs from the scene's default framing
+  let seed: CameraPose | undefined
+  if (snap && !spec.offset && sceneDefaults?.offset) {
+    seed = resolveCameraPose(sceneDefaults) ?? undefined
+  }
+  const pose = resolveCameraPose(spec, seed)
+  if (!pose) {
+    if (snap) {
+      // content typo (unknown anchor): degrade to a warning, but still
+      // complete the handback so the camera state machine stays sane
+      cameraCtl.cancel()
+      controls.target.copy(cameraCtl.lookTarget)
+      controls.enabled = true
+    }
+    return
+  }
   cameraTrack = typeof spec.lookAt === 'string' ? spec : null
   if (snap) {
     // scene boundary: hard cut (§4.1), then — for anchor targets — a zero-
     // length flight so tracking follows the anchor while the robot settles
+    flushOrbitInertia()
     cameraCtl.snapTo(pose.position, pose.look)
     controls.target.copy(pose.look)
     controls.enabled = true

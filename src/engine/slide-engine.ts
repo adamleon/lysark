@@ -9,8 +9,9 @@ export interface SlideEngineOptions {
   scenes: SceneManager
   overlay: Overlay
   overlayCtx: OverlayContext
-  /** snap=true on scene boundaries — no camera continuity across scenes (§4.1) */
-  applyCamera(spec: CameraTargetSpec, opts: { snap: boolean }): void
+  /** snap=true on scene boundaries — no camera continuity across scenes (§4.1);
+      sceneDefaults seeds deterministic resolution of position-less specs */
+  applyCamera(spec: CameraTargetSpec, opts: { snap: boolean; sceneDefaults?: CameraTargetSpec }): void
   /** fired after a boundary transition, with the new binding (null = scene-less) */
   onSceneChange?(binding: SceneInstance | null): void
 }
@@ -26,6 +27,12 @@ export class SlideEngine {
   private index = -1
   private visibleChunks = 1
   private navSeq = 0
+  /** a crossed boundary latched across supersession — the boundary belongs to
+      the manager's state change, not to the navigation that requested it */
+  private pendingBoundary = false
+  /** destination overlay not shown yet: fragment keys must not touch the
+      outgoing slide's DOM */
+  private pendingShow = false
 
   constructor(private readonly opts: SlideEngineOptions) {}
 
@@ -49,7 +56,9 @@ export class SlideEngine {
     if (this.index < 0) return this.start()
     if (this.visibleChunks < this.current.fragments.length) {
       this.visibleChunks++
-      this.opts.overlay.setVisibleChunks(this.visibleChunks)
+      // mid-transition the on-screen DOM is still the outgoing slide's;
+      // show() reads visibleChunks when it fires, so the count arrives intact
+      if (!this.pendingShow) this.opts.overlay.setVisibleChunks(this.visibleChunks)
       return
     }
     if (this.index + 1 < this.slideCount) this.goTo(this.index + 1, 'forward')
@@ -59,7 +68,7 @@ export class SlideEngine {
     if (this.index < 0) return this.start()
     if (this.visibleChunks > 1) {
       this.visibleChunks--
-      this.opts.overlay.setVisibleChunks(this.visibleChunks)
+      if (!this.pendingShow) this.opts.overlay.setVisibleChunks(this.visibleChunks)
       return
     }
     if (this.index > 0) this.goTo(this.index - 1, 'backward')
@@ -77,14 +86,22 @@ export class SlideEngine {
     this.index = index
     this.visibleChunks = direction === 'backward' ? slide.fragments.length : 1
     window.location.hash = String(index + 1)
+    this.pendingShow = true
     void this.transitionAndApply(slide, ++this.navSeq)
   }
 
   private async transitionAndApply(slide: CompiledSlide, seq: number): Promise<void> {
     const { binding, boundary } = await this.opts.scenes.transitionTo(slide.scene)
+    // latch before the supersession check: if THIS navigation crossed the
+    // boundary but a faster one wins, the survivor must still fire the
+    // boundary side effects (snap camera, onSceneChange)
+    this.pendingBoundary ||= boundary
     if (seq !== this.navSeq) return // superseded by faster navigation
-    if (binding && slide.scene) this.applyTargets(slide, binding, boundary)
-    if (boundary) this.opts.onSceneChange?.(binding)
+    const crossed = this.pendingBoundary
+    this.pendingBoundary = false
+    if (binding && slide.scene) this.applyTargets(slide, binding, crossed)
+    if (crossed) this.opts.onSceneChange?.(binding)
+    this.pendingShow = false
     this.opts.overlay.show(slide, this.visibleChunks, this.opts.overlayCtx)
   }
 
@@ -118,7 +135,9 @@ export class SlideEngine {
 
     // per-key merge over scene defaults, same semantics as joints (§4.3)
     const camera = mergeCameraSpec(scene.defaults.camera, slide.effective.camera)
-    if (camera) this.opts.applyCamera(camera, { snap: boundary })
+    if (camera) {
+      this.opts.applyCamera(camera, { snap: boundary, sceneDefaults: scene.defaults.camera })
+    }
   }
 }
 

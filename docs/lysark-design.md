@@ -120,10 +120,13 @@ Full evidence and the framework comparison table are in `docs/archive/lysark-des
   canvas to a data URL (capture immediately after `render()` in the same frame — no
   `preserveDrawingBuffer` needed), show it as a DOM `<img>` over the canvas, dispose the old scene,
   build the new one, fade the snapshot out.
-- **Suspend (leaving a scene):** serialize dynamic state — joint positions and velocities, camera
-  pose, widget values — to a plain object; free all GPU resources; detach the graph from the
-  renderer. Never keep two scenes' GPU resources alive simultaneously (`renderer.info` asserts
-  this in tests).
+- **Suspend (leaving a scene):** serialize dynamic state — joint positions and velocities, widget
+  values — to a plain object; free all GPU resources; detach the graph from the renderer. Never
+  keep two scenes' GPU resources alive simultaneously (`renderer.info` asserts this in tests).
+  (M4 deviation from the original "camera pose" item: camera pose is deliberately *not*
+  serialized — boundary re-entry resolves the destination slide's camera spec against the scene's
+  default framing instead, which is deterministic where restoring a presenter-orbited pose would
+  not be. Scene defaults must therefore declare a full `lookAt` + `offset` framing.)
 - **Restore (re-entering, including backward navigation):** reattach, initialize motion channels
   from the serialized state, and let the controllers drive toward the entering slide's *effective*
   targets (§4.3) — re-entry settles naturally even when entering from a different slide than we

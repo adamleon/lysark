@@ -29,6 +29,8 @@ export class SceneManager {
   private readonly saved = new Map<string, unknown>()
   private queue: Promise<unknown> = Promise.resolve()
   private pending = 0
+  private gen = 0
+  private virgin = true
 
   constructor(
     private readonly layer: SceneLayer,
@@ -52,30 +54,43 @@ export class SceneManager {
 
   /** serialized: concurrent calls run in order, so rapid navigation is safe */
   transitionTo(sceneId: string | undefined): Promise<TransitionResult> {
+    const myGen = ++this.gen
     this.pending++
-    const run = this.queue.then(() => this.doTransition(sceneId))
+    const run = this.queue.then(() => this.doTransition(sceneId, myGen))
     this.queue = run.catch(() => undefined).then(() => {
       this.pending--
     })
     return run
   }
 
-  private async doTransition(sceneId: string | undefined): Promise<TransitionResult> {
-    if (sceneId === this.activeId) {
+  private async doTransition(sceneId: string | undefined, myGen: number): Promise<TransitionResult> {
+    // superseded while queued: skip entirely — the newest request transitions
+    // from the true current state, so rapid navigation pays for one
+    // suspend/activate and one snapshot, not a stacked chain of them
+    if (myGen !== this.gen) {
+      return { binding: this.activeInstance, boundary: false }
+    }
+    // the very first transition is always a boundary, even scene-less→scene-less:
+    // deep-linked boots (§6) need their onSceneChange side effects
+    const first = this.virgin
+    this.virgin = false
+    if (!first && sceneId === this.activeId) {
       return { binding: this.activeInstance, boundary: false }
     }
     const canvas = this.layer.renderer.domElement
     const hadScene = this.activeInstance !== null
 
     if (hadScene && sceneId !== undefined) {
-      // scene → scene: capture the outgoing frame, swap under the snapshot
+      // scene → scene, in §4.1's prescribed order: render one last frame,
+      // capture, SHOW the snapshot, dispose the old scene, build the new one,
+      // fade the snapshot out — so an async build never paints a bare gap
       this.layer.render()
-      const snapshotUrl = canvas.toDataURL('image/png')
+      const snapshot = this.showSnapshot(canvas.toDataURL('image/jpeg', 0.92))
       this.suspendActive()
       await this.activate(sceneId)
       this.layer.render()
-      this.fadeSnapshot(snapshotUrl)
-    } else if (hadScene && sceneId === undefined) {
+      this.fadeOutSnapshot(snapshot)
+    } else if (hadScene) {
       // scene → scene-less: fade the canvas out, never yank it (§3)
       await this.fadeCanvas(0)
       this.suspendActive()
@@ -111,6 +126,11 @@ export class SceneManager {
     if (!instance) {
       instance = await module.build()
       this.instances.set(sceneId, instance)
+      if (!instance.defaults.camera?.lookAt || !instance.defaults.camera.offset) {
+        console.warn(
+          `scene '${sceneId}': defaults.camera should declare lookAt + offset — boundary camera resolution seeds from it (§4.1)`,
+        )
+      }
     } else {
       const saved = this.saved.get(sceneId)
       if (saved !== undefined) instance.restore(saved)
@@ -125,11 +145,15 @@ export class SceneManager {
     this.activeInstance = instance
   }
 
-  private fadeSnapshot(url: string): void {
+  private showSnapshot(url: string): HTMLImageElement {
     const img = document.createElement('img')
     img.className = 'scene-snapshot'
     img.src = url
     this.container.appendChild(img)
+    return img
+  }
+
+  private fadeOutSnapshot(img: HTMLImageElement): void {
     void img.offsetWidth // force reflow so the opacity transition runs
     img.style.opacity = '0'
     window.setTimeout(() => img.remove(), SNAPSHOT_FADE_MS + 100)

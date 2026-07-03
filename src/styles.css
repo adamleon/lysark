@@ -21,6 +21,9 @@ body {
 #scene-layer canvas {
   display: block;
   opacity: 1;
+  /* hidden until the first scene activates — a deep-linked scene-less boot
+     must not sit behind an opaque never-rendered canvas (§3/§6) */
+  visibility: hidden;
   transition: opacity 280ms ease;
 }
 
