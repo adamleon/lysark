@@ -3,8 +3,10 @@ import katex from 'katex'
 import { parse as parseYaml } from 'yaml'
 import { mergeCameraSpec } from '../engine/camera-merge'
 import type {
+  AnchoredSpec,
   CameraTargetSpec,
   CompiledSlide,
+  IdleOsc,
   SlideTargets,
   WidgetSpec,
 } from '../engine/slide-types'
@@ -89,17 +91,18 @@ function splitFragments(body: string): string[] {
   return chunks.map((c) => c.join('\n'))
 }
 
-/** pre-render math before markdown; code spans/fences are masked out first */
-function renderWithMath(chunk: string): string {
+/**
+ * Render markdown with pre-rendered KaTeX. Code spans/fences are masked out
+ * first so `$` and markdown inside them stay literal. `block: false` renders
+ * inline (no wrapping `<p>`) for anchored labels (§4.2).
+ */
+function renderChunk(text: string, block: boolean): string {
   const code: string[] = []
   const maskCode = (s: string): string => {
     code.push(s)
     return `%%CODE_${code.length - 1}%%`
   }
-  let text = chunk.replace(
-    /^(`{3,}|~{3,})[^\n]*\n(?:[\s\S]*?\n)?\1[ \t]*$/gm,
-    maskCode,
-  )
+  text = text.replace(/^(`{3,}|~{3,})[^\n]*\n(?:[\s\S]*?\n)?\1[ \t]*$/gm, maskCode)
   text = text.replace(/`[^`\n]+`/g, maskCode)
 
   const rendered: string[] = []
@@ -113,7 +116,8 @@ function renderWithMath(chunk: string): string {
     .replace(/\\\$/g, '$')
   // restore code before markdown render so it renders as normal code
   text = text.replace(/%%CODE_(\d+)%%/g, (_, n: string) => code[Number(n)])
-  return md.render(text).replace(/%%MATH_(\d+)%%/g, (_, n: string) => rendered[Number(n)])
+  const html = block ? md.render(text) : md.renderInline(text)
+  return html.replace(/%%MATH_(\d+)%%/g, (_, n: string) => rendered[Number(n)])
 }
 
 // ---------------------------------------------------------------------------
@@ -129,9 +133,17 @@ function isVec3(v: unknown): v is [number, number, number] {
   return Array.isArray(v) && v.length === 3 && v.every(isFiniteNumber)
 }
 
+function isVec2(v: unknown): v is [number, number] {
+  return Array.isArray(v) && v.length === 2 && v.every(isFiniteNumber)
+}
+
+function isMapping(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function validateJoints(raw: unknown, slideNo: number): Record<string, number> {
   if (raw === undefined) return {}
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+  if (!isMapping(raw)) {
     throw new Error(`slides: slide ${slideNo} 'joints' must be a mapping of joint → number`)
   }
   for (const [name, value] of Object.entries(raw)) {
@@ -144,10 +156,10 @@ function validateJoints(raw: unknown, slideNo: number): Record<string, number> {
 
 function validateCamera(raw: unknown, slideNo: number): CameraTargetSpec | undefined {
   if (raw === undefined) return undefined
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+  if (!isMapping(raw)) {
     throw new Error(`slides: slide ${slideNo} 'camera' must be a mapping`)
   }
-  const cam = raw as Record<string, unknown>
+  const cam = raw
   for (const key of Object.keys(cam)) {
     if (!['lookAt', 'offset', 'distance', 'spring'].includes(key)) {
       throw new Error(`slides: slide ${slideNo} camera has unknown key '${key}'`)
@@ -166,7 +178,7 @@ function validateCamera(raw: unknown, slideNo: number): CameraTargetSpec | undef
     throw new Error(`slides: slide ${slideNo} camera declares both offset and distance — they are alternative framings, pick one`)
   }
   if (cam.spring !== undefined) {
-    if (typeof cam.spring !== 'object' || cam.spring === null || Array.isArray(cam.spring)) {
+    if (!isMapping(cam.spring)) {
       throw new Error(`slides: slide ${slideNo} camera.spring must be a mapping`)
     }
     for (const [key, value] of Object.entries(cam.spring)) {
@@ -178,28 +190,136 @@ function validateCamera(raw: unknown, slideNo: number): CameraTargetSpec | undef
   return cam as CameraTargetSpec
 }
 
+const PLOT_FIELDS = ['measured', 'setpoint', 'error']
+
 function validateWidgets(raw: unknown, slideNo: number): WidgetSpec[] {
   if (raw === undefined) return []
   if (!Array.isArray(raw)) throw new Error(`slides: slide ${slideNo} 'widgets' must be a list`)
-  for (const w of raw as Array<Record<string, unknown>>) {
-    if (w.type !== 'slider') {
-      throw new Error(`slides: unknown widget type '${String(w.type)}' on slide ${slideNo} (M3 supports: slider)`)
+  return (raw as unknown[]).map((entry) => {
+    if (!isMapping(entry)) {
+      throw new Error(`slides: slide ${slideNo} each widget must be a mapping`)
     }
-    if (typeof w.bind !== 'string' || w.bind.length === 0) {
+    if (typeof entry.bind !== 'string' || entry.bind.length === 0) {
       throw new Error(`slides: widget on slide ${slideNo} is missing 'bind'`)
     }
-    if (w.range !== undefined && !(Array.isArray(w.range) && w.range.length === 2 && w.range.every(isFiniteNumber))) {
-      throw new Error(`slides: slide ${slideNo} widget range must be [min, max]`)
+    if (entry.type === 'slider') return validateSlider(entry, slideNo)
+    if (entry.type === 'plot') return validatePlot(entry, slideNo)
+    throw new Error(`slides: unknown widget type '${String(entry.type)}' on slide ${slideNo} (M5 supports: slider, plot)`)
+  })
+}
+
+function validateSlider(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'bind', 'label', 'range', 'pid'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} slider widget has unknown key '${key}'`)
     }
-    if (w.pid !== undefined) {
-      for (const [key, value] of Object.entries(w.pid as Record<string, unknown>)) {
-        if (!['kp', 'ki', 'kd'].includes(key) || !isFiniteNumber(value) || value < 0) {
-          throw new Error(`slides: slide ${slideNo} widget pid.${key} must be a non-negative number`)
-        }
+  }
+  if (w.range !== undefined && !isVec2(w.range)) {
+    throw new Error(`slides: slide ${slideNo} widget range must be [min, max]`)
+  }
+  if (w.pid !== undefined) {
+    if (!isMapping(w.pid)) throw new Error(`slides: slide ${slideNo} widget pid must be a mapping`)
+    for (const [key, value] of Object.entries(w.pid)) {
+      if (!['kp', 'ki', 'kd'].includes(key) || !isFiniteNumber(value) || value < 0) {
+        throw new Error(`slides: slide ${slideNo} widget pid.${key} must be a non-negative number`)
       }
     }
   }
-  return raw as WidgetSpec[]
+  return w as unknown as WidgetSpec
+}
+
+function validatePlot(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'bind', 'label', 'range', 'window'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} plot widget has unknown key '${key}'`)
+    }
+  }
+  const dot = (w.bind as string).indexOf('.')
+  if (dot !== -1) {
+    const field = (w.bind as string).slice(dot + 1)
+    if (!PLOT_FIELDS.includes(field)) {
+      throw new Error(`slides: slide ${slideNo} plot bind field '.${field}' must be one of ${PLOT_FIELDS.join(', ')}`)
+    }
+  }
+  if (w.range !== undefined && !isVec2(w.range)) {
+    throw new Error(`slides: slide ${slideNo} plot range must be [min, max]`)
+  }
+  if (w.window !== undefined && (!isFiniteNumber(w.window) || w.window <= 0)) {
+    throw new Error(`slides: slide ${slideNo} plot window must be a positive number of seconds`)
+  }
+  return {
+    type: 'plot',
+    bind: w.bind as string,
+    ...(w.label !== undefined ? { label: w.label as string } : {}),
+    ...(w.range !== undefined ? { range: w.range as [number, number] } : {}),
+    window: (w.window as number | undefined) ?? 6,
+  }
+}
+
+function validateAnchored(raw: unknown, slideNo: number): AnchoredSpec[] {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) throw new Error(`slides: slide ${slideNo} 'anchored' must be a list`)
+  return (raw as unknown[]).map((entry) => {
+    if (!isMapping(entry)) {
+      throw new Error(`slides: slide ${slideNo} each anchored element must be a mapping`)
+    }
+    for (const key of Object.keys(entry)) {
+      if (!['anchor', 'offset', 'content'].includes(key)) {
+        throw new Error(`slides: slide ${slideNo} anchored element has unknown key '${key}'`)
+      }
+    }
+    if (typeof entry.anchor !== 'string' || entry.anchor.length === 0) {
+      throw new Error(`slides: slide ${slideNo} anchored element needs an 'anchor' node name`)
+    }
+    if (typeof entry.content !== 'string' || entry.content.length === 0) {
+      throw new Error(`slides: slide ${slideNo} anchored element '${entry.anchor}' needs 'content'`)
+    }
+    let offset: [number, number] = [0, 0]
+    if (entry.offset !== undefined) {
+      if (!isVec2(entry.offset)) {
+        throw new Error(`slides: slide ${slideNo} anchored offset must be [dx, dy] pixels`)
+      }
+      offset = entry.offset
+    }
+    return { anchor: entry.anchor, offset, html: renderChunk(entry.content, false) }
+  })
+}
+
+function validateIdle(raw: unknown, slideNo: number): Record<string, IdleOsc> | undefined {
+  if (raw === undefined) return undefined
+  if (!isMapping(raw)) {
+    throw new Error(`slides: slide ${slideNo} 'idle' must be a mapping of channel → { amp, freq }`)
+  }
+  const out: Record<string, IdleOsc> = {}
+  for (const [name, spec] of Object.entries(raw)) {
+    if (!isMapping(spec)) {
+      throw new Error(`slides: slide ${slideNo} idle channel '${name}' must be a mapping`)
+    }
+    for (const key of Object.keys(spec)) {
+      if (!['amp', 'freq', 'phase', 'center'].includes(key)) {
+        throw new Error(`slides: slide ${slideNo} idle channel '${name}' has unknown key '${key}'`)
+      }
+    }
+    if (!isFiniteNumber(spec.amp) || spec.amp < 0) {
+      throw new Error(`slides: slide ${slideNo} idle '${name}' amp must be a non-negative number`)
+    }
+    if (!isFiniteNumber(spec.freq) || spec.freq <= 0) {
+      throw new Error(`slides: slide ${slideNo} idle '${name}' freq must be a positive number`)
+    }
+    if (spec.phase !== undefined && !isFiniteNumber(spec.phase)) {
+      throw new Error(`slides: slide ${slideNo} idle '${name}' phase must be a number`)
+    }
+    if (spec.center !== undefined && !isFiniteNumber(spec.center)) {
+      throw new Error(`slides: slide ${slideNo} idle '${name}' center must be a number`)
+    }
+    out[name] = {
+      amp: spec.amp,
+      freq: spec.freq,
+      phase: (spec.phase as number | undefined) ?? 0,
+      ...(spec.center !== undefined ? { center: spec.center as number } : {}),
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -240,20 +360,30 @@ export function compileSlides(source: string): CompiledSlide[] {
     const widgets = validateWidgets(frontmatter.widgets, slideNo)
 
     let effective: SlideTargets = {}
+    let anchored: AnchoredSpec[] = []
+    let idle: Record<string, IdleOsc> | undefined
     if (scene === undefined) {
       // scene-less slides carry overlay content only (spec §3)
-      if (frontmatter.joints !== undefined || frontmatter.camera !== undefined || widgets.length > 0) {
-        throw new Error(`slides: scene-less slide ${slideNo} cannot declare joints, camera, or widgets (spec §3)`)
+      if (
+        frontmatter.joints !== undefined ||
+        frontmatter.camera !== undefined ||
+        widgets.length > 0 ||
+        frontmatter.anchored !== undefined ||
+        frontmatter.idle !== undefined
+      ) {
+        throw new Error(`slides: scene-less slide ${slideNo} cannot declare joints, camera, widgets, anchored, or idle (spec §3)`)
       }
     } else {
       Object.assign(joints, validateJoints(frontmatter.joints, slideNo))
       camera = mergeCameraSpec(camera, validateCamera(frontmatter.camera, slideNo))
       effective = { joints: { ...joints } }
       if (camera) effective.camera = structuredClone(camera)
+      anchored = validateAnchored(frontmatter.anchored, slideNo)
+      idle = validateIdle(frontmatter.idle, slideNo)
     }
 
     const fragments = splitFragments(body)
-      .map((chunk) => renderWithMath(chunk.trim()))
+      .map((chunk) => renderChunk(chunk.trim(), true))
       .filter((html) => html.length > 0)
 
     out.push({
@@ -262,6 +392,8 @@ export function compileSlides(source: string): CompiledSlide[] {
       layout: frontmatter.layout === 'center' ? 'center' : 'panel',
       effective,
       widgets,
+      anchored,
+      ...(idle ? { idle } : {}),
       fragments: fragments.length > 0 ? fragments : [''],
     })
   })

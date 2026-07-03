@@ -1,16 +1,20 @@
 import './styles.css'
 import 'katex/dist/katex.min.css'
+import 'uplot/dist/uPlot.min.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { SceneLayer } from './scene/scene-layer'
 import { CameraController } from './scene/camera-controller'
 import { createSlider } from './overlay/widgets/slider'
-import { Overlay } from './overlay/overlay'
-import { MotionSystem } from './engine/motion-system'
+import { createPlot } from './overlay/widgets/plot'
+import { Overlay, type WidgetHandle } from './overlay/overlay'
+import { AnchorLayer } from './overlay/anchor-layer'
+import { MotionSystem, type PidChannel } from './engine/motion-system'
 import { SceneManager } from './engine/scene-manager'
 import { SlideEngine } from './engine/slide-engine'
+import { parseBinding, readField } from './engine/channel-binding'
 import type { SceneInstance } from './engine/scene-types'
-import type { CameraTargetSpec, WidgetSpec } from './engine/slide-types'
+import type { CameraTargetSpec, CompiledSlide, WidgetSpec } from './engine/slide-types'
 import deck from './content/deck'
 
 const sceneLayer = new SceneLayer(document.getElementById('scene-layer')!)
@@ -154,27 +158,106 @@ function applyCameraSpec(
 // Slide deck
 // ---------------------------------------------------------------------------
 
-const overlay = new Overlay(document.getElementById('overlay-layer')!)
+const overlayHost = document.getElementById('overlay-layer')!
+const overlay = new Overlay(overlayHost)
 
-function createWidget(spec: WidgetSpec): HTMLElement | null {
+// anchored labels get their own inset layer so per-frame projection never
+// disturbs the screen-mode slide content (§4.2)
+const anchorHost = document.createElement('div')
+anchorHost.className = 'anchor-layer'
+overlayHost.appendChild(anchorHost)
+const anchorLayer = new AnchorLayer(anchorHost)
+
+function createWidget(spec: WidgetSpec): WidgetHandle | null {
   const binding = sceneManager.active
-  const channel = binding?.channels[spec.bind]
-  if (!binding || !channel) {
+  if (!binding) {
+    console.warn(`widget bind: no active scene for '${spec.bind}'`)
+    return null
+  }
+  if (spec.type === 'plot') {
+    const { channel, field } = parseBinding(spec.bind)
+    const ch = binding.channels[channel]
+    if (!ch) {
+      console.warn(`plot bind: unknown channel '${channel}'`)
+      return null
+    }
+    return createPlot({
+      label: spec.label ?? spec.bind,
+      range: spec.range,
+      window: spec.window ?? 6,
+      sample: () => readField(ch, field),
+    })
+  }
+
+  const channel = binding.channels[spec.bind]
+  if (!channel) {
     console.warn(`widget bind: unknown channel '${spec.bind}'`)
     return null
   }
   const limits = spec.range ?? [channel.min, channel.max]
-  return createSlider({
-    label: spec.label ?? spec.bind,
-    min: limits[0],
-    max: limits[1],
-    value: channel.setpoint,
-    format: (v) => `${v.toFixed(2)} rad`,
-    onInput: (v) => {
-      channel.setpoint = v
-      ensureTicking()
-    },
-  }).el
+  return {
+    el: createSlider({
+      label: spec.label ?? spec.bind,
+      min: limits[0],
+      max: limits[1],
+      value: channel.setpoint,
+      format: (v) => `${v.toFixed(2)} rad`,
+      onInput: (v) => {
+        channel.setpoint = v
+        ensureTicking()
+      },
+    }).el,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Anchored labels + declarative idle animation (§4.2, §11)
+// ---------------------------------------------------------------------------
+
+function applyAnchors(slide: CompiledSlide, binding: SceneInstance | null): void {
+  anchorLayer.show(slide.anchored, binding)
+  ensureTicking()
+}
+
+// idle: while a slide with an `idle:` block shows, its channels' setpoints
+// sweep sinusoidally around the pose applyTargets resolved. Cleared on any
+// slide without idle, so the next slide's static targets take over cleanly.
+let idleSpecs: CompiledSlide['idle'] | null = null
+let idleChannels: Record<string, PidChannel> | null = null
+const idleBase = new Map<string, number>()
+let idleT0 = 0
+
+function applyIdle(slide: CompiledSlide, binding: SceneInstance | null): void {
+  idleBase.clear()
+  if (!slide.idle || !binding) {
+    idleSpecs = null
+    idleChannels = null
+    return
+  }
+  idleSpecs = slide.idle
+  idleChannels = binding.channels
+  for (const name of Object.keys(slide.idle)) {
+    const ch = binding.channels[name]
+    if (!ch) {
+      console.warn(`idle: unknown channel '${name}'`)
+      continue
+    }
+    // center defaults to the setpoint applyTargets just resolved for this slide
+    idleBase.set(name, ch.setpoint)
+  }
+  idleT0 = performance.now()
+  ensureTicking()
+}
+
+function stepIdle(now: number): void {
+  if (!idleSpecs || !idleChannels) return
+  const t = (now - idleT0) / 1000
+  for (const [name, osc] of Object.entries(idleSpecs)) {
+    const ch = idleChannels[name]
+    if (!ch) continue
+    const center = osc.center ?? idleBase.get(name) ?? 0
+    ch.setpoint = center + osc.amp * Math.sin(2 * Math.PI * osc.freq * t + osc.phase)
+  }
 }
 
 const engine = new SlideEngine({
@@ -183,6 +266,8 @@ const engine = new SlideEngine({
   overlay,
   overlayCtx: { createWidget },
   applyCamera: applyCameraSpec,
+  applyAnchors,
+  applyIdle,
   onSceneChange: (binding) => rebuildDebugSceneSection(binding),
 })
 
@@ -313,6 +398,9 @@ document.getElementById('overlay-layer')!.appendChild(panel)
   cameraCtl,
   engine,
   sceneManager,
+  anchorLayer,
+  overlay,
+  stepIdle: (now: number) => stepIdle(now),
   ensureTicking: () => ensureTicking(),
   isTicking: () => ticking,
 }
@@ -334,6 +422,8 @@ function ensureTicking(): void {
 }
 
 const tick = (now: number) => {
+  // idle sweeps setpoints BEFORE the integrator reads them this frame (§11)
+  stepIdle(now)
   motion.step((now - last) / 1000)
   last = now
 
@@ -367,6 +457,12 @@ const tick = (now: number) => {
 
   const sceneVisible = sceneManager.active !== null || sceneManager.busy
   if (sceneVisible) sceneLayer.render()
+
+  // anchored labels: project after render() so matrices are fresh, and fade in
+  // only once the whole scene (camera + joints) has settled (§4.2, §5)
+  anchorLayer.update(sceneLayer.camera, window.innerWidth, window.innerHeight, settled)
+  // live plots sample here; t origin is arbitrary (window scrolls relatively)
+  overlay.tick(now / 1000)
 
   // keep ticking while a scene is live (orbiting needs frames); on scene-less
   // slides, stop once everything has settled — zero rAF work at rest (§3)

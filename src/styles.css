@@ -103,6 +103,26 @@ body {
   font-size: 1.15em;
 }
 
+/* rich media in overlay content — base64-inlined in the single-file build (M6) */
+.slide-content img,
+.slide-content video,
+.slide-content svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px 0;
+}
+
+.slide-content figure {
+  margin: 16px 0;
+}
+
+.slide-content figcaption {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #9aa0a6;
+}
+
 .fragment {
   opacity: 0;
   transform: translateY(6px);
@@ -122,6 +142,54 @@ body {
   background: rgba(22, 25, 30, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
+}
+
+/* live plot (uPlot, its own 2D canvas — never WebGL, spec §12) */
+.slide-plot {
+  margin-top: 12px;
+}
+
+.slide-plot .u-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9aa0a6;
+  letter-spacing: 0.02em;
+}
+
+/* ------------------------------------------------ anchored overlay labels */
+
+.anchor-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.anchor-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 3px 9px;
+  font-size: 15px;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: #e8eaed;
+  background: rgba(20, 22, 27, 0.72);
+  border: 1px solid rgba(240, 162, 74, 0.55);
+  border-radius: 7px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  /* fade-in choreography: hidden until the scene settles (§5) */
+  opacity: 0;
+  transition: opacity 380ms ease;
+  will-change: transform;
+}
+
+.anchor-label.revealed {
+  opacity: 1;
+}
+
+.anchor-label .katex {
+  font-size: 1.05em;
 }
 
 .panel.hidden {

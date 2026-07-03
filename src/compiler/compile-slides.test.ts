@@ -149,3 +149,120 @@ describe('compileSlides — schema validation (review findings)', () => {
     expect(() => compileSlides('---\nid: 3\n---\nx')).toThrow(/'id' must be a string/)
   })
 })
+
+describe('compileSlides — plot widgets (M5)', () => {
+  it('parses a plot, defaults the window, and passes range through', () => {
+    const src =
+      '---\nscene: arm\nwidgets:\n  - type: plot\n    bind: joint2.error\n    range: [-1, 1]\n---\nx'
+    const [slide] = compileSlides(src)
+    expect(slide.widgets[0]).toEqual({
+      type: 'plot',
+      bind: 'joint2.error',
+      range: [-1, 1],
+      window: 6,
+    })
+  })
+
+  it('accepts an explicit window and a bare-channel bind', () => {
+    const src = '---\nscene: arm\nwidgets:\n  - type: plot\n    bind: swing\n    window: 8\n---\nx'
+    const [slide] = compileSlides(src)
+    expect(slide.widgets[0]).toMatchObject({ type: 'plot', bind: 'swing', window: 8 })
+  })
+
+  it('rejects an unknown plot bind field and a non-positive window', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: plot\n    bind: joint2.velocity\n---\nx'),
+    ).toThrow(/bind field '\.velocity'/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: plot\n    bind: j1\n    window: 0\n---\nx'),
+    ).toThrow(/window must be a positive/)
+  })
+
+  it('rejects unknown keys on slider and plot widgets', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: slider\n    bind: j1\n    color: red\n---\nx'),
+    ).toThrow(/slider widget has unknown key 'color'/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: plot\n    bind: j1\n    pid: {}\n---\nx'),
+    ).toThrow(/plot widget has unknown key 'pid'/)
+  })
+})
+
+describe('compileSlides — anchored overlays (M5, spec §4.2)', () => {
+  it('parses anchored elements, renders inline math, defaults the offset', () => {
+    const src =
+      '---\nscene: arm\nanchored:\n  - anchor: end_effector\n    content: "$x_e$"\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.anchored).toHaveLength(1)
+    expect(slide.anchored[0].anchor).toBe('end_effector')
+    expect(slide.anchored[0].offset).toEqual([0, 0])
+    expect(slide.anchored[0].html).toContain('katex')
+    // inline render: no wrapping <p>
+    expect(slide.anchored[0].html).not.toContain('<p>')
+  })
+
+  it('carries an explicit pixel offset', () => {
+    const src =
+      '---\nscene: arm\nanchored:\n  - anchor: base\n    offset: [24, -12]\n    content: "label"\n---\nx'
+    const [slide] = compileSlides(src)
+    expect(slide.anchored[0].offset).toEqual([24, -12])
+  })
+
+  it('rejects a missing anchor name, missing content, and bad offset', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nanchored:\n  - content: "x"\n---\nx'),
+    ).toThrow(/needs an 'anchor'/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nanchored:\n  - anchor: base\n---\nx'),
+    ).toThrow(/needs 'content'/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nanchored:\n  - anchor: base\n    offset: [1]\n    content: "x"\n---\nx'),
+    ).toThrow(/offset must be \[dx, dy\]/)
+  })
+
+  it('defaults anchored to an empty list when absent', () => {
+    const [slide] = compileSlides('---\nscene: arm\n---\nx')
+    expect(slide.anchored).toEqual([])
+  })
+})
+
+describe('compileSlides — idle animation (M5, spec §11)', () => {
+  it('parses idle channels and defaults the phase', () => {
+    const src =
+      '---\nscene: arm\nidle:\n  joint1: { amp: 0.3, freq: 0.5 }\n  joint2: { amp: 0.1, freq: 0.2, phase: 1.5, center: 0.6 }\n---\nx'
+    const [slide] = compileSlides(src)
+    expect(slide.idle).toEqual({
+      joint1: { amp: 0.3, freq: 0.5, phase: 0 },
+      joint2: { amp: 0.1, freq: 0.2, phase: 1.5, center: 0.6 },
+    })
+  })
+
+  it('omits idle when absent', () => {
+    const [slide] = compileSlides('---\nscene: arm\n---\nx')
+    expect(slide.idle).toBeUndefined()
+  })
+
+  it('rejects negative amplitude, non-positive frequency, and unknown keys', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nidle:\n  j1: { amp: -1, freq: 0.5 }\n---\nx'),
+    ).toThrow(/amp must be a non-negative/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nidle:\n  j1: { amp: 0.3, freq: 0 }\n---\nx'),
+    ).toThrow(/freq must be a positive/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nidle:\n  j1: { amp: 0.3, freq: 0.5, speed: 2 }\n---\nx'),
+    ).toThrow(/unknown key 'speed'/)
+  })
+})
+
+describe('compileSlides — scene-less guard covers M5 keys', () => {
+  it('rejects anchored, idle, and plot widgets on a scene-less slide', () => {
+    expect(() =>
+      compileSlides('---\nanchored:\n  - anchor: x\n    content: "y"\n---\nz'),
+    ).toThrow(/scene-less/)
+    expect(() => compileSlides('---\nidle:\n  j1: { amp: 0.3, freq: 0.5 }\n---\nz')).toThrow(/scene-less/)
+    expect(() =>
+      compileSlides('---\nwidgets:\n  - type: plot\n    bind: j1\n---\nz'),
+    ).toThrow(/scene-less/)
+  })
+})

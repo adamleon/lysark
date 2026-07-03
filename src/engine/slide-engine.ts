@@ -14,6 +14,11 @@ export interface SlideEngineOptions {
   applyCamera(spec: CameraTargetSpec, opts: { snap: boolean; sceneDefaults?: CameraTargetSpec }): void
   /** fired after a boundary transition, with the new binding (null = scene-less) */
   onSceneChange?(binding: SceneInstance | null): void
+  /** (re)build anchored labels for the destination slide (§4.2); runs for
+      every slide, scene or scene-less, so stale anchors never linger */
+  applyAnchors?(slide: CompiledSlide, binding: SceneInstance | null): void
+  /** start/stop the destination slide's declarative idle oscillation (§11) */
+  applyIdle?(slide: CompiledSlide, binding: SceneInstance | null): void
 }
 
 /**
@@ -101,6 +106,11 @@ export class SlideEngine {
     this.pendingBoundary = false
     if (binding && slide.scene) this.applyTargets(slide, binding, crossed)
     if (crossed) this.opts.onSceneChange?.(binding)
+    // anchors/idle refresh on every slide (not just boundaries): moving within
+    // a scene from a plain slide to an anchored one must swap them in, and a
+    // scene-less slide must clear whatever the previous scene slide left up
+    this.opts.applyAnchors?.(slide, binding)
+    this.opts.applyIdle?.(slide, binding)
     this.pendingShow = false
     this.opts.overlay.show(slide, this.visibleChunks, this.opts.overlayCtx)
   }
@@ -115,8 +125,9 @@ export class SlideEngine {
       pid.kd = gains.kd
     }
     for (const widget of slide.widgets) {
+      if (widget.type !== 'slider' || !widget.pid) continue // plots carry no gains
       const pid = scene.channels[widget.bind]?.pid
-      if (!pid || !widget.pid) continue
+      if (!pid) continue
       if (widget.pid.kp !== undefined) pid.kp = widget.pid.kp
       if (widget.pid.ki !== undefined) pid.ki = widget.pid.ki
       if (widget.pid.kd !== undefined) pid.kd = widget.pid.kd

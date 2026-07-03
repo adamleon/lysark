@@ -12,6 +12,7 @@
   "dependencies": {
     "katex": "0.17.0",
     "three": "0.185.1",
+    "uplot": "1.6.32",
     "urdf-loader": "0.13.0"
   },
   "devDependencies": {
