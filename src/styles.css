@@ -20,6 +20,20 @@ body {
 
 #scene-layer canvas {
   display: block;
+  opacity: 1;
+  transition: opacity 280ms ease;
+}
+
+/* outgoing scene's last frame, fading over the live new scene (spec §4.1) */
+.scene-snapshot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 1;
+  transition: opacity 350ms ease;
+  pointer-events: none;
 }
 
 /* Overlay never blocks scene interaction except inside its own widgets */

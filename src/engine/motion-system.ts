@@ -28,8 +28,8 @@ export class PidChannel implements Channel {
   v = 0
   setpoint: number
   readonly pid: PID
-  private readonly min: number
-  private readonly max: number
+  readonly min: number
+  readonly max: number
   private readonly apply?: (x: number) => void
 
   constructor({ x0, pid, min = -Infinity, max = Infinity, apply }: PidChannelOptions) {

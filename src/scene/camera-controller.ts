@@ -75,6 +75,19 @@ export class CameraController {
     for (const ch of [...this.pos, ...this.look]) ch.reset(ch.x)
   }
 
+  /** hard cut: place the camera with no transient (scene boundaries, §4.1) */
+  snapTo(position: THREE.Vector3, look: THREE.Vector3): void {
+    this.active = false
+    this.pos[0].reset(position.x)
+    this.pos[1].reset(position.y)
+    this.pos[2].reset(position.z)
+    this.look[0].reset(look.x)
+    this.look[1].reset(look.y)
+    this.look[2].reset(look.z)
+    this.camera.position.copy(position)
+    this.camera.lookAt(look)
+  }
+
   /**
    * Active path — call once per frame after MotionSystem.step. Writes the
    * camera from the channels; returns true on the frame the flight settles.

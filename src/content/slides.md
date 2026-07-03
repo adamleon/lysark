@@ -95,3 +95,52 @@ and swing back?
 
 <!-- pause -->
 Every camera move and joint transition in this deck is one of these three.
+
+---
+id: pendulum-cut
+scene: pendulum
+---
+## A new scene, a hard cut
+
+The arm you just saw was **suspended** — its state serialized, its GPU
+resources freed — and this pendulum took its place under a crossfade.
+
+<!-- pause -->
+Step **backward** across the boundary and the arm comes back exactly as
+you left it.
+
+---
+id: pendulum-swing
+scene: pendulum
+joints:
+  swing: 1.1
+camera:
+  lookAt: bob
+  offset: [0.9, 0.1, 1.3]
+widgets:
+  - type: slider
+    bind: swing
+    label: swing setpoint
+    pid: { kp: 9, ki: 0, kd: 0.3 }
+---
+## Same math, different plant
+
+One channel, same PID loop: $\zeta \approx \dfrac{K_d}{2\sqrt{K_p}} \approx 0.05$
+on this slide.
+
+Drag the setpoint — the pendulum rings hard before it settles.
+
+---
+id: outro
+layout: center
+---
+## Scene-less slide
+
+The canvas is gone and the render loop is **stopped** — zero GPU work
+right now.
+
+<!-- pause -->
+Text, math, and media still work, because the overlay never depended on
+WebGL:
+
+$$e^{i\pi} + 1 = 0$$

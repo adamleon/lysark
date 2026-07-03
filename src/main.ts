@@ -4,22 +4,23 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { SceneLayer } from './scene/scene-layer'
 import { CameraController } from './scene/camera-controller'
-import { buildArmScene } from './scenes/arm'
 import { createSlider } from './overlay/widgets/slider'
 import { Overlay } from './overlay/overlay'
 import { MotionSystem } from './engine/motion-system'
+import { SceneManager } from './engine/scene-manager'
 import { SlideEngine } from './engine/slide-engine'
+import type { SceneInstance } from './engine/scene-types'
 import type { CameraTargetSpec, WidgetSpec } from './engine/slide-types'
-import slides from './content/slides.md'
+import deck from './content/deck'
 
 const sceneLayer = new SceneLayer(document.getElementById('scene-layer')!)
-const arm = buildArmScene()
-sceneLayer.scene.add(arm.root)
-
 const motion = new MotionSystem()
-for (const [name, channel] of Object.entries(arm.channels)) {
-  motion.add(`${arm.id}.${name}`, channel)
-}
+const sceneManager = new SceneManager(
+  sceneLayer,
+  motion,
+  deck.scenes,
+  document.getElementById('scene-layer')!,
+)
 
 const controls = new OrbitControls(sceneLayer.camera, sceneLayer.renderer.domElement)
 controls.target.set(0, 0.45, 0)
@@ -51,13 +52,15 @@ sceneLayer.renderer.domElement.addEventListener('pointerdown', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Slide deck (M3)
+// Camera spec resolution (anchors come from the ACTIVE scene)
 // ---------------------------------------------------------------------------
 
-function resolveCameraPose(spec: CameraTargetSpec): { position: THREE.Vector3; look: THREE.Vector3 } | null {
+function resolveCameraPose(
+  spec: CameraTargetSpec,
+): { position: THREE.Vector3; look: THREE.Vector3 } | null {
   let look: THREE.Vector3
   if (typeof spec.lookAt === 'string') {
-    const anchor = arm.anchors[spec.lookAt]
+    const anchor = sceneManager.active?.anchors[spec.lookAt]
     if (!anchor) {
       console.warn(`camera lookAt: unknown anchor '${spec.lookAt}'`)
       return null
@@ -91,27 +94,41 @@ let cameraTrack: CameraTargetSpec | null = null
 // defaultGains pattern for PID, keeping backward navigation reversible (§4.3)
 const springDefaults = { omega: cameraCtl.spring.omega, zeta: cameraCtl.spring.zeta }
 
-function applyCameraSpec(spec: CameraTargetSpec): void {
+function applyCameraSpec(spec: CameraTargetSpec, { snap }: { snap: boolean }): void {
   cameraCtl.spring.omega = spec.spring?.omega ?? springDefaults.omega
   cameraCtl.spring.zeta = spec.spring?.zeta ?? springDefaults.zeta
   const pose = resolveCameraPose(spec)
   if (!pose) return
   cameraTrack = typeof spec.lookAt === 'string' ? spec : null
+  if (snap) {
+    // scene boundary: hard cut (§4.1), then — for anchor targets — a zero-
+    // length flight so tracking follows the anchor while the robot settles
+    cameraCtl.snapTo(pose.position, pose.look)
+    controls.target.copy(pose.look)
+    controls.enabled = true
+    if (cameraTrack) {
+      controls.enabled = false
+      cameraCtl.moveTo(pose.position, pose.look, controls.target)
+    }
+    return
+  }
   flyTo(pose.position, pose.look)
 }
+
+// ---------------------------------------------------------------------------
+// Slide deck
+// ---------------------------------------------------------------------------
 
 const overlay = new Overlay(document.getElementById('overlay-layer')!)
 
 function createWidget(spec: WidgetSpec): HTMLElement | null {
-  const channel = arm.channels[spec.bind]
-  if (!channel) {
+  const binding = sceneManager.active
+  const channel = binding?.channels[spec.bind]
+  if (!binding || !channel) {
     console.warn(`widget bind: unknown channel '${spec.bind}'`)
     return null
   }
-  const limits = spec.range ?? [
-    arm.jointLimits(spec.bind).lower,
-    arm.jointLimits(spec.bind).upper,
-  ]
+  const limits = spec.range ?? [channel.min, channel.max]
   return createSlider({
     label: spec.label ?? spec.bind,
     min: limits[0],
@@ -120,16 +137,18 @@ function createWidget(spec: WidgetSpec): HTMLElement | null {
     format: (v) => `${v.toFixed(2)} rad`,
     onInput: (v) => {
       channel.setpoint = v
+      ensureTicking()
     },
   }).el
 }
 
 const engine = new SlideEngine({
-  slides,
-  scene: { channels: arm.channels, defaultGains: arm.defaultGains, defaults: arm.defaults },
+  slides: deck.slides,
+  scenes: sceneManager,
   overlay,
   overlayCtx: { createWidget },
   applyCamera: applyCameraSpec,
+  onSceneChange: (binding) => rebuildDebugSceneSection(binding),
 })
 
 window.addEventListener('keydown', (e) => {
@@ -162,46 +181,68 @@ window.addEventListener('hashchange', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Debug panel — hidden by default, toggled with 'd'
+// Debug panel — hidden by default, toggled with 'd'; scene section rebuilds
+// on every scene boundary
 // ---------------------------------------------------------------------------
 
 const panel = document.createElement('div')
 panel.className = 'panel hidden'
 
-function section(title: string): void {
+const sceneSection = document.createElement('div')
+panel.appendChild(sceneSection)
+
+function heading(parent: HTMLElement, title: string): void {
   const h = document.createElement('h2')
   h.textContent = title
-  panel.appendChild(h)
+  parent.appendChild(h)
 }
 
-section('Joint setpoints (PID)')
-for (const name of arm.jointNames) {
-  const { lower, upper } = arm.jointLimits(name)
-  const channel = arm.channels[name]
-  const slider = createSlider({
-    label: name,
-    min: lower,
-    max: upper,
-    value: channel.x,
-    format: (v) => `${v.toFixed(2)} rad`,
-    onInput: (v) => {
-      channel.setpoint = v
-    },
-  })
-  panel.appendChild(slider.el)
+function rebuildDebugSceneSection(binding: SceneInstance | null): void {
+  sceneSection.replaceChildren()
+  if (!binding) {
+    heading(sceneSection, 'Scene-less slide — no channels')
+    return
+  }
+  heading(sceneSection, 'Channel setpoints (PID)')
+  for (const [name, channel] of Object.entries(binding.channels)) {
+    sceneSection.appendChild(
+      createSlider({
+        label: name,
+        min: channel.min,
+        max: channel.max,
+        value: channel.setpoint,
+        format: (v) => `${v.toFixed(2)} rad`,
+        onInput: (v) => {
+          channel.setpoint = v
+          ensureTicking()
+        },
+      }).el,
+    )
+  }
+  heading(sceneSection, 'PID gains (all channels)')
+  const pids = Object.values(binding.channels).map((c) => c.pid)
+  const gainDefs: Array<[string, number, number, number, (v: number) => void]> = [
+    ['Kp', 0.5, 40, pids[0]?.kp ?? 12, (v) => pids.forEach((p) => (p.kp = v))],
+    ['Ki', 0, 20, pids[0]?.ki ?? 0, (v) => pids.forEach((p) => (p.ki = v))],
+    ['Kd', 0, 10, pids[0]?.kd ?? 2.5, (v) => pids.forEach((p) => (p.kd = v))],
+  ]
+  for (const [label, min, max, value, set] of gainDefs) {
+    sceneSection.appendChild(
+      createSlider({
+        label,
+        min,
+        max,
+        value,
+        onInput: (v) => {
+          set(v)
+          ensureTicking()
+        },
+      }).el,
+    )
+  }
 }
 
-section('PID gains (all joints)')
-const gainDefs: Array<[label: string, min: number, max: number, value: number, set: (v: number) => void]> = [
-  ['Kp', 0.5, 40, 12, (v) => arm.pids.forEach((p) => (p.kp = v))],
-  ['Ki', 0, 20, 0, (v) => arm.pids.forEach((p) => (p.ki = v))],
-  ['Kd', 0, 10, 2.5, (v) => arm.pids.forEach((p) => (p.kd = v))],
-]
-for (const [label, min, max, value, set] of gainDefs) {
-  panel.appendChild(createSlider({ label, min, max, value, onInput: set }).el)
-}
-
-section('Camera spring (ω, ζ)')
+heading(panel, 'Camera spring (ω, ζ)')
 panel.appendChild(
   createSlider({
     label: 'ω',
@@ -232,18 +273,31 @@ document.getElementById('overlay-layer')!.appendChild(panel)
 // handle for browser-automation verification and, later, the PDF exporter's settle probe
 ;(window as unknown as Record<string, unknown>).__lysark = {
   sceneLayer,
-  arm,
   controls,
   motion,
   cameraCtl,
   engine,
+  sceneManager,
+  ensureTicking: () => ensureTicking(),
+  isTicking: () => ticking,
 }
 
 // ---------------------------------------------------------------------------
-// Frame loop: fixed-timestep motion, then camera, then render
+// Frame loop: fixed-timestep motion, then camera, then render. Pausable —
+// on a settled scene-less slide the loop stops entirely (spec §3); any
+// interaction or transition restarts it.
 // ---------------------------------------------------------------------------
 
-let last = performance.now()
+let ticking = false
+let last = 0
+
+function ensureTicking(): void {
+  if (ticking) return
+  ticking = true
+  last = performance.now()
+  requestAnimationFrame(tick)
+}
+
 const tick = (now: number) => {
   motion.step((now - last) / 1000)
   last = now
@@ -267,20 +321,30 @@ const tick = (now: number) => {
 
   // Ki ≥ Kd·Kp is closed-loop unstable for ẍ = τ (Routh–Hurwitz) — reachable
   // from the gain sliders on purpose; the badge names it instead of hiding it
-  const { kp, ki, kd } = arm.pids[0]
-  const unstable = ki > 0 && ki >= kd * kp
+  const firstPid = sceneManager.active
+    ? Object.values(sceneManager.active.channels)[0]?.pid
+    : undefined
+  const unstable = !!firstPid && firstPid.ki > 0 && firstPid.ki >= firstPid.kd * firstPid.kp
   const settled = motion.settled()
-  badge.textContent = unstable
-    ? 'unstable gains: Ki ≥ Kd·Kp'
-    : settled
-      ? 'settled'
-      : 'moving'
+  badge.textContent = unstable ? 'unstable gains: Ki ≥ Kd·Kp' : settled ? 'settled' : 'moving'
   badge.classList.toggle('settled', settled && !unstable)
   badge.classList.toggle('unstable', unstable)
 
-  sceneLayer.render()
-  requestAnimationFrame(tick)
-}
-requestAnimationFrame(tick)
+  const sceneVisible = sceneManager.active !== null || sceneManager.busy
+  if (sceneVisible) sceneLayer.render()
 
+  // keep ticking while a scene is live (orbiting needs frames); on scene-less
+  // slides, stop once everything has settled — zero rAF work at rest (§3)
+  if (sceneVisible || cameraCtl.active || !motion.settled(0.5)) {
+    requestAnimationFrame(tick)
+  } else {
+    ticking = false
+  }
+}
+
+for (const event of ['keydown', 'pointerdown', 'wheel', 'hashchange']) {
+  window.addEventListener(event, () => ensureTicking())
+}
+
+ensureTicking()
 engine.start(initialSlide - 1)

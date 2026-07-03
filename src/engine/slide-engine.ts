@@ -1,38 +1,31 @@
-import type { CameraTargetSpec, CompiledSlide, SlideTargets, WidgetSpec } from './slide-types'
-import type { PidChannel } from './motion-system'
+import type { CameraTargetSpec, CompiledSlide, WidgetSpec } from './slide-types'
+import type { SceneInstance } from './scene-types'
+import type { SceneManager } from './scene-manager'
 import { mergeCameraSpec } from './camera-merge'
 import { Overlay, type OverlayContext } from '../overlay/overlay'
 
-export interface GainDefaults {
-  kp: number
-  ki: number
-  kd: number
-}
-
-export interface SceneBinding {
-  channels: Record<string, PidChannel>
-  /** construction-time gains, restored on every slide enter before widget overrides */
-  defaultGains: Record<string, GainDefaults>
-  defaults: SlideTargets
-}
-
 export interface SlideEngineOptions {
   slides: CompiledSlide[]
-  scene: SceneBinding
+  scenes: SceneManager
   overlay: Overlay
   overlayCtx: OverlayContext
-  applyCamera(spec: CameraTargetSpec): void
+  /** snap=true on scene boundaries — no camera continuity across scenes (§4.1) */
+  applyCamera(spec: CameraTargetSpec, opts: { snap: boolean }): void
+  /** fired after a boundary transition, with the new binding (null = scene-less) */
+  onSceneChange?(binding: SceneInstance | null): void
 }
 
 /**
  * Deck runtime (spec §4.3/§6): owns the slide index and fragment state,
  * applies each destination slide's effective targets (merged over scene
  * defaults) to the motion channels and camera. Navigation is reversible by
- * construction because targets are cumulative.
+ * construction because targets are cumulative. Scene changes go through the
+ * SceneManager; a navigation sequence token drops superseded transitions.
  */
 export class SlideEngine {
   private index = -1
   private visibleChunks = 1
+  private navSeq = 0
 
   constructor(private readonly opts: SlideEngineOptions) {}
 
@@ -83,18 +76,19 @@ export class SlideEngine {
     const slide = this.opts.slides[index]
     this.index = index
     this.visibleChunks = direction === 'backward' ? slide.fragments.length : 1
-
-    this.applyTargets(slide)
-    this.opts.overlay.show(slide, this.visibleChunks, this.opts.overlayCtx)
     window.location.hash = String(index + 1)
+    void this.transitionAndApply(slide, ++this.navSeq)
   }
 
-  private applyTargets(slide: CompiledSlide): void {
-    // scene-less slides carry overlay content only (spec §3) — the scene
-    // keeps its state untouched
-    if (!slide.scene) return
-    const { scene, applyCamera } = this.opts
+  private async transitionAndApply(slide: CompiledSlide, seq: number): Promise<void> {
+    const { binding, boundary } = await this.opts.scenes.transitionTo(slide.scene)
+    if (seq !== this.navSeq) return // superseded by faster navigation
+    if (binding && slide.scene) this.applyTargets(slide, binding, boundary)
+    if (boundary) this.opts.onSceneChange?.(binding)
+    this.opts.overlay.show(slide, this.visibleChunks, this.opts.overlayCtx)
+  }
 
+  private applyTargets(slide: CompiledSlide, scene: SceneInstance, boundary: boolean): void {
     // gains first: restore scene defaults, then this slide's widget overrides
     for (const [name, gains] of Object.entries(scene.defaultGains)) {
       const pid = scene.channels[name]?.pid
@@ -124,7 +118,7 @@ export class SlideEngine {
 
     // per-key merge over scene defaults, same semantics as joints (§4.3)
     const camera = mergeCameraSpec(scene.defaults.camera, slide.effective.camera)
-    if (camera) applyCamera(camera)
+    if (camera) this.opts.applyCamera(camera, { snap: boundary })
   }
 }
 
