@@ -215,7 +215,11 @@ class PID {
 - All parameters live in per-widget config so the lecturer can tune feel per slide.
 - **Settle detection:** the system is settled when every active channel has |x − target| < ε and
   |v| < ε_v for N consecutive frames. Used by the PDF exporter (§9c) and by anchored-overlay
-  fade-in choreography.
+  fade-in choreography. (M5 resolution: anchored labels reveal on full-motion settle, but a slide
+  with a declarative `idle:` sweep (§8) never fully settles — its setpoints move every frame — so
+  on idle slides the reveal falls back to *camera* settle, matching §4's "camera settle + anchored
+  fade-in". The label tracks the still-idling node meanwhile. Without this an idle+anchored slide
+  would compile fine yet never reveal its labels.)
 
 ## 6. Navigation
 

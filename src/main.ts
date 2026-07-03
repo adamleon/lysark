@@ -458,9 +458,12 @@ const tick = (now: number) => {
   const sceneVisible = sceneManager.active !== null || sceneManager.busy
   if (sceneVisible) sceneLayer.render()
 
-  // anchored labels: project after render() so matrices are fresh, and fade in
-  // only once the whole scene (camera + joints) has settled (§4.2, §5)
-  anchorLayer.update(sceneLayer.camera, window.innerWidth, window.innerHeight, settled)
+  // anchored labels: project after render() so matrices are fresh. Reveal on
+  // settle — but an idle slide's joints sweep forever and never settle, so on
+  // idle slides fall back to camera-settle (spec §4: "camera settle + anchored
+  // fade-in"); the label just tracks the still-moving node (§4.2, §5).
+  const anchorsRevealed = idleSpecs ? !cameraCtl.active : settled
+  anchorLayer.update(sceneLayer.camera, window.innerWidth, window.innerHeight, anchorsRevealed)
   // live plots sample here; t origin is arbitrary (window scrolls relatively)
   overlay.tick(now / 1000)
 
