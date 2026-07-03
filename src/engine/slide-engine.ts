@@ -1,5 +1,6 @@
 import type { CameraTargetSpec, CompiledSlide, SlideTargets, WidgetSpec } from './slide-types'
 import type { PidChannel } from './motion-system'
+import { mergeCameraSpec } from './camera-merge'
 import { Overlay, type OverlayContext } from '../overlay/overlay'
 
 export interface GainDefaults {
@@ -76,8 +77,8 @@ export class SlideEngine {
    * backward shows all fragments (you step back into the slide's end state).
    */
   goTo(index: number, direction: 'forward' | 'backward' = 'forward'): void {
-    if (index < 0 || index >= this.slideCount || index === this.index) {
-      if (index !== this.index) return
+    if (!Number.isInteger(index) || index < 0 || index >= this.slideCount || index === this.index) {
+      return
     }
     const slide = this.opts.slides[index]
     this.index = index
@@ -89,6 +90,9 @@ export class SlideEngine {
   }
 
   private applyTargets(slide: CompiledSlide): void {
+    // scene-less slides carry overlay content only (spec §3) — the scene
+    // keeps its state untouched
+    if (!slide.scene) return
     const { scene, applyCamera } = this.opts
 
     // gains first: restore scene defaults, then this slide's widget overrides
@@ -118,7 +122,8 @@ export class SlideEngine {
       channel.setpoint = value
     }
 
-    const camera = slide.effective.camera ?? scene.defaults.camera
+    // per-key merge over scene defaults, same semantics as joints (§4.3)
+    const camera = mergeCameraSpec(scene.defaults.camera, slide.effective.camera)
     if (camera) applyCamera(camera)
   }
 }

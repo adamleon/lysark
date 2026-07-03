@@ -35,9 +35,11 @@ export interface CompiledSlide {
   scene?: string
   layout: 'panel' | 'center'
   /**
-   * Cumulative declared targets up to and including this slide (spec §4.3):
-   * per-key inheritance from earlier slides. The runtime merges this over the
-   * scene module's defaults, which the build step cannot know.
+   * Cumulative declared targets within this slide's contiguous scene run
+   * (spec §4.3): per-key inheritance from earlier slides in the same range,
+   * reset at every scene boundary — targets never leak across scenes (§4.1).
+   * The runtime merges this over the scene module's defaults, which the
+   * build step cannot know. Empty for scene-less slides.
    */
   effective: SlideTargets
   widgets: WidgetSpec[]

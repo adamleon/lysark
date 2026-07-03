@@ -87,9 +87,13 @@ function resolveCameraPose(spec: CameraTargetSpec): { position: THREE.Vector3; l
 // ENDS UP, not where it was at slide entry
 let cameraTrack: CameraTargetSpec | null = null
 
+// spring gains reset to these on every slide camera application — mirrors the
+// defaultGains pattern for PID, keeping backward navigation reversible (§4.3)
+const springDefaults = { omega: cameraCtl.spring.omega, zeta: cameraCtl.spring.zeta }
+
 function applyCameraSpec(spec: CameraTargetSpec): void {
-  if (spec.spring?.omega !== undefined) cameraCtl.spring.omega = spec.spring.omega
-  if (spec.spring?.zeta !== undefined) cameraCtl.spring.zeta = spec.spring.zeta
+  cameraCtl.spring.omega = spec.spring?.omega ?? springDefaults.omega
+  cameraCtl.spring.zeta = spec.spring?.zeta ?? springDefaults.zeta
   const pose = resolveCameraPose(spec)
   if (!pose) return
   cameraTrack = typeof spec.lookAt === 'string' ? spec : null
@@ -129,6 +133,12 @@ const engine = new SlideEngine({
 })
 
 window.addEventListener('keydown', (e) => {
+  // focused form controls (slide widgets, debug sliders) keep their native
+  // keyboard behavior — deck navigation must not hijack a slider mid-lesson
+  if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')) {
+    return
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
     e.preventDefault()
     engine.next()
@@ -141,11 +151,13 @@ window.addEventListener('keydown', (e) => {
 })
 
 // deep link: #3 opens slide 3 (works under file://, spec §6)
-const initialSlide = Math.max(1, Number(window.location.hash.slice(1)) || 1)
+const parsedHash = Number(window.location.hash.slice(1))
+const initialSlide = Number.isInteger(parsedHash) && parsedHash >= 1 ? parsedHash : 1
 window.addEventListener('hashchange', () => {
   const n = Number(window.location.hash.slice(1))
   if (Number.isInteger(n) && n >= 1 && n <= engine.slideCount && n - 1 !== engine.currentIndex) {
-    engine.goTo(n - 1, 'forward')
+    // browser Back into a slide is backward navigation: show its end state
+    engine.goTo(n - 1, n - 1 < engine.currentIndex ? 'backward' : 'forward')
   }
 })
 
