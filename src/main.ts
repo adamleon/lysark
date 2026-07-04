@@ -9,6 +9,7 @@ import { createSlider } from './overlay/widgets/slider'
 import { createPlot } from './overlay/widgets/plot'
 import { Overlay, type WidgetHandle } from './overlay/overlay'
 import { AnchorLayer } from './overlay/anchor-layer'
+import { Presenter } from './overlay/presenter'
 import { MotionSystem, type PidChannel } from './engine/motion-system'
 import { SceneManager } from './engine/scene-manager'
 import { SlideEngine } from './engine/slide-engine'
@@ -269,6 +270,14 @@ const engine = new SlideEngine({
   applyAnchors,
   applyIdle,
   onSceneChange: (binding) => rebuildDebugSceneSection(binding),
+  onSlideChange: (index) => presenter.setSlide(index),
+})
+
+// presenter niceties: overview, help, position indicator, shortcuts (§11)
+const presenter = new Presenter(overlayHost, {
+  slides: deck.slides,
+  goTo: (i) => engine.goTo(i, i < engine.currentIndex ? 'backward' : 'forward'),
+  currentIndex: () => engine.currentIndex,
 })
 
 window.addEventListener('keydown', (e) => {
@@ -278,6 +287,11 @@ window.addEventListener('keydown', (e) => {
     return
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return
+  // presenter modals + Home/End/o/f/? claim their keys first
+  if (presenter.handleKey(e)) {
+    e.preventDefault()
+    return
+  }
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
     e.preventDefault()
     engine.next()
@@ -286,8 +300,30 @@ window.addEventListener('keydown', (e) => {
     engine.prev()
   } else if (e.key === 'd') {
     panel.classList.toggle('hidden')
+  } else if (e.key === 't') {
+    logTuning()
   }
 })
+
+// per-slide motion tuning aid (§11): dump the live camera spring + PID gains as
+// frontmatter YAML so a value tuned in the debug panel can be pasted back into
+// slides.md — closing the tune-by-feel loop the debug sliders open
+function logTuning(): void {
+  const z = (n: number) => Number(n.toFixed(3))
+  const lines = [
+    `# tuning for slide '${engine.current.id}'`,
+    `camera:`,
+    `  spring: { omega: ${z(cameraCtl.spring.omega)}, zeta: ${z(cameraCtl.spring.zeta)} }`,
+  ]
+  const active = sceneManager.active
+  if (active) {
+    lines.push(`# per-channel PID gains:`)
+    for (const [name, ch] of Object.entries(active.channels)) {
+      lines.push(`#   ${name}: { kp: ${z(ch.pid.kp)}, ki: ${z(ch.pid.ki)}, kd: ${z(ch.pid.kd)} }`)
+    }
+  }
+  console.log(lines.join('\n'))
+}
 
 // deep link: #3 opens slide 3 (works under file://, spec §6)
 const parsedHash = Number(window.location.hash.slice(1))
@@ -400,6 +436,7 @@ document.getElementById('overlay-layer')!.appendChild(panel)
   sceneManager,
   anchorLayer,
   overlay,
+  presenter,
   stepIdle: (now: number) => stepIdle(now),
   ensureTicking: () => ensureTicking(),
   isTicking: () => ticking,

@@ -255,6 +255,24 @@ describe('compileSlides — idle animation (M5, spec §11)', () => {
   })
 })
 
+describe('compileSlides — slide titles (M7 overview)', () => {
+  it('takes the first heading as the title, and falls back to the id when there is none', () => {
+    const [one, two] = compileSlides(deck)
+    expect(one.title).toBe('Title') // from '# Title'
+    expect(two.title).toBe('two') // body two has no heading → falls back to id
+  })
+
+  it('strips emphasis, code and $ from the heading text', () => {
+    const [s] = compileSlides('---\nscene: arm\n---\n## The **camera** is a `spring` with $\\zeta$')
+    expect(s.title).toBe('The camera is a spring with \\zeta')
+  })
+
+  it('ignores headings inside code fences and falls back to the id', () => {
+    const [s] = compileSlides('---\nid: no-heading\nscene: arm\n---\n```\n# not a title\n```\njust text')
+    expect(s.title).toBe('no-heading')
+  })
+})
+
 describe('compileSlides — scene-less guard covers M5 keys', () => {
   it('rejects anchored, idle, and plot widgets on a scene-less slide', () => {
     expect(() =>

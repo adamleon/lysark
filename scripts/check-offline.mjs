@@ -53,13 +53,27 @@ for (let i = slideCount - 2; i >= 0; i--) {
   await page.waitForTimeout(300)
 }
 
+// KaTeX font integrity: a broken CSS inline pass (e.g. an @font-face-merging
+// regex) drops fonts WITHOUT any console error or network request, so the checks
+// above are blind to it — math would just render in a fallback serif. Assert the
+// KaTeX @font-face rules survived (KaTeX ships ~20 faces across ~10 families).
+const katexFaces = await page.evaluate(
+  () => [...document.fonts].filter((f) => f.family.startsWith('KaTeX')).length,
+)
+const MIN_KATEX_FACES = 16
+
 await browser.close()
 
-const ok = consoleErrors.length === 0 && pageErrors.length === 0 && requests.length === 0
+const ok =
+  consoleErrors.length === 0 &&
+  pageErrors.length === 0 &&
+  requests.length === 0 &&
+  katexFaces >= MIN_KATEX_FACES
 console.log(`slides stepped: ${slideCount} (forward + backward)`)
 console.log(`console errors: ${consoleErrors.length}`)
 console.log(`uncaught exceptions: ${pageErrors.length}`)
 console.log(`external/network requests: ${requests.length}`)
+console.log(`KaTeX @font-face rules: ${katexFaces} (expect ≥ ${MIN_KATEX_FACES})`)
 for (const e of consoleErrors) console.log(`  console.error: ${e}`)
 for (const e of pageErrors) console.log(`  pageerror: ${e}`)
 for (const r of requests) console.log(`  request: ${r}`)

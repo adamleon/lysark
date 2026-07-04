@@ -68,6 +68,9 @@ export interface SlideTargets {
 
 export interface CompiledSlide {
   id: string
+  /** plaintext title from the slide's first heading (falls back to id);
+      used by the presenter overview (§11) — never rendered as markup */
+  title: string
   scene?: string
   layout: 'panel' | 'center'
   /**

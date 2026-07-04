@@ -19,6 +19,9 @@ export interface SlideEngineOptions {
   applyAnchors?(slide: CompiledSlide, binding: SceneInstance | null): void
   /** start/stop the destination slide's declarative idle oscillation (§11) */
   applyIdle?(slide: CompiledSlide, binding: SceneInstance | null): void
+  /** fired for every destination slide (not just boundaries) — drives the
+      presenter position indicator and overview highlight (§11) */
+  onSlideChange?(index: number, slide: CompiledSlide): void
 }
 
 /**
@@ -123,6 +126,8 @@ export class SlideEngine {
     this.opts.applyIdle?.(slide, binding)
     this.pendingShow = false
     this.opts.overlay.show(slide, this.visibleChunks, this.opts.overlayCtx)
+    // this.index is the survivor's index here (goTo set it synchronously)
+    this.opts.onSlideChange?.(this.index, slide)
   }
 
   private applyTargets(slide: CompiledSlide, scene: SceneInstance, boundary: boolean): void {

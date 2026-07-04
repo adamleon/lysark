@@ -76,6 +76,25 @@ function splitSlides(source: string): RawSlide[] {
   return slides
 }
 
+/**
+ * Plaintext title from the slide's first markdown heading, for the presenter
+ * overview (§11). Strips emphasis/code/math markers so it is safe as text
+ * content (never rendered as markup). Headings inside code fences are ignored.
+ */
+function extractTitle(body: string, fallback: string): string {
+  let inFence = false
+  for (const line of body.split('\n')) {
+    if (FENCE.test(line.trimStart())) inFence = !inFence
+    if (inFence) continue
+    const m = /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
+    if (m) {
+      const text = m[1].replace(/[*_`$]/g, '').replace(/\s+/g, ' ').trim()
+      if (text) return text
+    }
+  }
+  return fallback
+}
+
 /** fragment split on <!-- pause --> lines, ignoring markers inside code fences */
 function splitFragments(body: string): string[] {
   const chunks: string[][] = [[]]
@@ -386,8 +405,10 @@ export function compileSlides(source: string): CompiledSlide[] {
       .map((chunk) => renderChunk(chunk.trim(), true))
       .filter((html) => html.length > 0)
 
+    const id = (frontmatter.id as string | undefined) ?? `slide-${slideNo}`
     out.push({
-      id: (frontmatter.id as string | undefined) ?? `slide-${slideNo}`,
+      id,
+      title: extractTitle(body, id),
       scene,
       layout: frontmatter.layout === 'center' ? 'center' : 'panel',
       effective,
