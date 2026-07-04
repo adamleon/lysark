@@ -79,6 +79,16 @@ export class SlideEngine {
     if (this.index > 0) this.goTo(this.index - 1, 'backward')
   }
 
+  /** reveal every fragment of the current slide — the PDF exporter (§9c)
+      wants each slide's complete end state, not its first reveal step */
+  showAllFragments(): void {
+    if (this.index < 0) return
+    this.visibleChunks = this.current.fragments.length
+    // during a pending transition the queued overlay.show reads visibleChunks
+    // when it fires, so we only push the count directly when already shown
+    if (!this.pendingShow) this.opts.overlay.setVisibleChunks(this.visibleChunks)
+  }
+
   /**
    * Jump to a slide. Entering forward shows the first fragment; entering
    * backward shows all fragments (you step back into the slide's end state).

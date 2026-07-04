@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:offline": "vite build --mode singlefile",
+    "verify:offline": "node scripts/check-offline.mjs",
     "preview": "vite preview",
+    "export:pdf": "node scripts/export-pdf.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -20,8 +23,11 @@
     "@types/markdown-it": "14.1.2",
     "@types/three": "0.185.0",
     "markdown-it": "14.3.0",
+    "pdf-lib": "1.17.1",
+    "playwright-chromium": "1.61.1",
     "typescript": "6.0.3",
     "vite": "6.4.3",
+    "vite-plugin-singlefile": "2.3.3",
     "vitest": "4.1.9",
     "yaml": "2.9.0"
   }
