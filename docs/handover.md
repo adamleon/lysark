@@ -22,31 +22,40 @@ URDF + Collada meshes, runs from the offline file with no fetch.
 Each milestone ended with an adversarial multi-agent review (`git log`); worth
 continuing for substantial changes.
 
-## The Baneplanlegging lecture — 8 slides, Norwegian ([src/content/baneplanlegging/slides.md](../src/content/baneplanlegging/slides.md))
+## The Baneplanlegging lecture — 15 slides, Norwegian ([src/content/baneplanlegging/slides.md](../src/content/baneplanlegging/slides.md))
 
-Build/run it with `LYSARK_DECK=baneplanlegging` (see Commands). All slides are the
-real KUKA agilus (slides 1–7 the single `agilus` scene, slide 8 the two-robot
-`agilus-duo`).
+Built out to full parity with the source pptx (`AIS2105/.../Baneplanlegging.pptx`):
+equation-rich, and **presenter-facing** — the lecturer drives the live scenes, so
+every student-directed "drag/click here" instruction was removed. Build/run with
+`LYSARK_DECK=baneplanlegging`. Scene runs: `agilus` (1–5), scene-less theory (6–10),
+`agilus` again (11–14, resumed after the gap — see the contiguity gotcha), then
+`agilus-duo` (15).
 
 1. **tittel** — title, idle sweep.
-2. **konfigurasjon** — joint sliders; a live `q`-vector anchored at tool0 (column
-   vector of the current joint values, updates as you drag).
-3. **bane** — a path *q(s)* is pure geometry; a manual `s` slider scrubs the whole
-   robot q₀→q_f (linear in joint space). No time yet.
-4. **ptp** (PTP / MoveJ) — joint-linear; the tool traces a **curve** (gold). Draws
-   both reference tool paths + a `jointgraph` of q(s) = **straight lines**.
-5. **lin** (Lin / MoveL) — the tool follows a **straight** task-space line (green)
-   via IK; joints move nonlinearly → `jointgraph` = **curved lines**.
-6. **kubisk** — cubic time-scaling s(t); the whole robot runs it, `curve` widget
-   plots s/ṡ/s̈. s̈ ≠ 0 at the ends → the robot lurches (geometrisk, ikke fysisk glatt).
-7. **femteordens** — quintic; s̈ = 0 at the ends → smooth (fysisk glatt).
-8. **sammenligning** — TWO overlaid robots (white cubic + green translucent ghost
-   quintic) on one clock; `transport` (Run/Pause + time scrub), `compare` graph
-   (pos/vel/acc tabs, both profiles), and a `toggle` to swap which robot is solid.
+2. **konfigurasjon** — joint sliders + live anchored `q`-vector; adds the config
+   equation q∈𝒞⊂ℝⁿ and forward kinematics x=f(q).
+3. **bane** — path q(s):[0,1]→𝒞 (formal def), `s` slider scrubs the robot. No time.
+4. **ptp** (PTP/MoveJ) — joint-linear q(s)=s·q_f+(1−s)·q₀; gold tool curve,
+   `jointgraph` = **straight lines**.
+5. **lin** (Lin/MoveL) — task-linear x(s) via IK; `jointgraph` = **curved**; bridges
+   to the SE(3) theory (orientation must also interpolate).
+6. **translasjon-rotasjon** *(scene-less)* — SE(3): t(s) linear, R(s)=R_A·exp(log(R_AᵀR_B)s).
+7. **matriseeksponent** *(scene-less)* — eᴬ=Σ Aⁿ/n!, tie to ẋ=Ax.
+8. **rotasjonsmatrise** *(scene-less)* — angle-axis exp, skew matrix, Rodrigues.
+9. **rute** *(scene-less)* — bane+tid=rute; time scaling s(t) + chain rule for q̇,q̈.
+10. **kubisk-utledning** *(scene-less)* — cubic general form → boundary conditions
+    (a₂=3/T², a₃=−2/T³) → 3(t/T)²−2(t/T)³. (Fixes the pptx's s̈=2a₂+6a₃ → +6a₃t.)
+11. **kubisk** — robot runs cubic; `curve` shows s̈≠0 at ends (geometrisk, ikke fysisk glatt).
+12. **trapes** — trapezoidal profile (piecewise-constant s̈); `curve` widget.
+13. **s-kurve** — S-curve (7-phase bounded-jerk); `curve` widget. New engine profile.
+14. **femteordens** — quintic; general form + closed form; s̈=0 at ends (fysisk glatt).
+15. **sammenligning** — TWO overlaid robots (white cubic + green ghost quintic);
+    `transport`, `compare` graph, `toggle`.
 
 Note: cubic vs quintic only diverge ~5 % along the path — the overlay reads best in
 motion. PTP↔Lin verified numerically: PTP tool bulges 0.52 m off the chord, Lin
-tool stays within 0.7 mm of the line.
+tool stays within 0.7 mm of the line. The pptx's rendered-equation slides 6–8 and
+14–16 became the scene-less theory slides + the profile demos here.
 
 ## Framework capabilities the lecture added (all reusable, unit-tested, file://-safe)
 
@@ -55,7 +64,12 @@ tool stays within 0.7 mm of the line.
   alias resolved from `LYSARK_DECK` (default `demo`) — one static import, only the
   selected deck bundles. Offline/PDF outputs are deck-named.
 - **Time-scaling** ([src/engine/time-scaling.ts](../src/engine/time-scaling.ts)):
-  `cubic`/`quintic`/`trapezoidal` as pure `s(t)→{s,ṡ,s̈,⃛s}`, plus a `PROFILES` map.
+  `cubic`/`quintic`/`trapezoidal`/`scurve` as pure `s(t)→{s,ṡ,s̈,⃛s}`, plus a
+  `PROFILES` map. `scurve` = 7-phase bounded-jerk (accel is a trapezoid, a(0)=a(T)=0,
+  finite jerk everywhere); parameterized by jerk/accel fractions, unit-jerk shape
+  integrated analytically and scaled to land s(1)=1. `ProfileName` is the one source
+  of truth (slide-types/compiler/main import it; compiler derives PROFILE_NAMES from
+  `Object.keys(PROFILES)`).
 - **Kinematic playback**: `PidChannel.playback = {x,v}` replays an exact pose,
   bypassing PID (no lag). Cleared to resume PID control.
 - **`trajectory:` frontmatter** (main.ts drives it): multi-joint `from`/`to` poses;
@@ -122,9 +136,13 @@ keep it green.
   check in the lecture work was done. `window.__lysark` exposes engine, motion,
   sceneManager, cameraCtl, overlay, anchorLayer, presenter, getTrajS, …. The active
   scene's `ik` is reachable at `__lysark.sceneManager.active.ik`.
-- **Scene contiguity** (compiler-enforced): a scene id may appear in only ONE
-  contiguous slide range. This is why PTP/Lin (agilus) had to sit *before* the
-  `agilus-duo` comparison slide, not between the agilus slides and it.
+- **Scene contiguity** (compiler-enforced, relaxed): a scene may now span more than
+  one run as long as the runs are separated ONLY by scene-less slides — the runtime
+  suspends the scene and restores its serialized state on re-entry (§4.1), which the
+  Baneplanlegging deck relies on (`agilus` 1–5 → scene-less theory 6–10 → `agilus`
+  11–14). Still forbidden: interleaving two *different* scenes — once another scene
+  runs, the previous one is "sealed" and may not reappear (this is why `agilus` still
+  can't return after `agilus-duo`). See `sealedScenes`/`lastRealScene` in the compiler.
 - **Probe slider selector**: the debug panel's sliders are also `.widget-slider`;
   target a slide widget with `.slide-widgets input[type=range]`, not `.widget-slider`.
 - **IK**: position-only DLS, warm-started — accurate for the small per-frame target

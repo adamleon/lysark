@@ -48,16 +48,21 @@ anchored:
 ---
 ## Hva er en konfigurasjon?
 
-En **konfigurasjon** er settet av leddverdier som gir roboten én bestemt
-stilling – vinkelen på hvert dreieledd (og lengden på hvert skyveledd).
+En **konfigurasjon** er settet av leddverdier som fastlegger robotens stilling
+entydig – vinkelen på hvert dreieledd og lengden på hvert skyveledd. Vi samler
+dem i én vektor:
+
+$$q = (q_1, q_2, \dots, q_n) \in \mathcal{C} \subset \mathbb{R}^n$$
 
 <!-- pause -->
-Vi samler dem i én vektor $q = (q_1, \dots, q_n)$. Mengden av *alle* mulige
-konfigurasjoner er **konfigurasjonsrommet** $\mathcal{C}$.
+Mengden av *alle* mulige konfigurasjoner er **konfigurasjonsrommet**
+$\mathcal{C}$. For denne KUKA-en er $n = 6$: hvert punkt i $\mathcal{C}$ svarer
+til nøyaktig én stilling.
 
 <!-- pause -->
-Dra i leddene – hver innstilling er ett punkt i $\mathcal{C}$, og roboten er
-den direkte avbildningen av det punktet.
+Verktøyets stilling i rommet er den direkte (forover-)kinematikken $x = f(q)$ –
+en *ulineær* avbildning fra leddrommet til arbeidsrommet. Den ulineariteten er
+kjernen i hele forelesningen.
 
 ---
 id: bane
@@ -76,13 +81,19 @@ widgets:
 ---
 ## Banen q(s) – ren geometri
 
-En **bane** er en sammenhengende sekvens av konfigurasjoner
-$q(s),\; s \in [0, 1]$: fra start $q(0) = q_0$ til slutt $q(1) = q_f$. Den
-enkleste er en rett linje i leddrommet, $q(s) = q_0 + s\,(q_f - q_0)$.
+En **bane** er en sammenhengende avbildning fra en baneparameter $s$ inn i
+konfigurasjonsrommet:
+
+$$\mathbf{q}(s) : [0, 1] \to \mathcal{C} \subset \mathbb{R}^n, \qquad \mathbf{q}(0) = q_0, \quad \mathbf{q}(1) = q_f$$
 
 <!-- pause -->
-Legg merke til: **ingen tid** ennå – bare *hvor* roboten er, ikke *når*. Dra i
-$s$ og skru hele roboten gjennom banen.
+Legg merke til: her er det **ingen tid** ennå – banen sier bare *hvor* roboten
+er langs ruten, ikke *når*. Det er ren geometri.
+
+<!-- pause -->
+Den enkleste banen er en rett linje i leddrommet:
+
+$$\mathbf{q}(s) = q_0 + s\,(q_f - q_0)$$
 
 ---
 id: ptp
@@ -105,12 +116,17 @@ widgets:
 ---
 ## PTP / MoveJ – rett i leddrommet
 
-Den enkleste ruten: interpolér **leddene** lineært fra $q_0$ til $q_f$, akkurat
-som på forrige side. Rask og alltid mulig – men se hva verktøyet (tool0) gjør.
+Den enkleste ruten interpolerer **leddene** lineært fra $q_0$ til $q_f$ – kalt
+PTP eller MoveJ:
+
+$$\mathbf{q}(s) = s\,\mathbf{q}_f + (1-s)\,\mathbf{q}_0, \qquad \dot{\mathbf{q}}(s) = \mathbf{q}_f - \mathbf{q}_0, \qquad \ddot{\mathbf{q}}(s) = 0$$
+
+Hvert ledd beveger seg med jevn takt i $s$ – leddkurvene er **rette linjer**.
 
 <!-- pause -->
-Dra i $s$: verktøyet følger den **gule** banen – en *krum* kurve, ikke en rett
-linje. Den grønne streken viser den rette linjen mellom start og mål.
+Men fordi kinematikken $x = f(q)$ er ulineær, blir verktøybanen (gul) en *krum*
+kurve, ikke den rette linjen (grønn) mellom start og mål. Rask og alltid mulig,
+men verktøyet svinger ut.
 
 ---
 id: lin
@@ -133,12 +149,126 @@ widgets:
 ---
 ## Lin / MoveL – rett i arbeidsrommet
 
-Nå tvinger vi **verktøyet** til å følge den rette linjen (grønn). Invers
-kinematikk løser leddvinklene i hvert steg, så tool0 går rett fram.
+Nå legger vi den rette linjen i **arbeidsrommet** i stedet – posisjonen $x$
+interpoleres lineært (Lin, MoveL):
+
+$$\mathbf{x}(s) = s\,\mathbf{x}_B + (1-s)\,\mathbf{x}_A, \qquad \dot{\mathbf{x}}(s) = \mathbf{x}_B - \mathbf{x}_A, \qquad \ddot{\mathbf{x}}(s) = 0$$
+
+Her er $\mathbf{x}_A = f(q_0)$ og $\mathbf{x}_B = f(q_f)$ start- og målposisjonen i
+arbeidsrommet – samme start og mål som PTP. Invers kinematikk løser leddvinklene
+$q$ i hvert steg slik at verktøyet holder seg på den rette linjen (grønn).
 
 <!-- pause -->
-Dra i $s$: verktøyet går rett, men roboten må vri seg mer for å få det til.
-Samme start og mål som PTP – helt ulik verktøybane (sammenlign med den gule).
+Prisen: leddene må nå vri seg **ulineært** – leddkurvene blir krumme. Og $x$ er
+bare posisjonen; verktøyet har også en **orientering** som må dreies jevnt fra
+start til mål. Hvordan interpolerer man en rotasjon?
+
+---
+id: translasjon-rotasjon
+layout: center
+---
+## Lineær translasjon og rotasjon
+
+En full stilling i arbeidsrommet er både en **posisjon** $\mathbf{t}$ og en
+**orientering** $\mathbf{R} \in \mathrm{SO}(3)$. Translasjonen interpolerer vi
+rett fram:
+
+$$\mathbf{t}(s) = s\,\mathbf{t}_B + (1-s)\,\mathbf{t}_A$$
+
+<!-- pause -->
+Rotasjoner kan vi *ikke* interpolere komponentvis – summen av to
+rotasjonsmatriser er ingen rotasjonsmatrise. Vi må følge den **korteste veien**
+på rotasjonsgruppen. Den relative rotasjonen $\mathbf{R}_A^\top\mathbf{R}_B$
+skaleres jevnt med $s$:
+
+$$\mathbf{R}(s) = \mathbf{R}_A \exp\!\big( \log(\mathbf{R}_A^\top \mathbf{R}_B)\, s \big)$$
+
+<!-- pause -->
+Her er $\exp$ og $\log$ **matrise**-eksponent og -logaritme, ikke de skalare. De
+neste to sidene forklarer hva det betyr.
+
+---
+id: matriseeksponent
+layout: center
+---
+## Eksponent av en matrise
+
+Matriseeksponenten er definert av nøyaktig samme rekke som den skalare
+$e^{x} = \sum x^n / n!$, bare med matrisepotenser:
+
+$$e^{\mathbf{A}} = \sum_{n=0}^{\infty} \frac{\mathbf{A}^n}{n!} = \mathbf{I} + \mathbf{A} + \frac{\mathbf{A}^2}{2!} + \frac{\mathbf{A}^3}{3!} + \cdots$$
+
+<!-- pause -->
+Den løser den lineære differensialligningen $\dot{\mathbf{x}} = \mathbf{A}\mathbf{x}$
+med løsning $\mathbf{x}(t) = e^{\mathbf{A}t}\,\mathbf{x}_0$. Vi bruker den til å
+bygge en rotasjon opp fra en konstant vinkelhastighet.
+
+---
+id: rotasjonsmatrise
+layout: center
+---
+## Eksponent av en rotasjonsmatrise
+
+En rotasjon om en enhetsakse $\hat{\mathbf{k}}$ med vinkel $\theta$ er nettopp
+matriseeksponenten av den skjevsymmetriske matrisen $[\hat{\mathbf{k}}]_\times$
+skalert med $\theta$:
+
+$$\mathbf{R}(\hat{\mathbf{k}}, \theta) = e^{[\hat{\mathbf{k}}]_\times \theta}, \qquad \log\!\big(\mathbf{R}(\hat{\mathbf{k}}, \theta)\big) = [\hat{\mathbf{k}}]_\times\, \theta$$
+
+<!-- pause -->
+der $[\hat{\mathbf{k}}]_\times$ er kryssprodukt-matrisen:
+
+$$[\hat{\mathbf{k}}]_\times = \begin{bmatrix} 0 & -k_z & k_y \\ k_z & 0 & -k_x \\ -k_y & k_x & 0 \end{bmatrix}$$
+
+<!-- pause -->
+Rekka summerer seg til **Rodrigues' formel** i lukket form:
+
+$$\mathbf{R}(\hat{\mathbf{k}}, \theta) = \mathbf{I} + \sin\theta\,[\hat{\mathbf{k}}]_\times + (1 - \cos\theta)\,[\hat{\mathbf{k}}]_\times^{\,2}$$
+
+Slik blir rotasjonsinterpolasjonen en jevn dreining om **én fast akse** – like
+enkel som en glidning langs én rett linje.
+
+---
+id: rute
+layout: center
+---
+## Bane + tid = rute
+
+En **rute** (trajectory) er en bane der vi også vet *når* vi er hvor. Vi legger
+på en **tidsskalering** $s(t)$ som styrer framdriften langs banen:
+
+$$s(t) : [t_0, t_f] \to [0, 1], \qquad s(t_0) = 0, \quad s(t_f) = 1$$
+
+<!-- pause -->
+Kjerneregelen (regelen for å derivere en sammensatt funksjon) gir ledd-fart og
+-akselerasjon fra banegeometrien og tidsskaleringen:
+
+$$\dot{\mathbf{q}}(t) = \frac{d\mathbf{q}}{ds}\,\dot{s}, \qquad \ddot{\mathbf{q}}(t) = \frac{d^2\mathbf{q}}{ds^2}\,\dot{s}^{\,2} + \frac{d\mathbf{q}}{ds}\,\ddot{s}$$
+
+<!-- pause -->
+Geometrien $\mathbf{q}(s)$ er fast. Nå står valget om **$s(t)$** – og hvor glatt
+ruten blir, avhenger av hvor mange deriverte av $s$ vi holder kontinuerlige.
+
+---
+id: kubisk-utledning
+layout: center
+---
+## Tredjeordens polynom – utledning
+
+Den enkleste glatte tidsskaleringen er et **tredjeordens** (kubisk) polynom:
+
+$$s(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3$$
+$$\dot{s}(t) = a_1 + 2 a_2 t + 3 a_3 t^2, \qquad \ddot{s}(t) = 2 a_2 + 6 a_3 t$$
+
+<!-- pause -->
+Vi setter tidsvinduet til $[0, T]$ (altså $t_0 = 0$, $t_f = T$, med $T$ som total
+kjøretid). Fire ukjente, fire randbetingelser: $s = 0,\ \dot{s} = 0$ ved $t = 0$
+og $s = 1,\ \dot{s} = 0$ ved $t = T$. Løst gir det
+
+$$a_0 = 0, \qquad a_1 = 0, \qquad a_2 = \frac{3}{T^2}, \qquad a_3 = -\frac{2}{T^3}$$
+
+<!-- pause -->
+$$s(t) = 3\left(\tfrac{t}{T}\right)^2 - 2\left(\tfrac{t}{T}\right)^3$$
 
 ---
 id: kubisk
@@ -159,20 +289,80 @@ widgets:
     show: [s, v, a]
     label: Kubisk – s, ṡ, s̈
 ---
-## Kubisk polynom – geometrisk glatt
+## Tredjeordens polynom – geometrisk glatt
 
-En bane blir en **rute** når vi legger på en tidsskalering $s(t)$: *hvor* langs
-banen vi er til hver tid. Nå kjører **hele roboten** $q(s(t))$ fra $q_0$ til
-$q_f$. Det tredjeordens (kubiske) polynomet
+Nå kjører **hele roboten** ruten $\mathbf{q}(s(t))$ fra $q_0$ til $q_f$ med den
+kubiske tidsskaleringen. Farten $\dot{s}$ hviler i null ved start og mål – men
+akselerasjonen gjør det ikke:
 
-$$s(t) = 3\left(\tfrac{t}{T}\right)^2 - 2\left(\tfrac{t}{T}\right)^3$$
-
-starter og stopper med **null hastighet** – men se på akselerasjonen $\ddot s$
-i plottet: den er *ikke* null i endene.
+$$\ddot{s}(0) = \frac{6}{T^2}, \qquad \ddot{s}(T) = -\frac{6}{T^2}$$
 
 <!-- pause -->
-Roboten **rykker** i gang og stopper brått – geometrisk glatt, men ikke *fysisk*
-glatt (uendelig rykk i endepunktene).
+Akselerasjonen **hopper** fra null idet roboten setter av gårde. Det gir et
+uendelig **rykk** ($\dddot{s} \to \infty$) i endepunktene: *geometrisk* glatt,
+men ikke *fysisk* glatt. Roboten rykker i gang og stopper brått.
+
+---
+id: trapes
+scene: agilus
+camera:
+  lookAt: [0, 0.55, 0]
+  offset: [0.6, 1.5, 3.4]
+  spring: { omega: 4, zeta: 1.0 }
+trajectory:
+  profile: trapezoidal
+  duration: 1.4
+  dwell: 0.7
+  from: { joint_1: -1.5, joint_2: -0.5, joint_3: 1.3, joint_4: 0.0, joint_5: 0.7, joint_6: 0.0 }
+  to:   { joint_1:  1.5, joint_2: -1.6, joint_3: 0.4, joint_4: 0.0, joint_5: 1.3, joint_6: 0.0 }
+widgets:
+  - type: curve
+    profile: trapezoidal
+    show: [s, v, a]
+    label: Trapes – s, ṡ, s̈
+---
+## Trapes – enklest å implementere
+
+En **trapesprofil** holder farten konstant i midten, med konstant akselerasjon
+på ramper opp og ned. Tre faser:
+
+$$\ddot{s}(t) = \begin{cases} +a & 0 \le t \le t_a \\ 0 & t_a \le t \le T - t_a \\ -a & T - t_a \le t \le T \end{cases}$$
+
+<!-- pause -->
+Akselerasjonen er **stykkevis konstant** og hopper mellom $+a$, $0$ og $-a$ ved
+faseskiftene. Enkel å kjøre på virkelige motorer, men hoppene gir fortsatt
+rykk – ikke fysisk glatt, bare billig og forutsigbar.
+
+---
+id: s-kurve
+scene: agilus
+camera:
+  lookAt: [0, 0.55, 0]
+  offset: [0.6, 1.5, 3.4]
+  spring: { omega: 4, zeta: 1.0 }
+trajectory:
+  profile: scurve
+  duration: 1.6
+  dwell: 0.7
+  from: { joint_1: -1.5, joint_2: -0.5, joint_3: 1.3, joint_4: 0.0, joint_5: 0.7, joint_6: 0.0 }
+  to:   { joint_1:  1.5, joint_2: -1.6, joint_3: 0.4, joint_4: 0.0, joint_5: 1.3, joint_6: 0.0 }
+widgets:
+  - type: curve
+    profile: scurve
+    show: [s, v, a]
+    label: S-kurve – s, ṡ, s̈
+---
+## S-kurve – begrenset rykk
+
+S-kurven mykner opp trapesen: i stedet for å slå akselerasjonen på momentant,
+lar vi den **rampe opp og ned** med begrenset rykk. Akselerasjonen blir selv en
+trapes, satt sammen av sju faser.
+
+<!-- pause -->
+Nå hviler både farten *og* akselerasjonen i null i endene,
+$\dot{s}(0) = \ddot{s}(0) = 0$, mens rykket $\dddot{s}$ holder seg **endelig**
+overalt – aldri den kubiske impulsen. Fysisk glatt, med begrenset rykk – slik
+virkelige bevegelsesregulatorer gjør det.
 
 ---
 id: femteordens
@@ -195,14 +385,19 @@ widgets:
 ---
 ## Femteordens polynom – fysisk glatt
 
-Samme bane, samme tid – men krever vi at også **akselerasjonen** skal være null
-i endene, trengs et femteordens polynom:
+Krever vi at også **akselerasjonen** hviler i null i endene (seks
+randbetingelser: $s, \dot{s}, \ddot{s}$ ved begge ender), trengs et
+**femteordens** polynom:
+
+$$s(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5$$
+
+<!-- pause -->
+De seks betingelsene gir den lukkede formen
 
 $$s(t) = 10\left(\tfrac{t}{T}\right)^3 - 15\left(\tfrac{t}{T}\right)^4 + 6\left(\tfrac{t}{T}\right)^5$$
 
-<!-- pause -->
-Nå glir hele roboten mykt i gang og til ro: $\ddot s = 0$ i begge ender gir
-begrenset rykk. *Fysisk* glatt.
+Nå glir hele roboten mykt i gang og til ro: $\ddot{s} = 0$ i begge ender gir
+kontinuerlig, jevnt rykk. *Fysisk* glatt.
 
 ---
 id: sammenligning
@@ -221,7 +416,7 @@ trajectory:
   to:   { joint_1:  1.5, joint_2: -1.6, joint_3: 0.4, joint_4: 0.0, joint_5: 1.3, joint_6: 0.0 }
 widgets:
   - type: transport
-    label: Tid – kjør eller dra manuelt
+    label: Framdrift i tid
   - type: compare
     profiles: [cubic, quintic]
     labels: [kubisk, femteordens]
@@ -233,9 +428,9 @@ widgets:
 ## Kubisk vs. femteordens – samtidig
 
 Samme bane, samme tid, kjørt av **to roboter oppå hverandre**: den hvite med
-tredjeordens, den **grønne** med femteordens tidsskalering.
+kubisk, den **grønne** med femteordens tidsskalering.
 
 <!-- pause -->
-De starter og stopper likt, men **skiller lag underveis**. Velg posisjon,
-hastighet eller akselerasjon i grafen, og **kjør** eller dra i tidsslideren –
-markøren følger bevegelsen. Knappen bytter hvilken robot som er solid.
+De starter og stopper likt, men **skiller lag underveis** – den kubiske rykker
+fra, den femteordens glir mykt. Forskjellen er tydeligst i akselerasjonen:
+kubisk spretter fra $6/T^2$ til null i endene, femteordens hviler i null.
