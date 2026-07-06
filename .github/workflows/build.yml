@@ -1,0 +1,46 @@
+name: Build decks
+
+# Typecheck, run the unit tests, and build every deck's self-contained offline
+# HTML. The built files are uploaded as a downloadable build artifact ("lysark-
+# decks") on each run — grab them from the run's Summary page. No deployment.
+on:
+  push:
+    branches: [main, baneplanlegging-lecture]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test
+
+      - name: Build offline decks
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          for deck in baneplanlegging demo; do
+            LYSARK_DECK="$deck" npm run build:offline
+            cp "dist-offline/${deck}-offline.html" "artifacts/${deck}.html"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lysark-decks
+          path: artifacts/
+          if-no-files-found: error
