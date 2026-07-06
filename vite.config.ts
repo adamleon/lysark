@@ -2,10 +2,18 @@ import { defineConfig, type Plugin } from 'vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import { rename } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { slidesPlugin } from './vite-plugin-slides'
 
+// Deck selection (spec §7): one folder per deck under src/content/, chosen by
+// LYSARK_DECK (default 'demo'). The `@active-deck` alias resolves to a single
+// static import of that deck's manifest, so only the selected deck's code and
+// assets bundle — no dynamic import(), file://-safe (spec §9b).
+const DECK = process.env.LYSARK_DECK || 'demo'
+const DECK_ENTRY = fileURLToPath(new URL(`./src/content/${DECK}/deck.ts`, import.meta.url))
+
 const OFFLINE_DIR = 'dist-offline'
-const OFFLINE_HTML = 'lysark-offline.html'
+const OFFLINE_HTML = `${DECK}-offline.html`
 
 /**
  * Size pass (spec §11): KaTeX ships every glyph as woff2 + woff + ttf, and the
@@ -56,7 +64,7 @@ function renameOfflineHtml(): Plugin {
 
 // Three delivery targets from one codebase (spec §9), selected by --mode:
 //   vite build                    → classroom static dist/ (base './' survives file:// too)
-//   vite build --mode singlefile  → one self-contained dist-offline/lysark-offline.html
+//   vite build --mode singlefile  → one self-contained dist-offline/<deck>-offline.html
 // base './' so relative asset paths survive all targets. The offline build has
 // NO runtime fetch/dynamic-import: the URDF is primitive-only (?raw string), KaTeX
 // fonts inline as base64 data URIs (assetsInlineLimit via useRecommendedBuildConfig),
@@ -65,6 +73,7 @@ export default defineConfig(({ mode }) => {
   const singlefile = mode === 'singlefile'
   return {
     base: './',
+    resolve: { alias: { '@active-deck': DECK_ENTRY } },
     plugins: [
       slidesPlugin(),
       katexWoff2Only(),

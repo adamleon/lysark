@@ -9,7 +9,9 @@ import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 
-const htmlPath = resolve('dist-offline/lysark-offline.html')
+// same deck the offline build wrote (vite.config.ts DECK); default 'demo'
+const deck = process.env.LYSARK_DECK || 'demo'
+const htmlPath = resolve('dist-offline', `${deck}-offline.html`)
 if (!existsSync(htmlPath)) {
   console.error(`✗ ${htmlPath} not found — run 'npm run build:offline' first.`)
   process.exit(1)

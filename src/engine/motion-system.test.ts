@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { MotionSystem, SpringChannel, type Channel } from './motion-system'
+import { MotionSystem, PidChannel, SpringChannel, type Channel } from './motion-system'
+import { PID } from './pid'
 import { SpringDamper } from './spring-damper'
 
 class CountingChannel implements Channel {
@@ -46,5 +47,55 @@ describe('MotionSystem', () => {
     channel.target = 2 // new target un-settles on the next step
     motion.step(1 / 30)
     expect(motion.settled()).toBe(false)
+  })
+})
+
+describe('PidChannel kinematic playback', () => {
+  function make(x0 = 0) {
+    const applied: number[] = []
+    const ch = new PidChannel({
+      x0,
+      pid: new PID({ kp: 12, ki: 0, kd: 7 }),
+      min: -2,
+      max: 2,
+      apply: (x) => applied.push(x),
+    })
+    return { ch, applied }
+  }
+
+  it('replays the exact commanded position/velocity, bypassing PID', () => {
+    const { ch, applied } = make()
+    ch.playback = { x: 0.73, v: 1.4 }
+    ch.step(1 / 240)
+    expect(ch.x).toBeCloseTo(0.73)
+    expect(ch.v).toBeCloseTo(1.4)
+    expect(applied.at(-1)).toBeCloseTo(0.73) // joint mesh updated
+  })
+
+  it('clamps playback to the joint limits', () => {
+    const { ch } = make()
+    ch.playback = { x: 5, v: 0 }
+    ch.step(1 / 240)
+    expect(ch.x).toBe(2) // max
+  })
+
+  it('reports error 0 while playing (settle rests on velocity)', () => {
+    const { ch } = make()
+    ch.setpoint = 1.5 // stale setpoint must not register as error under playback
+    ch.playback = { x: 0.2, v: 0.9 }
+    ch.step(1 / 240)
+    expect(ch.error()).toBe(0)
+    expect(ch.velocity()).toBeCloseTo(0.9)
+  })
+
+  it('resumes PID control when playback is cleared', () => {
+    const { ch } = make()
+    ch.playback = { x: 1, v: 0 }
+    ch.step(1 / 240)
+    ch.playback = null
+    ch.setpoint = 1
+    for (let i = 0; i < 2400; i++) ch.step(1 / 240) // 10 s to settle
+    expect(ch.x).toBeCloseTo(1, 2)
+    expect(ch.error()).toBeCloseTo(0, 2)
   })
 })

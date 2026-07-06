@@ -182,6 +182,38 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* curve widget: analytic profile plot with a small colour legend */
+.curve-legend {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.curve-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.curve-legend-item i {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* live phase marker: a vertical line over the plot area, tracking the robot */
+.curve-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(243, 238, 231, 0.6);
+  pointer-events: none;
+}
+
 /* ------------------------------------------------ anchored overlay labels */
 
 .anchor-layer {
@@ -216,6 +248,51 @@ body {
 
 .anchor-label .katex {
   font-size: 1.05em;
+}
+
+/* live configuration vector: "q = [ … ]" pinned to a node (§4.2) */
+.anchor-vector {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 5px 11px;
+}
+
+.anchor-vector .cv-sym {
+  display: flex;
+  align-items: center;
+}
+
+.anchor-vector .cv-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 5px;
+}
+
+.anchor-vector .cv-val {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 3.7em;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+/* square brackets drawn as thin bordered rails that stretch to the column */
+.anchor-vector .cv-bracket {
+  width: 6px;
+  border: 2px solid rgba(var(--accent-rgb), 0.85);
+}
+
+.anchor-vector .cv-left {
+  border-right: none;
+  border-radius: 4px 0 0 4px;
+}
+
+.anchor-vector .cv-right {
+  border-left: none;
+  border-radius: 0 4px 4px 0;
 }
 
 /* ---------------------------------------------------- presenter niceties */
@@ -471,4 +548,112 @@ body {
   grid-column: 1 / -1;
   width: 100%;
   accent-color: var(--accent);
+}
+
+/* comparison-slide toggle: swap which overlaid robot is solid */
+.widget-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.widget-toggle-caption {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.widget-toggle-btn {
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.16);
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.widget-toggle-btn:hover {
+  background: rgba(var(--accent-rgb), 0.28);
+}
+
+/* transport: Run/Pause + normalized-time scrub */
+.widget-transport {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.transport-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.transport-btn {
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.16);
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.transport-btn:hover {
+  background: rgba(var(--accent-rgb), 0.28);
+}
+
+.transport-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.transport-readout {
+  align-self: flex-end;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* comparison plot: quantity tabs above two-profile curves */
+.compare-title {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.compare-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.compare-tab {
+  flex: 1;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.compare-tab:hover {
+  color: var(--text);
+}
+
+.compare-tab.active {
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.5);
 }

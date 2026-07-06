@@ -17,9 +17,12 @@ const SCALE = 2
 const MAX_SETTLE_MS = 4000 // §9c fallback: unstable-gain / idle slides never settle
 const REVEAL_MS = 550 // let the overlay fade-in + anchor reveal finish after settle
 const OUT_DIR = 'pdf-export'
-const OUT_FILE = resolve(OUT_DIR, 'lysark.pdf')
 
-const htmlPath = resolve('dist-offline/lysark-offline.html')
+// same deck the offline build wrote (vite.config.ts DECK); default 'demo'
+const deck = process.env.LYSARK_DECK || 'demo'
+const OUT_FILE = resolve(OUT_DIR, `${deck}.pdf`)
+
+const htmlPath = resolve('dist-offline', `${deck}-offline.html`)
 if (!existsSync(htmlPath)) {
   console.error(`✗ ${htmlPath} not found — run 'npm run build:offline' first.`)
   process.exit(1)

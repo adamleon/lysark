@@ -7,6 +7,13 @@ import { SceneLayer } from './scene/scene-layer'
 import { CameraController } from './scene/camera-controller'
 import { createSlider } from './overlay/widgets/slider'
 import { createPlot } from './overlay/widgets/plot'
+import { createCurve } from './overlay/widgets/curve'
+import { createToggle } from './overlay/widgets/toggle'
+import { createTransport } from './overlay/widgets/transport'
+import { createCompare } from './overlay/widgets/compare-curve'
+import { createJointGraph, type JointSeries } from './overlay/widgets/joints-graph'
+import { PROFILES, type TimeScaling } from './engine/time-scaling'
+import type { IkSolver } from './scene/ik'
 import { Overlay, type WidgetHandle } from './overlay/overlay'
 import { AnchorLayer } from './overlay/anchor-layer'
 import { Presenter } from './overlay/presenter'
@@ -15,8 +22,8 @@ import { SceneManager } from './engine/scene-manager'
 import { SlideEngine } from './engine/slide-engine'
 import { parseBinding, readField } from './engine/channel-binding'
 import type { SceneInstance } from './engine/scene-types'
-import type { CameraTargetSpec, CompiledSlide, WidgetSpec } from './engine/slide-types'
-import deck from './content/deck'
+import type { CameraTargetSpec, CompiledSlide, TrajectorySpec, WidgetSpec } from './engine/slide-types'
+import deck from '@active-deck'
 
 const sceneLayer = new SceneLayer(document.getElementById('scene-layer')!)
 const motion = new MotionSystem()
@@ -26,6 +33,98 @@ const sceneManager = new SceneManager(
   deck.scenes,
   document.getElementById('scene-layer')!,
 )
+
+// reference-path lines (PTP curve / Lin straight line) — geometry only, never
+// text (§4.2). Lives beside the scene root so it survives scene swaps; rebuilt
+// per slide by applyTraces.
+const traceGroup = new THREE.Group()
+traceGroup.name = 'trace-layer'
+sceneLayer.scene.add(traceGroup)
+
+function clearTraces(): void {
+  for (const child of traceGroup.children) {
+    const line = child as THREE.Line
+    line.geometry.dispose()
+    ;(line.material as THREE.Material).dispose()
+  }
+  traceGroup.clear()
+}
+
+function drawTrace(points: THREE.Vector3[], color: number): void {
+  const geometry = new THREE.BufferGeometry().setFromPoints(points)
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })
+  traceGroup.add(new THREE.Line(geometry, material))
+}
+
+/** draw the requested reference paths from the slide's q₀/q_f via the scene FK */
+function applyTraces(spec: TrajectorySpec, ik: IkSolver | null): void {
+  clearTraces()
+  if (!ik || spec.trace.length === 0) return
+  const names = Object.keys(spec.from)
+  if (spec.trace.includes('joint')) {
+    // PTP: FK of the joint-space straight line → a curve in task space
+    const pts: THREE.Vector3[] = []
+    for (let i = 0; i <= 48; i++) {
+      const s = i / 48
+      const q: Record<string, number> = {}
+      for (const n of names) q[n] = spec.from[n] + s * (spec.to[n] - spec.from[n])
+      pts.push(ik.fk(q))
+    }
+    drawTrace(pts, 0xf5c542) // cheese/gold curve
+  }
+  if (spec.trace.includes('task')) {
+    // Lin: the straight line between the two tool poses
+    drawTrace([ik.fk(spec.from), ik.fk(spec.to)], 0x3fc46a) // green straight line
+  }
+}
+
+const JOINT_MOVE_EPS = 0.05
+
+function jointLabel(name: string): string {
+  const m = /(\d+)$/.exec(name)
+  return m ? `q${m[1]}` : name
+}
+
+/** sample the joint-value curves q(s): PTP analytic (straight), Lin via IK (curved) */
+function computeJointSamples(
+  spec: TrajectorySpec,
+  ik: IkSolver | null,
+): { s: number[]; series: JointSeries[] } {
+  const names = Object.keys(spec.from)
+  const STEPS = 36
+  const sArr: number[] = []
+  const raw: Record<string, number[]> = {}
+  for (const n of names) raw[n] = []
+
+  if (spec.space === 'task' && ik) {
+    const xA = ik.fk(spec.from)
+    const xB = ik.fk(spec.to)
+    const live = ik.getJoints()
+    ik.setJoints(spec.from) // warm-start the sweep at q₀
+    for (let i = 0; i <= STEPS; i++) {
+      const s = i / STEPS
+      sArr.push(s)
+      const q = ik.solve(xA.clone().lerp(xB, s), { iterations: 20 })
+      for (const n of names) raw[n].push(q[n])
+    }
+    ik.setJoints(live) // leave the robot as we found it
+  } else {
+    for (let i = 0; i <= STEPS; i++) {
+      const s = i / STEPS
+      sArr.push(s)
+      for (const n of names) raw[n].push(spec.from[n] + s * (spec.to[n] - spec.from[n]))
+    }
+  }
+
+  // only the joints that actually move (drop the constant ones)
+  const series: JointSeries[] = []
+  for (const n of names) {
+    const vals = raw[n]
+    if (Math.max(...vals) - Math.min(...vals) < JOINT_MOVE_EPS) continue
+    series.push({ label: jointLabel(n), values: vals })
+  }
+  return { s: sArr, series }
+}
 
 const controls = new OrbitControls(sceneLayer.camera, sceneLayer.renderer.domElement)
 controls.target.set(0, 0.45, 0)
@@ -170,6 +269,82 @@ overlayHost.appendChild(anchorHost)
 const anchorLayer = new AnchorLayer(anchorHost)
 
 function createWidget(spec: WidgetSpec): WidgetHandle | null {
+  // curve plots an analytic profile — no channel binding, no active scene needed
+  if (spec.type === 'curve') {
+    return createCurve({
+      label: spec.label ?? `Tidsskalering – ${spec.profile}`,
+      profile: spec.profile,
+      show: spec.show,
+      phase: () => trajS,
+    })
+  }
+  // path: a manual slider for the shared path parameter s (scrubs q(s))
+  if (spec.type === 'path') {
+    return {
+      el: createSlider({
+        label: spec.label ?? 's',
+        min: 0,
+        max: 1,
+        step: 0.005,
+        value: trajS,
+        format: (v) => v.toFixed(2),
+        onInput: (v) => {
+          trajS = v
+          ensureTicking()
+        },
+      }).el,
+    }
+  }
+  // toggle: swap which overlaid robot is solid vs. ghost (comparison slide)
+  if (spec.type === 'toggle') {
+    return {
+      el: createToggle({
+        labels: spec.labels,
+        heading: spec.label,
+        onToggle: (solidIndex) => {
+          const active = sceneManager.active as unknown as { setSolid?: (i: number) => void } | null
+          active?.setSolid?.(solidIndex)
+          ensureTicking()
+        },
+      }).el,
+    }
+  }
+  // transport: Run/Pause + normalized-time scrub for a `control: time` slide
+  if (spec.type === 'transport') {
+    return createTransport({
+      label: spec.label,
+      isRunning: () => trajRunning,
+      setRunning: (running) => {
+        trajRunning = running
+        ensureTicking()
+      },
+      getTime: () => trajTime,
+      setTime: (u) => {
+        trajTime = Math.min(Math.max(u, 0), 1)
+        trajRunning = false // scrubbing pauses the loop
+        ensureTicking()
+      },
+    })
+  }
+  // compare: one quantity (pos/vel/acc) plotted for two profiles at once
+  if (spec.type === 'compare') {
+    return createCompare({
+      profiles: spec.profiles,
+      labels: spec.labels,
+      quantities: spec.quantities,
+      phase: () => trajTime,
+    })
+  }
+  // jointgraph: the driven joints' values vs s (PTP straight, Lin curved)
+  if (spec.type === 'jointgraph') {
+    if (!trajJointSamples || trajJointSamples.series.length === 0) return null
+    return createJointGraph({
+      label: spec.label ?? 'Leddverdier q(s)',
+      s: trajJointSamples.s,
+      series: trajJointSamples.series,
+      phase: () => trajS,
+    })
+  }
   const binding = sceneManager.active
   if (!binding) {
     console.warn(`widget bind: no active scene for '${spec.bind}'`)
@@ -261,6 +436,205 @@ function stepIdle(now: number): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Kinematic path playback (trajectory lecture): move the WHOLE robot from q₀ to
+// q_f along one shared path parameter s. Every listed joint replays q(s) =
+// from + s·(to − from) EXACTLY via PidChannel.playback (no PID lag), so the
+// robot's motion is the geometry/curve on screen. `auto` advances s = s(t) along
+// the profile (ping-pong + dwell); `slider` leaves s to the path widget. trajS
+// is the shared phase the curve widget's marker reads.
+interface TrajJoint {
+  ch: PidChannel
+  name: string
+  from: number
+  to: number
+}
+// a track = one profile driving one set of channels; a comparison slide runs two
+// (primary on `joint_*`, `compare` on `ghost_joint_*`) on the same clock
+interface TrajTrack {
+  prof: TimeScaling
+  joints: TrajJoint[]
+}
+let trajSpec: TrajectorySpec | null = null
+let trajTracks: TrajTrack[] = []
+let trajArmed = false // engaged only after PID has eased the robot(s) to q₀
+let trajArmStart = 0
+let trajT0 = 0
+let trajS = 0
+// `time` control (comparison slide): a normalized time u the transport drives
+let trajRunning = true
+let trajTime = 0
+let trajDir: 1 | -1 = 1
+let trajDwell = 0
+let trajLastNow = 0
+// task-space (Lin) driving: solve IK toward a point on the straight line each frame
+let trajIk: IkSolver | null = null
+const trajTaskA = new THREE.Vector3()
+const trajTaskB = new THREE.Vector3()
+// precomputed joint-value curves q(s) for the joint-space graph (PTP/Lin)
+let trajJointSamples: { s: number[]; series: JointSeries[] } | null = null
+
+function applyTrack(track: TrajTrack, s: number, sVel: number): void {
+  for (const j of track.joints) {
+    const span = j.to - j.from
+    j.ch.playback = { x: j.from + s * span, v: sVel * span }
+  }
+}
+
+function buildTrack(
+  spec: TrajectorySpec,
+  binding: SceneInstance,
+  profileName: 'cubic' | 'quintic' | 'trapezoidal',
+  chanKey: (joint: string) => string,
+): TrajTrack {
+  const joints: TrajJoint[] = []
+  for (const name of Object.keys(spec.from)) {
+    const ch = binding.channels[chanKey(name)]
+    if (!ch) {
+      console.warn(`trajectory: unknown channel '${chanKey(name)}'`)
+      continue
+    }
+    joints.push({ ch, name, from: spec.from[name], to: spec.to[name] })
+  }
+  return { prof: PROFILES[profileName], joints }
+}
+
+function applyTrajectory(slide: CompiledSlide, binding: SceneInstance | null): void {
+  // release whatever the previous slide was driving
+  for (const t of trajTracks) for (const j of t.joints) j.ch.playback = null
+  trajSpec = null
+  trajTracks = []
+  trajArmed = false
+  trajIk = null
+  trajJointSamples = null
+  clearTraces()
+  if (!slide.trajectory || !binding) return
+  const spec = slide.trajectory
+  const tracks: TrajTrack[] = [buildTrack(spec, binding, spec.profile, (n) => n)]
+  if (spec.compare) tracks.push(buildTrack(spec, binding, spec.compare, (n) => `ghost_${n}`))
+  trajSpec = spec
+  trajTracks = tracks
+  trajS = 0
+  trajRunning = true // `time` slides auto-play on entry; the transport can pause
+  trajTime = 0
+  trajDir = 1
+  trajDwell = 0
+
+  // task-space (Lin): precompute the straight tool line xA→xB (world) via FK;
+  // also used, with FK, to draw the reference paths
+  const ik = (binding as unknown as { ik?: IkSolver }).ik ?? null
+  if (spec.space === 'task') {
+    if (ik) {
+      trajIk = ik
+      trajTaskA.copy(ik.fk(spec.from))
+      trajTaskB.copy(ik.fk(spec.to))
+    } else {
+      console.warn(`trajectory space:task but scene '${sceneManager.activeSceneId}' exposes no ik`)
+    }
+  }
+  applyTraces(spec, ik)
+  trajJointSamples = computeJointSamples(spec, ik)
+
+  // ease to q₀ under PID first (no teleport between poses); kinematic playback
+  // engages only once the robot(s) have arrived (stepTrajectory arms it)
+  for (const t of trajTracks) for (const j of t.joints) j.ch.setpoint = j.from
+  trajArmStart = performance.now()
+  ensureTicking()
+}
+
+/** Lin/MoveL: place the tool at fraction s along the straight line, joints via IK */
+function applyTaskIk(s: number): void {
+  if (!trajIk) return
+  const target = trajTaskA.clone().lerp(trajTaskB, s)
+  const solution = trajIk.solve(target, { iterations: 15 })
+  for (const track of trajTracks) {
+    for (const j of track.joints) {
+      j.ch.playback = { x: solution[j.name] ?? j.from + s * (j.to - j.from), v: 0 }
+    }
+  }
+}
+
+/** ping-pong the normalized time u ∈ [0,1] with a dwell at each end (time mode) */
+function advanceTime(dt: number): void {
+  if (!trajSpec) return
+  if (trajDwell > 0) {
+    trajDwell -= dt
+    return
+  }
+  trajTime += (trajDir * dt) / trajSpec.duration
+  if (trajTime >= 1) {
+    trajTime = 1
+    trajDir = -1
+    trajDwell = trajSpec.dwell
+  } else if (trajTime <= 0) {
+    trajTime = 0
+    trajDir = 1
+    trajDwell = trajSpec.dwell
+  }
+}
+
+/** ping-pong s(t) for one profile: hold q₀, forward leg, hold q_f, reverse leg */
+function pingPong(prof: TimeScaling, c: number, duration: number, dwell: number): { s: number; v: number } {
+  if (c < dwell) return { s: 0, v: 0 }
+  if (c < dwell + duration) {
+    const smp = prof(c - dwell, duration)
+    return { s: smp.s, v: smp.v }
+  }
+  if (c < 2 * dwell + duration) return { s: 1, v: 0 }
+  const smp = prof(2 * (dwell + duration) - c, duration)
+  return { s: smp.s, v: -smp.v }
+}
+
+function stepTrajectory(now: number): void {
+  if (!trajSpec) return
+  if (!trajArmed) {
+    // hold PID control until the robot(s) reach q₀ (or a 3 s fallback), so
+    // entry is a smooth move, not a snap
+    const atStart = trajTracks.every((t) =>
+      t.joints.every((j) => Math.abs(j.ch.x - j.from) < 0.02 && Math.abs(j.ch.v) < 0.05),
+    )
+    if (!atStart && (now - trajArmStart) / 1000 < 3) return
+    trajArmed = true
+    trajT0 = now
+    trajLastNow = now
+  }
+  const taskMode = trajSpec.space === 'task' && trajIk !== null
+  if (trajSpec.control === 'slider') {
+    // manual scrub: hold at fraction trajS; the path widget sets trajS
+    if (taskMode) applyTaskIk(trajS)
+    else for (const t of trajTracks) applyTrack(t, trajS, 0)
+    return
+  }
+  if (trajSpec.control === 'time') {
+    // transport-driven: one normalized time u feeds every track through its own
+    // profile, so the two robots (and the graph marker) stay in lockstep
+    const dt = Math.min(Math.max((now - trajLastNow) / 1000, 0), 0.1)
+    trajLastNow = now
+    if (trajRunning) advanceTime(dt)
+    const tReal = trajTime * trajSpec.duration
+    if (taskMode) {
+      // Lin: one profile maps u→s, then the tool follows the straight line via IK
+      applyTaskIk(trajTracks[0].prof(tReal, trajSpec.duration).s)
+    } else {
+      for (const track of trajTracks) {
+        const smp = track.prof(tReal, trajSpec.duration)
+        applyTrack(track, smp.s, trajRunning ? smp.v * trajDir : 0)
+      }
+    }
+    return
+  }
+  // auto: each track maps the shared clock through its own profile, so the two
+  // robots diverge mid-move and meet at the ends
+  const { duration, dwell } = trajSpec
+  const cycle = 2 * (dwell + duration)
+  const c = ((now - trajT0) / 1000) % cycle
+  trajTracks.forEach((track, i) => {
+    const { s, v } = pingPong(track.prof, c, duration, dwell)
+    if (i === 0) trajS = s
+    applyTrack(track, s, v)
+  })
+}
+
 const engine = new SlideEngine({
   slides: deck.slides,
   scenes: sceneManager,
@@ -269,6 +643,7 @@ const engine = new SlideEngine({
   applyCamera: applyCameraSpec,
   applyAnchors,
   applyIdle,
+  applyTrajectory,
   onSceneChange: (binding) => rebuildDebugSceneSection(binding),
   onSlideChange: (index) => presenter.setSlide(index),
 })
@@ -438,6 +813,7 @@ document.getElementById('overlay-layer')!.appendChild(panel)
   overlay,
   presenter,
   stepIdle: (now: number) => stepIdle(now),
+  getTrajS: () => trajS,
   ensureTicking: () => ensureTicking(),
   isTicking: () => ticking,
 }
@@ -459,8 +835,10 @@ function ensureTicking(): void {
 }
 
 const tick = (now: number) => {
-  // idle sweeps setpoints BEFORE the integrator reads them this frame (§11)
+  // idle sweeps setpoints and trajectory playback sets joint state BEFORE the
+  // integrator reads them this frame (§11)
   stepIdle(now)
+  stepTrajectory(now)
   motion.step((now - last) / 1000)
   last = now
 

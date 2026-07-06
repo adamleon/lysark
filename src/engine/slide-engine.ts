@@ -19,6 +19,8 @@ export interface SlideEngineOptions {
   applyAnchors?(slide: CompiledSlide, binding: SceneInstance | null): void
   /** start/stop the destination slide's declarative idle oscillation (§11) */
   applyIdle?(slide: CompiledSlide, binding: SceneInstance | null): void
+  /** start/stop the destination slide's kinematic trajectory playback */
+  applyTrajectory?(slide: CompiledSlide, binding: SceneInstance | null): void
   /** fired for every destination slide (not just boundaries) — drives the
       presenter position indicator and overview highlight (§11) */
   onSlideChange?(index: number, slide: CompiledSlide): void
@@ -124,6 +126,7 @@ export class SlideEngine {
     // scene-less slide must clear whatever the previous scene slide left up
     this.opts.applyAnchors?.(slide, binding)
     this.opts.applyIdle?.(slide, binding)
+    this.opts.applyTrajectory?.(slide, binding)
     this.pendingShow = false
     this.opts.overlay.show(slide, this.visibleChunks, this.opts.overlayCtx)
     // this.index is the survivor's index here (goTo set it synchronously)

@@ -8,8 +8,12 @@ import type {
   CompiledSlide,
   IdleOsc,
   SlideTargets,
+  TrajectorySpec,
   WidgetSpec,
 } from '../engine/slide-types'
+
+const PROFILE_NAMES = ['cubic', 'quintic', 'trapezoidal']
+const CURVE_SERIES = ['s', 'v', 'a']
 
 /**
  * Build-time slide compiler (spec §8): markdown + YAML frontmatter →
@@ -218,13 +222,127 @@ function validateWidgets(raw: unknown, slideNo: number): WidgetSpec[] {
     if (!isMapping(entry)) {
       throw new Error(`slides: slide ${slideNo} each widget must be a mapping`)
     }
+    // these bind to no channel
+    if (entry.type === 'curve') return validateCurve(entry, slideNo)
+    if (entry.type === 'path') return validatePath(entry, slideNo)
+    if (entry.type === 'toggle') return validateToggle(entry, slideNo)
+    if (entry.type === 'transport') return validateTransport(entry, slideNo)
+    if (entry.type === 'compare') return validateCompare(entry, slideNo)
+    if (entry.type === 'jointgraph') return validateJointGraph(entry, slideNo)
     if (typeof entry.bind !== 'string' || entry.bind.length === 0) {
       throw new Error(`slides: widget on slide ${slideNo} is missing 'bind'`)
     }
     if (entry.type === 'slider') return validateSlider(entry, slideNo)
     if (entry.type === 'plot') return validatePlot(entry, slideNo)
-    throw new Error(`slides: unknown widget type '${String(entry.type)}' on slide ${slideNo} (M5 supports: slider, plot)`)
+    throw new Error(`slides: unknown widget type '${String(entry.type)}' on slide ${slideNo} (supports: slider, plot, curve, path, toggle, transport, compare)`)
   })
+}
+
+function validatePath(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'label'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} path widget has unknown key '${key}'`)
+    }
+  }
+  return { type: 'path', ...(w.label !== undefined ? { label: w.label as string } : {}) }
+}
+
+function validateToggle(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'labels', 'label'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} toggle widget has unknown key '${key}'`)
+    }
+  }
+  if (
+    !Array.isArray(w.labels) ||
+    w.labels.length !== 2 ||
+    !w.labels.every((l) => typeof l === 'string' && l.length > 0)
+  ) {
+    throw new Error(`slides: slide ${slideNo} toggle 'labels' must be a list of exactly two names`)
+  }
+  return {
+    type: 'toggle',
+    labels: w.labels as [string, string],
+    ...(w.label !== undefined ? { label: w.label as string } : {}),
+  }
+}
+
+function validateTransport(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'label'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} transport widget has unknown key '${key}'`)
+    }
+  }
+  return { type: 'transport', ...(w.label !== undefined ? { label: w.label as string } : {}) }
+}
+
+function validateJointGraph(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'label'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} jointgraph widget has unknown key '${key}'`)
+    }
+  }
+  return { type: 'jointgraph', ...(w.label !== undefined ? { label: w.label as string } : {}) }
+}
+
+function validateCompare(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'profiles', 'labels', 'quantities', 'label'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} compare widget has unknown key '${key}'`)
+    }
+  }
+  if (
+    !Array.isArray(w.profiles) ||
+    w.profiles.length !== 2 ||
+    !w.profiles.every((p) => typeof p === 'string' && PROFILE_NAMES.includes(p))
+  ) {
+    throw new Error(`slides: slide ${slideNo} compare 'profiles' must be two of ${PROFILE_NAMES.join(', ')}`)
+  }
+  if (
+    !Array.isArray(w.labels) ||
+    w.labels.length !== 2 ||
+    !w.labels.every((l) => typeof l === 'string' && l.length > 0)
+  ) {
+    throw new Error(`slides: slide ${slideNo} compare 'labels' must be two names`)
+  }
+  let quantities = ['s', 'v', 'a']
+  if (w.quantities !== undefined) {
+    if (!Array.isArray(w.quantities) || w.quantities.length === 0 || !w.quantities.every((q) => CURVE_SERIES.includes(q as string))) {
+      throw new Error(`slides: slide ${slideNo} compare 'quantities' must be a non-empty list of ${CURVE_SERIES.join(', ')}`)
+    }
+    quantities = w.quantities as string[]
+  }
+  return {
+    type: 'compare',
+    profiles: w.profiles as ['cubic' | 'quintic' | 'trapezoidal', 'cubic' | 'quintic' | 'trapezoidal'],
+    labels: w.labels as [string, string],
+    quantities: quantities as ('s' | 'v' | 'a')[],
+    ...(w.label !== undefined ? { label: w.label as string } : {}),
+  }
+}
+
+function validateCurve(w: Record<string, unknown>, slideNo: number): WidgetSpec {
+  for (const key of Object.keys(w)) {
+    if (!['type', 'profile', 'show', 'label'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} curve widget has unknown key '${key}'`)
+    }
+  }
+  if (typeof w.profile !== 'string' || !PROFILE_NAMES.includes(w.profile)) {
+    throw new Error(`slides: slide ${slideNo} curve profile must be one of ${PROFILE_NAMES.join(', ')}`)
+  }
+  let show = ['s', 'v', 'a']
+  if (w.show !== undefined) {
+    if (!Array.isArray(w.show) || w.show.length === 0 || !w.show.every((s) => CURVE_SERIES.includes(s as string))) {
+      throw new Error(`slides: slide ${slideNo} curve 'show' must be a non-empty list of ${CURVE_SERIES.join(', ')}`)
+    }
+    show = w.show as string[]
+  }
+  return {
+    type: 'curve',
+    profile: w.profile as 'cubic' | 'quintic' | 'trapezoidal',
+    show: show as ('s' | 'v' | 'a')[],
+    ...(w.label !== undefined ? { label: w.label as string } : {}),
+  }
 }
 
 function validateSlider(w: Record<string, unknown>, slideNo: number): WidgetSpec {
@@ -278,20 +396,17 @@ function validatePlot(w: Record<string, unknown>, slideNo: number): WidgetSpec {
 function validateAnchored(raw: unknown, slideNo: number): AnchoredSpec[] {
   if (raw === undefined) return []
   if (!Array.isArray(raw)) throw new Error(`slides: slide ${slideNo} 'anchored' must be a list`)
-  return (raw as unknown[]).map((entry) => {
+  return (raw as unknown[]).map((entry): AnchoredSpec => {
     if (!isMapping(entry)) {
       throw new Error(`slides: slide ${slideNo} each anchored element must be a mapping`)
     }
     for (const key of Object.keys(entry)) {
-      if (!['anchor', 'offset', 'content'].includes(key)) {
+      if (!['anchor', 'offset', 'content', 'vector'].includes(key)) {
         throw new Error(`slides: slide ${slideNo} anchored element has unknown key '${key}'`)
       }
     }
     if (typeof entry.anchor !== 'string' || entry.anchor.length === 0) {
       throw new Error(`slides: slide ${slideNo} anchored element needs an 'anchor' node name`)
-    }
-    if (typeof entry.content !== 'string' || entry.content.length === 0) {
-      throw new Error(`slides: slide ${slideNo} anchored element '${entry.anchor}' needs 'content'`)
     }
     let offset: [number, number] = [0, 0]
     if (entry.offset !== undefined) {
@@ -300,8 +415,54 @@ function validateAnchored(raw: unknown, slideNo: number): AnchoredSpec[] {
       }
       offset = entry.offset
     }
-    return { anchor: entry.anchor, offset, html: renderChunk(entry.content, false) }
+    if ((entry.content !== undefined) === (entry.vector !== undefined)) {
+      throw new Error(
+        `slides: slide ${slideNo} anchored element '${entry.anchor}' must declare exactly one of 'content' or 'vector'`,
+      )
+    }
+    if (entry.content !== undefined) {
+      if (typeof entry.content !== 'string' || entry.content.length === 0) {
+        throw new Error(`slides: slide ${slideNo} anchored element '${entry.anchor}' needs 'content'`)
+      }
+      return { kind: 'label', anchor: entry.anchor, offset, html: renderChunk(entry.content, false) }
+    }
+    return { ...validateAnchoredVector(entry.vector, entry.anchor, slideNo), anchor: entry.anchor, offset }
   })
+}
+
+function validateAnchoredVector(
+  raw: unknown,
+  anchor: string,
+  slideNo: number,
+): { kind: 'vector'; symbolHtml: string; channels: string[]; digits: number } {
+  if (!isMapping(raw)) {
+    throw new Error(`slides: slide ${slideNo} anchored '${anchor}' vector must be a mapping`)
+  }
+  for (const key of Object.keys(raw)) {
+    if (!['symbol', 'joints', 'digits'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} anchored '${anchor}' vector has unknown key '${key}'`)
+    }
+  }
+  const symbol = raw.symbol === undefined ? 'q' : raw.symbol
+  if (typeof symbol !== 'string' || symbol.length === 0) {
+    throw new Error(`slides: slide ${slideNo} anchored '${anchor}' vector symbol must be a non-empty string`)
+  }
+  if (
+    !Array.isArray(raw.joints) ||
+    raw.joints.length === 0 ||
+    !raw.joints.every((j) => typeof j === 'string' && j.length > 0)
+  ) {
+    throw new Error(`slides: slide ${slideNo} anchored '${anchor}' vector needs a non-empty 'joints' list of channel names`)
+  }
+  let digits = 2
+  if (raw.digits !== undefined) {
+    if (!isFiniteNumber(raw.digits) || raw.digits < 0 || !Number.isInteger(raw.digits)) {
+      throw new Error(`slides: slide ${slideNo} anchored '${anchor}' vector digits must be a non-negative integer`)
+    }
+    digits = raw.digits
+  }
+  // `$symbol =$` gives the leading term the same KaTeX typography as body math
+  return { kind: 'vector', symbolHtml: renderChunk(`$${symbol} =$`, false), channels: raw.joints as string[], digits }
 }
 
 function validateIdle(raw: unknown, slideNo: number): Record<string, IdleOsc> | undefined {
@@ -339,6 +500,110 @@ function validateIdle(raw: unknown, slideNo: number): Record<string, IdleOsc> | 
     }
   }
   return Object.keys(out).length > 0 ? out : undefined
+}
+
+function validatePose(raw: unknown, slideNo: number, which: string): Record<string, number> {
+  if (!isMapping(raw)) {
+    throw new Error(`slides: slide ${slideNo} trajectory '${which}' must be a mapping of joint → number`)
+  }
+  const keys = Object.keys(raw)
+  if (keys.length === 0) {
+    throw new Error(`slides: slide ${slideNo} trajectory '${which}' needs at least one joint`)
+  }
+  for (const [name, value] of Object.entries(raw)) {
+    if (!isFiniteNumber(value)) {
+      throw new Error(`slides: slide ${slideNo} trajectory ${which}.${name} must be a finite number`)
+    }
+  }
+  return raw as Record<string, number>
+}
+
+function validateTrajectory(raw: unknown, slideNo: number): TrajectorySpec | undefined {
+  if (raw === undefined) return undefined
+  if (!isMapping(raw)) {
+    throw new Error(`slides: slide ${slideNo} 'trajectory' must be a mapping`)
+  }
+  for (const key of Object.keys(raw)) {
+    if (!['from', 'to', 'control', 'profile', 'compare', 'space', 'trace', 'duration', 'dwell'].includes(key)) {
+      throw new Error(`slides: slide ${slideNo} trajectory has unknown key '${key}'`)
+    }
+  }
+  const from = validatePose(raw.from, slideNo, 'from')
+  const to = validatePose(raw.to, slideNo, 'to')
+  // every q₀ joint must have a q_f value and vice versa — a partial pose is a typo
+  for (const name of Object.keys(from)) {
+    if (!(name in to)) throw new Error(`slides: slide ${slideNo} trajectory joint '${name}' is in 'from' but not 'to'`)
+  }
+  for (const name of Object.keys(to)) {
+    if (!(name in from)) throw new Error(`slides: slide ${slideNo} trajectory joint '${name}' is in 'to' but not 'from'`)
+  }
+
+  const control = raw.control === undefined ? 'auto' : raw.control
+  if (control !== 'auto' && control !== 'slider' && control !== 'time') {
+    throw new Error(`slides: slide ${slideNo} trajectory control must be 'auto', 'slider' or 'time'`)
+  }
+
+  // profile/duration matter when time drives s (auto/time); defaulted for slider
+  let profile = 'cubic'
+  if (raw.profile !== undefined) {
+    if (typeof raw.profile !== 'string' || !PROFILE_NAMES.includes(raw.profile)) {
+      throw new Error(`slides: slide ${slideNo} trajectory profile must be one of ${PROFILE_NAMES.join(', ')}`)
+    }
+    profile = raw.profile
+  } else if (control !== 'slider') {
+    throw new Error(`slides: slide ${slideNo} ${control} trajectory needs a 'profile'`)
+  }
+
+  let duration = 1
+  if (raw.duration !== undefined) {
+    if (!isFiniteNumber(raw.duration) || raw.duration <= 0) {
+      throw new Error(`slides: slide ${slideNo} trajectory 'duration' must be a positive number of seconds`)
+    }
+    duration = raw.duration
+  } else if (control !== 'slider') {
+    throw new Error(`slides: slide ${slideNo} ${control} trajectory needs a 'duration'`)
+  }
+
+  let dwell = 0.5
+  if (raw.dwell !== undefined) {
+    if (!isFiniteNumber(raw.dwell) || raw.dwell < 0) {
+      throw new Error(`slides: slide ${slideNo} trajectory 'dwell' must be a non-negative number`)
+    }
+    dwell = raw.dwell
+  }
+
+  let compare: string | undefined
+  if (raw.compare !== undefined) {
+    if (typeof raw.compare !== 'string' || !PROFILE_NAMES.includes(raw.compare)) {
+      throw new Error(`slides: slide ${slideNo} trajectory compare must be one of ${PROFILE_NAMES.join(', ')}`)
+    }
+    compare = raw.compare
+  }
+
+  const space = raw.space === undefined ? 'joint' : raw.space
+  if (space !== 'joint' && space !== 'task') {
+    throw new Error(`slides: slide ${slideNo} trajectory space must be 'joint' or 'task'`)
+  }
+
+  let trace: ('joint' | 'task')[] = []
+  if (raw.trace !== undefined) {
+    if (!Array.isArray(raw.trace) || !raw.trace.every((t) => t === 'joint' || t === 'task')) {
+      throw new Error(`slides: slide ${slideNo} trajectory trace must be a list of 'joint' and/or 'task'`)
+    }
+    trace = raw.trace as ('joint' | 'task')[]
+  }
+
+  return {
+    from,
+    to,
+    control,
+    space,
+    trace,
+    profile: profile as 'cubic' | 'quintic' | 'trapezoidal',
+    ...(compare ? { compare: compare as 'cubic' | 'quintic' | 'trapezoidal' } : {}),
+    duration,
+    dwell,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,6 +646,7 @@ export function compileSlides(source: string): CompiledSlide[] {
     let effective: SlideTargets = {}
     let anchored: AnchoredSpec[] = []
     let idle: Record<string, IdleOsc> | undefined
+    let trajectory: TrajectorySpec | undefined
     if (scene === undefined) {
       // scene-less slides carry overlay content only (spec §3)
       if (
@@ -388,9 +654,10 @@ export function compileSlides(source: string): CompiledSlide[] {
         frontmatter.camera !== undefined ||
         widgets.length > 0 ||
         frontmatter.anchored !== undefined ||
-        frontmatter.idle !== undefined
+        frontmatter.idle !== undefined ||
+        frontmatter.trajectory !== undefined
       ) {
-        throw new Error(`slides: scene-less slide ${slideNo} cannot declare joints, camera, widgets, anchored, or idle (spec §3)`)
+        throw new Error(`slides: scene-less slide ${slideNo} cannot declare joints, camera, widgets, anchored, idle, or trajectory (spec §3)`)
       }
     } else {
       Object.assign(joints, validateJoints(frontmatter.joints, slideNo))
@@ -399,6 +666,7 @@ export function compileSlides(source: string): CompiledSlide[] {
       if (camera) effective.camera = structuredClone(camera)
       anchored = validateAnchored(frontmatter.anchored, slideNo)
       idle = validateIdle(frontmatter.idle, slideNo)
+      trajectory = validateTrajectory(frontmatter.trajectory, slideNo)
     }
 
     const fragments = splitFragments(body)
@@ -415,6 +683,7 @@ export function compileSlides(source: string): CompiledSlide[] {
       widgets,
       anchored,
       ...(idle ? { idle } : {}),
+      ...(trajectory ? { trajectory } : {}),
       fragments: fragments.length > 0 ? fragments : [''],
     })
   })

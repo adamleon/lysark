@@ -194,11 +194,14 @@ describe('compileSlides — anchored overlays (M5, spec §4.2)', () => {
       '---\nscene: arm\nanchored:\n  - anchor: end_effector\n    content: "$x_e$"\n---\nBody'
     const [slide] = compileSlides(src)
     expect(slide.anchored).toHaveLength(1)
-    expect(slide.anchored[0].anchor).toBe('end_effector')
-    expect(slide.anchored[0].offset).toEqual([0, 0])
-    expect(slide.anchored[0].html).toContain('katex')
+    const a = slide.anchored[0]
+    expect(a.anchor).toBe('end_effector')
+    expect(a.offset).toEqual([0, 0])
+    expect(a.kind).toBe('label')
+    if (a.kind !== 'label') throw new Error('expected a label')
+    expect(a.html).toContain('katex')
     // inline render: no wrapping <p>
-    expect(slide.anchored[0].html).not.toContain('<p>')
+    expect(a.html).not.toContain('<p>')
   })
 
   it('carries an explicit pixel offset', () => {
@@ -208,16 +211,55 @@ describe('compileSlides — anchored overlays (M5, spec §4.2)', () => {
     expect(slide.anchored[0].offset).toEqual([24, -12])
   })
 
-  it('rejects a missing anchor name, missing content, and bad offset', () => {
+  it('rejects a missing anchor name, neither content nor vector, and bad offset', () => {
     expect(() =>
       compileSlides('---\nscene: arm\nanchored:\n  - content: "x"\n---\nx'),
     ).toThrow(/needs an 'anchor'/)
     expect(() =>
       compileSlides('---\nscene: arm\nanchored:\n  - anchor: base\n---\nx'),
-    ).toThrow(/needs 'content'/)
+    ).toThrow(/exactly one of 'content' or 'vector'/)
     expect(() =>
       compileSlides('---\nscene: arm\nanchored:\n  - anchor: base\n    offset: [1]\n    content: "x"\n---\nx'),
     ).toThrow(/offset must be \[dx, dy\]/)
+  })
+
+  it('rejects declaring both content and vector on one element', () => {
+    expect(() =>
+      compileSlides(
+        '---\nscene: arm\nanchored:\n  - anchor: base\n    content: "x"\n    vector: { joints: [j1] }\n---\nx',
+      ),
+    ).toThrow(/exactly one of 'content' or 'vector'/)
+  })
+
+  it('compiles a live configuration vector: symbol, channels, digits', () => {
+    const src =
+      '---\nscene: arm\nanchored:\n  - anchor: end_effector\n    vector:\n      symbol: q\n      joints: [joint1, joint2, joint3]\n      digits: 3\n---\nBody'
+    const [slide] = compileSlides(src)
+    const a = slide.anchored[0]
+    expect(a.kind).toBe('vector')
+    if (a.kind !== 'vector') throw new Error('expected a vector')
+    expect(a.channels).toEqual(['joint1', 'joint2', 'joint3'])
+    expect(a.digits).toBe(3)
+    expect(a.symbolHtml).toContain('katex')
+  })
+
+  it('defaults the vector symbol to q and digits to 2', () => {
+    const src =
+      '---\nscene: arm\nanchored:\n  - anchor: end_effector\n    vector: { joints: [joint1] }\n---\nBody'
+    const [slide] = compileSlides(src)
+    const a = slide.anchored[0]
+    if (a.kind !== 'vector') throw new Error('expected a vector')
+    expect(a.digits).toBe(2)
+    expect(a.channels).toEqual(['joint1'])
+  })
+
+  it('rejects a vector with an empty joints list or bad digits', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nanchored:\n  - anchor: base\n    vector: { joints: [] }\n---\nx'),
+    ).toThrow(/non-empty 'joints' list/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nanchored:\n  - anchor: base\n    vector: { joints: [j1], digits: -1 }\n---\nx'),
+    ).toThrow(/digits must be a non-negative integer/)
   })
 
   it('defaults anchored to an empty list when absent', () => {
@@ -282,5 +324,147 @@ describe('compileSlides — scene-less guard covers M5 keys', () => {
     expect(() =>
       compileSlides('---\nwidgets:\n  - type: plot\n    bind: j1\n---\nz'),
     ).toThrow(/scene-less/)
+    expect(() =>
+      compileSlides('---\ntrajectory:\n  bind: j1\n  from: 0\n  to: 1\n  duration: 1\n  profile: cubic\n---\nz'),
+    ).toThrow(/scene-less/)
+  })
+})
+
+describe('compileSlides — trajectory playback + curve widget', () => {
+  it('compiles an auto trajectory over multiple joints, defaulting control and dwell', () => {
+    const src =
+      '---\nscene: arm\ntrajectory:\n  profile: cubic\n  duration: 1.2\n  from: { j1: -0.9, j2: 0.1 }\n  to: { j1: 0.9, j2: 0.3 }\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.trajectory).toEqual({
+      from: { j1: -0.9, j2: 0.1 },
+      to: { j1: 0.9, j2: 0.3 },
+      control: 'auto',
+      space: 'joint',
+      trace: [],
+      profile: 'cubic',
+      duration: 1.2,
+      dwell: 0.5,
+    })
+  })
+
+  it('compiles a task-space (Lin) trajectory with trace paths', () => {
+    const src =
+      '---\nscene: arm\ntrajectory:\n  control: slider\n  space: task\n  trace: [joint, task]\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.trajectory?.space).toBe('task')
+    expect(slide.trajectory?.trace).toEqual(['joint', 'task'])
+  })
+
+  it('rejects a bad space or trace entry', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  space: cartesian\n  profile: cubic\n  duration: 1\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nx'),
+    ).toThrow(/space must be/)
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  trace: [joint, elbow]\n  profile: cubic\n  duration: 1\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nx'),
+    ).toThrow(/trace must be/)
+  })
+
+  it('compiles a slider trajectory without a profile or duration', () => {
+    const src =
+      '---\nscene: arm\ntrajectory:\n  control: slider\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.trajectory?.control).toBe('slider')
+    expect(slide.trajectory?.from).toEqual({ j1: 0 })
+  })
+
+  it('rejects auto trajectory missing profile, mismatched poses, and bad control', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nx'),
+    ).toThrow(/needs a 'profile'/)
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  control: slider\n  from: { j1: 0, j2: 0 }\n  to: { j1: 1 }\n---\nx'),
+    ).toThrow(/in 'from' but not 'to'/)
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  control: manual\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nx'),
+    ).toThrow(/control must be/)
+  })
+
+  it('compiles a path widget with no bind', () => {
+    const src = '---\nscene: arm\nwidgets:\n  - type: path\n    label: s\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.widgets[0]).toEqual({ type: 'path', label: 's' })
+  })
+
+  it('compiles a compare profile for the two-robot slide', () => {
+    const src =
+      '---\nscene: arm\ntrajectory:\n  profile: cubic\n  compare: quintic\n  duration: 1.4\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.trajectory?.profile).toBe('cubic')
+    expect(slide.trajectory?.compare).toBe('quintic')
+  })
+
+  it('rejects an unknown compare profile', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  profile: cubic\n  compare: sine\n  duration: 1\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nx'),
+    ).toThrow(/compare must be one of/)
+  })
+
+  it('compiles a toggle widget with two labels', () => {
+    const src = '---\nscene: arm\nwidgets:\n  - type: toggle\n    labels: [a, b]\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.widgets[0]).toEqual({ type: 'toggle', labels: ['a', 'b'] })
+  })
+
+  it('rejects a toggle without exactly two labels', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: toggle\n    labels: [only]\n---\nx'),
+    ).toThrow(/exactly two names/)
+  })
+
+  it('compiles a time-controlled trajectory (transport-driven)', () => {
+    const src =
+      '---\nscene: arm\ntrajectory:\n  control: time\n  profile: cubic\n  compare: quintic\n  duration: 1.4\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.trajectory?.control).toBe('time')
+    expect(slide.trajectory?.compare).toBe('quintic')
+  })
+
+  it('rejects a time trajectory missing profile/duration', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  control: time\n  from: { j1: 0 }\n  to: { j1: 1 }\n---\nx'),
+    ).toThrow(/time trajectory needs a 'profile'/)
+  })
+
+  it('compiles a transport widget', () => {
+    const [slide] = compileSlides('---\nscene: arm\nwidgets:\n  - type: transport\n    label: Tid\n---\nBody')
+    expect(slide.widgets[0]).toEqual({ type: 'transport', label: 'Tid' })
+  })
+
+  it('compiles a compare widget, defaulting quantities to s, v, a', () => {
+    const src =
+      '---\nscene: arm\nwidgets:\n  - type: compare\n    profiles: [cubic, quintic]\n    labels: [a, b]\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.widgets[0]).toMatchObject({
+      type: 'compare',
+      profiles: ['cubic', 'quintic'],
+      labels: ['a', 'b'],
+      quantities: ['s', 'v', 'a'],
+    })
+  })
+
+  it('rejects a compare widget with a bad profile', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: compare\n    profiles: [cubic, sine]\n    labels: [a, b]\n---\nx'),
+    ).toThrow(/compare 'profiles' must be two of/)
+  })
+
+  it('compiles a curve widget with no bind, defaulting show to s, v, a', () => {
+    const src = '---\nscene: arm\nwidgets:\n  - type: curve\n    profile: quintic\n---\nBody'
+    const [slide] = compileSlides(src)
+    expect(slide.widgets[0]).toMatchObject({ type: 'curve', profile: 'quintic', show: ['s', 'v', 'a'] })
+  })
+
+  it('rejects a curve widget with a bad profile or bad show entry', () => {
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: curve\n    profile: nope\n---\nx'),
+    ).toThrow(/curve profile must be one of/)
+    expect(() =>
+      compileSlides('---\nscene: arm\nwidgets:\n  - type: curve\n    profile: cubic\n    show: [s, jerk]\n---\nx'),
+    ).toThrow(/curve 'show'/)
   })
 })

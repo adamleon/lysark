@@ -31,6 +31,14 @@ export class PidChannel implements Channel {
   readonly min: number
   readonly max: number
   private readonly apply?: (x: number) => void
+  /**
+   * Kinematic playback override (trajectory-planning lecture): when set, the
+   * channel replays this exact position/velocity each step instead of running
+   * the PID loop, so a time-scaling profile s(t) drives the joint EXACTLY — the
+   * plotted acceleration IS the robot's acceleration, no controller lag to blur
+   * the "geometrisk vs. fysisk glatt" distinction. Null resumes PID control.
+   */
+  playback: { x: number; v: number } | null = null
 
   constructor({ x0, pid, min = -Infinity, max = Infinity, apply }: PidChannelOptions) {
     this.x = x0
@@ -42,6 +50,13 @@ export class PidChannel implements Channel {
   }
 
   step(dt: number): void {
+    if (this.playback) {
+      // clamp to the real joint stops; the profile author works in joint space
+      this.x = Math.min(Math.max(this.playback.x, this.min), this.max)
+      this.v = this.playback.v
+      this.apply?.(this.x)
+      return
+    }
     const a = this.pid.step(this.x, this.setpoint, dt)
     this.v += a * dt
     this.x += this.v * dt
@@ -60,6 +75,9 @@ export class PidChannel implements Channel {
   }
 
   error(): number {
+    // during playback there is no setpoint to chase; report 0 so settle
+    // detection rests on velocity() alone (moving profile ⇒ not settled)
+    if (this.playback) return 0
     return this.setpoint - this.x
   }
 

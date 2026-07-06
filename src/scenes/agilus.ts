@@ -13,6 +13,7 @@ import link6Dae from '../assets/agilus/link_6.dae?raw'
 import { PID } from '../engine/pid'
 import { PidChannel } from '../engine/motion-system'
 import type { GainDefaults, SceneInstance, SceneModule } from '../engine/scene-types'
+import { createIkSolver, type IkSolver } from '../scene/ik'
 import { buildStage, disposeSceneGraph } from './stage'
 
 // visual meshes are Collada XML text (imported ?raw), keyed by basename so the
@@ -48,7 +49,14 @@ type MeshCb = (
   onComplete: (mesh: THREE.Object3D | null, err?: Error) => void,
 ) => void
 
-function build(): SceneInstance {
+export type AgilusRobot = ReturnType<URDFLoader['parse']>
+
+/**
+ * Parse one KUKA agilus from the embedded URDF + Collada meshes (no fetch —
+ * file://-safe, spec §9b), Y-up, with creased normals + shadows. Shared by the
+ * single-robot `agilus` scene and the two-robot `agilus-duo` comparison scene.
+ */
+export function parseAgilusRobot(): AgilusRobot {
   const loader = new URDFLoader()
   // parse() + custom loadMeshCb — never load(), which fetches (dies under file://)
   ;(loader as unknown as { loadMeshCb: MeshCb }).loadMeshCb = (path, manager, _material, onComplete) => {
@@ -86,6 +94,11 @@ function build(): SceneInstance {
       mesh.geometry = toCreasedNormals(mesh.geometry, THREE.MathUtils.degToRad(40))
     }
   })
+  return robot
+}
+
+function build(): SceneInstance & { ik: IkSolver } {
+  const robot = parseAgilusRobot()
 
   // a raised, reaching pose so the arm clearly rises off the base (not folded
   // forward, which reads flat against the dark ground)
@@ -104,7 +117,10 @@ function build(): SceneInstance {
   const channels: Record<string, PidChannel> = {}
   const defaultGains: Record<string, GainDefaults> = {}
   for (const name of jointNames) {
-    defaultGains[name] = { kp: 12, ki: 0, kd: 2.5 }
+    // critically damped by default (ζ ≈ 1 on a unit-inertia joint: kd ≈ 2√kp):
+    // a robot at rest shouldn't wobble. Slides that want to teach overshoot
+    // (the demo's agilus-joint) still do so with explicit per-widget gain overrides.
+    defaultGains[name] = { kp: 12, ki: 0, kd: 7 }
     const joint = robot.joints[name]
     channels[name] = new PidChannel({
       x0: Number(joint.angle),
@@ -123,6 +139,8 @@ function build(): SceneInstance {
       tool0: robot.links['tool0'],
     },
     channels,
+    // exposed for the Lin/MoveL slide: task-space straight-line IK on tool0
+    ik: createIkSolver(robot, jointNames, 'tool0'),
     defaults: {
       joints: { joint_2: -1.25, joint_3: 0.9, joint_5: 0.9 },
       camera: { lookAt: [0.2, 0.55, 0], offset: [1.7, 0.35, 2.3] },
