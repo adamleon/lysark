@@ -26,7 +26,7 @@ export function buildStage(): THREE.Group {
   key.shadow.normalBias = 0.02
   stage.add(hemi, key)
 
-  const grid = new THREE.GridHelper(5, 25, 0x3a4048, 0x272c33)
+  const grid = new THREE.GridHelper(5, 25, 0x3a3640, 0x26232b)
   stage.add(grid)
 
   // shadow catcher just below the grid to avoid z-fighting

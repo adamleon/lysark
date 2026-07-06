@@ -12,7 +12,7 @@ export interface TransitionResult {
 
 const SNAPSHOT_FADE_MS = 350
 const CANVAS_FADE_MS = 280
-const DEFAULT_BACKGROUND = 0x14161a
+const DEFAULT_BACKGROUND = 0x17161b
 
 /**
  * Owns the scene lifecycle (spec §4.1): at most one scene's GPU resources

@@ -20,7 +20,7 @@ function build(): SceneInstance {
 
   const graphite = new THREE.MeshStandardMaterial({ color: 0x383c44, roughness: 0.6 })
   const steel = new THREE.MeshStandardMaterial({ color: 0xb2b6bc, roughness: 0.35, metalness: 0.4 })
-  const signal = new THREE.MeshStandardMaterial({ color: 0xf28020, roughness: 0.45 })
+  const signal = new THREE.MeshStandardMaterial({ color: 0xf5c542, roughness: 0.45 })
 
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.08, 48), graphite)
   base.position.y = 0.04
@@ -59,7 +59,7 @@ function build(): SceneInstance {
 
   return {
     root,
-    background: 0x191521,
+    background: 0x17161b,
     anchors: { pivot, bob },
     channels,
     defaults: {

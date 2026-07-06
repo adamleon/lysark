@@ -20,7 +20,7 @@ export class SceneLayer {
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color(0x14161a)
+    this.scene.background = new THREE.Color(0x17161b)
 
     this.camera = new THREE.PerspectiveCamera(
       45,

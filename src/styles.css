@@ -1,6 +1,23 @@
 :root {
   color-scheme: dark;
   font-family: system-ui, -apple-system, sans-serif;
+
+  /* --- theme tokens (one place to tune the whole deck) --- */
+  --bg: #17161b; /* page + 3D scene ground: dark, non-black, faint warm-neutral */
+  --bg-rgb: 23, 22, 27;
+  --surface-rgb: 34, 31, 39; /* panels/cards (#221f27) — used via rgba() */
+  --surface-hi: #2c2833; /* raised controls: buttons, kbd */
+  --surface-hi2: #363040; /* hover */
+  --text: #f3eee7; /* primary text: warm cream ("white") */
+  --text-dim: #9e97a1; /* secondary text */
+  --accent: #ff3b3b; /* PRIMARY accent: bright red — headings, chrome, robot */
+  --accent-rgb: 255, 59, 59;
+  --cheese: #f5c542; /* secondary warm accent + the "moving" state */
+  --cheese-rgb: 245, 197, 66;
+  --good: #33e17c; /* success / settled / stable */
+  --good-rgb: 51, 225, 124;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-soft: rgba(255, 255, 255, 0.14);
 }
 
 html,
@@ -8,8 +25,8 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #14161a;
-  color: #e8eaed;
+  background: var(--bg);
+  color: var(--text);
 }
 
 #scene-layer,
@@ -74,20 +91,29 @@ body {
   font-size: 52px;
   font-weight: 700;
   letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .slide-content h2 {
   margin: 0 0 14px;
   font-size: 30px;
   font-weight: 650;
-  color: #f0a24a;
+  color: var(--accent);
 }
 
 .slide-content p,
 .slide-content li {
   font-size: 19px;
   line-height: 1.5;
-  color: #d7dade;
+  color: var(--text);
+}
+
+/* emphasis carries the green accent through body content — pairs with the red
+   headings so the deck reads red + green, not red-only */
+.slide-content strong,
+.slide-content b {
+  color: var(--good);
+  font-weight: 650;
 }
 
 .slide-content ul {
@@ -120,7 +146,7 @@ body {
 .slide-content figcaption {
   margin-top: 6px;
   font-size: 14px;
-  color: #9aa0a6;
+  color: var(--text-dim);
 }
 
 .fragment {
@@ -139,8 +165,8 @@ body {
   margin-top: 18px;
   padding: 12px 14px;
   max-width: 320px;
-  background: rgba(22, 25, 30, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(var(--surface-rgb), 0.88);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
@@ -152,7 +178,7 @@ body {
 .slide-plot .u-title {
   font-size: 12px;
   font-weight: 600;
-  color: #9aa0a6;
+  color: var(--text-dim);
   letter-spacing: 0.02em;
 }
 
@@ -173,9 +199,9 @@ body {
   font-size: 15px;
   line-height: 1.2;
   white-space: nowrap;
-  color: #e8eaed;
-  background: rgba(20, 22, 27, 0.72);
-  border: 1px solid rgba(240, 162, 74, 0.55);
+  color: var(--text);
+  background: rgba(var(--bg-rgb), 0.75);
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
   border-radius: 7px;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
   /* fade-in choreography: hidden until the scene settles (§5) */
@@ -200,7 +226,7 @@ body {
   left: 0;
   height: 3px;
   width: 0;
-  background: #f0a24a;
+  background: var(--good);
   transition: width 260ms ease;
   pointer-events: none;
   z-index: 5;
@@ -213,9 +239,9 @@ body {
   padding: 3px 10px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: #9aa0a6;
-  background: rgba(22, 25, 30, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  background: rgba(var(--surface-rgb), 0.7);
+  border: 1px solid var(--border);
   border-radius: 999px;
   pointer-events: none;
 }
@@ -236,7 +262,7 @@ body {
   inset: 0;
   padding: 48px;
   overflow-y: auto;
-  background: rgba(12, 13, 16, 0.86);
+  background: rgba(var(--bg-rgb), 0.88);
   backdrop-filter: blur(4px);
 }
 
@@ -256,25 +282,25 @@ body {
   padding: 14px 16px;
   text-align: left;
   font: inherit;
-  color: #d7dade;
-  background: rgba(30, 34, 40, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: var(--text);
+  background: rgba(var(--surface-rgb), 0.92);
+  border: 1px solid var(--border);
   border-radius: 10px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, transform 0.1s;
 }
 
 .overview-card:hover {
-  background: rgba(40, 45, 52, 0.95);
+  background: var(--surface-hi);
 }
 
 .overview-card.selected {
-  border-color: #f0a24a;
+  border-color: var(--accent);
   transform: translateY(-1px);
 }
 
 .overview-card.current {
-  outline: 2px solid rgba(240, 162, 74, 0.4);
+  outline: 2px solid rgba(var(--accent-rgb), 0.45);
   outline-offset: -2px;
 }
 
@@ -284,7 +310,7 @@ body {
   font-size: 22px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: #f0a24a;
+  color: var(--good);
 }
 
 .overview-title {
@@ -298,13 +324,14 @@ body {
   padding: 1px 8px;
   font-size: 11px;
   letter-spacing: 0.03em;
-  color: #9aa0a6;
+  color: var(--text-dim);
   background: rgba(255, 255, 255, 0.06);
   border-radius: 999px;
 }
 
 .overview-badge.sceneless {
-  color: #7f8791;
+  color: var(--text-dim);
+  opacity: 0.8;
 }
 
 .help-card {
@@ -314,8 +341,8 @@ body {
   transform: translate(-50%, -50%);
   min-width: 340px;
   padding: 20px 24px;
-  background: rgba(22, 25, 30, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--surface-rgb), 0.96);
+  border: 1px solid var(--border-soft);
   border-radius: 12px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
 }
@@ -324,7 +351,7 @@ body {
   margin: 0 0 14px;
   font-size: 15px;
   font-weight: 650;
-  color: #f0a24a;
+  color: var(--accent);
 }
 
 .help-row {
@@ -334,7 +361,7 @@ body {
   align-items: baseline;
   margin-bottom: 8px;
   font-size: 14px;
-  color: #d7dade;
+  color: var(--text);
 }
 
 .help-row kbd {
@@ -342,9 +369,9 @@ body {
   padding: 2px 7px;
   font: inherit;
   font-size: 12px;
-  color: #e8eaed;
-  background: #2a2f36;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  background: var(--surface-hi);
+  border: 1px solid var(--border-soft);
   border-bottom-width: 2px;
   border-radius: 5px;
 }
@@ -360,8 +387,8 @@ body {
   right: 16px;
   width: 280px;
   padding: 14px 16px;
-  background: rgba(22, 25, 30, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(var(--surface-rgb), 0.9);
+  border: 1px solid var(--border);
   border-radius: 10px;
   backdrop-filter: blur(6px);
 }
@@ -372,7 +399,7 @@ body {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #9aa0a6;
+  color: var(--text-dim);
 }
 
 .panel h2:not(:first-child) {
@@ -390,15 +417,15 @@ body {
   padding: 7px 10px;
   font: inherit;
   font-size: 13px;
-  color: #e8eaed;
-  background: #2a2f36;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  background: var(--surface-hi);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   cursor: pointer;
 }
 
 .button-row button:hover {
-  background: #343a43;
+  background: var(--surface-hi2);
 }
 
 .badge {
@@ -407,19 +434,20 @@ body {
   font-size: 12px;
   text-align: center;
   border-radius: 999px;
-  background: rgba(240, 162, 74, 0.15);
-  color: #f0a24a;
+  /* default = "moving": the secondary warm accent (cheese) */
+  background: rgba(var(--cheese-rgb), 0.16);
+  color: var(--cheese);
   transition: background 0.2s, color 0.2s;
 }
 
 .badge.settled {
-  background: rgba(87, 171, 90, 0.15);
-  color: #7fc982;
+  background: rgba(var(--good-rgb), 0.16);
+  color: var(--good);
 }
 
 .badge.unstable {
-  background: rgba(214, 92, 92, 0.18);
-  color: #e58a8a;
+  background: rgba(var(--accent-rgb), 0.2);
+  color: #ff6b6b;
 }
 
 .widget-slider {
@@ -431,16 +459,16 @@ body {
 }
 
 .widget-slider label {
-  color: #c6c9ce;
+  color: var(--text-dim);
 }
 
 .widget-slider output {
   font-variant-numeric: tabular-nums;
-  color: #f0a24a;
+  color: var(--accent);
 }
 
 .widget-slider input[type='range'] {
   grid-column: 1 / -1;
   width: 100%;
-  accent-color: #f0a24a;
+  accent-color: var(--accent);
 }

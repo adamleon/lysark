@@ -21,7 +21,7 @@
     <visual>
       <origin xyz="0 0 0.055"/>
       <geometry><cylinder radius="0.09" length="0.11"/></geometry>
-      <material name="signal"><color rgba="0.95 0.50 0.12 1"/></material>
+      <material name="signal"><color rgba="0.961 0.773 0.259 1"/></material>
     </visual>
   </link>
 
@@ -42,7 +42,7 @@
     <visual>
       <origin xyz="0 0 0.32" rpy="1.5708 0 0"/>
       <geometry><cylinder radius="0.06" length="0.13"/></geometry>
-      <material name="signal2"><color rgba="0.95 0.50 0.12 1"/></material>
+      <material name="signal2"><color rgba="0.961 0.773 0.259 1"/></material>
     </visual>
   </link>
 
@@ -71,7 +71,7 @@
   <link name="end_effector">
     <visual>
       <geometry><sphere radius="0.045"/></geometry>
-      <material name="signal3"><color rgba="0.95 0.50 0.12 1"/></material>
+      <material name="signal3"><color rgba="0.961 0.773 0.259 1"/></material>
     </visual>
   </link>
 </robot>
