@@ -3,6 +3,8 @@
  * produces these lives in src/compiler and runs only at build time.
  */
 
+import type { ProfileName } from './time-scaling'
+
 export interface CameraTargetSpec {
   /** anchor name from the scene module, or an explicit point */
   lookAt?: string | [number, number, number]
@@ -47,7 +49,7 @@ export interface PlotWidgetSpec {
 export interface CurveWidgetSpec {
   type: 'curve'
   /** which time-scaling to plot */
-  profile: 'cubic' | 'quintic' | 'trapezoidal'
+  profile: ProfileName
   /** which curves to draw: position s, velocity ṡ, acceleration s̈ (default all) */
   show: ('s' | 'v' | 'a')[]
   label?: string
@@ -94,7 +96,7 @@ export interface TransportWidgetSpec {
 export interface CompareWidgetSpec {
   type: 'compare'
   /** the two profiles to overlay */
-  profiles: ['cubic' | 'quintic' | 'trapezoidal', 'cubic' | 'quintic' | 'trapezoidal']
+  profiles: [ProfileName, ProfileName]
   /** legend names for the two profiles */
   labels: [string, string]
   /** selectable quantities (default all three) */
@@ -157,13 +159,13 @@ export interface TrajectorySpec {
    * 'task' = the straight Lin line. Both are computed from the scene's FK.
    */
   trace: ('joint' | 'task')[]
-  profile: 'cubic' | 'quintic' | 'trapezoidal'
+  profile: ProfileName
   /**
    * Second profile run simultaneously on a parallel "ghost" robot (agilus-duo
    * comparison slide). Drives channels `ghost_<joint>` on the same clock, so the
    * two robots share q₀/q_f but differ in timing. Undefined = single robot.
    */
-  compare?: 'cubic' | 'quintic' | 'trapezoidal'
+  compare?: ProfileName
   /** seconds for one q₀→q_f leg (auto mode) */
   duration: number
   /** seconds held at each end before reversing (auto mode) */

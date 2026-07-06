@@ -12,7 +12,7 @@ import { createToggle } from './overlay/widgets/toggle'
 import { createTransport } from './overlay/widgets/transport'
 import { createCompare } from './overlay/widgets/compare-curve'
 import { createJointGraph, type JointSeries } from './overlay/widgets/joints-graph'
-import { PROFILES, type TimeScaling } from './engine/time-scaling'
+import { PROFILES, type ProfileName, type TimeScaling } from './engine/time-scaling'
 import type { IkSolver } from './scene/ik'
 import { Overlay, type WidgetHandle } from './overlay/overlay'
 import { AnchorLayer } from './overlay/anchor-layer'
@@ -484,7 +484,7 @@ function applyTrack(track: TrajTrack, s: number, sVel: number): void {
 function buildTrack(
   spec: TrajectorySpec,
   binding: SceneInstance,
-  profileName: 'cubic' | 'quintic' | 'trapezoidal',
+  profileName: ProfileName,
   chanKey: (joint: string) => string,
 ): TrajTrack {
   const joints: TrajJoint[] = []
@@ -678,6 +678,28 @@ window.addEventListener('keydown', (e) => {
   } else if (e.key === 't') {
     logTuning()
   }
+})
+
+// Touch navigation for phones/tablets (no keyboard): a tap in the left third goes
+// back, a tap anywhere else advances. Gated to touch pointers so mouse use keeps
+// the keyboard-only flow, and a MOVED touch is left to OrbitControls — so
+// touch-drag still orbits the camera while a clean tap navigates. Interactive UI
+// (widgets, debug panel, presenter modals) is excluded so its controls stay tappable.
+const NAV_IGNORE = 'input, textarea, select, button, [contenteditable], .slide-widgets, .panel, .overview, .help-card'
+let tapX = 0
+let tapY = 0
+let tapNav = false
+window.addEventListener('pointerdown', (e) => {
+  tapNav = e.pointerType === 'touch' && !(e.target instanceof HTMLElement && e.target.closest(NAV_IGNORE))
+  tapX = e.clientX
+  tapY = e.clientY
+})
+window.addEventListener('pointerup', (e) => {
+  if (!tapNav || e.pointerType !== 'touch') return
+  // a drag (> ~10px) is an orbit gesture, not a tap — leave it to the camera
+  if (Math.abs(e.clientX - tapX) > 10 || Math.abs(e.clientY - tapY) > 10) return
+  if (e.clientX < window.innerWidth * 0.3) engine.prev()
+  else engine.next()
 })
 
 // per-slide motion tuning aid (§11): dump the live camera spring + PID gains as

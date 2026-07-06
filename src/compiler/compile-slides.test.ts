@@ -115,8 +115,23 @@ describe('compileSlides — scene runs (spec §3/§4.3)', () => {
     expect(gripper.effective.camera).toBeUndefined()
   })
 
-  it('errors on non-contiguous reuse of a scene id', () => {
+  it('errors when a different scene interleaves two runs of a scene id', () => {
     const src = '---\nscene: arm\n---\na\n---\nscene: gripper\n---\nb\n---\nscene: arm\n---\nc'
+    expect(() => compileSlides(src)).toThrow(/non-contiguously/)
+  })
+
+  it('allows a scene to resume after a scene-less gap (suspend/restore, §4.1)', () => {
+    // arm → scene-less → arm: the runtime suspends the arm and restores it; the
+    // pptx-style theory interlude between robot slides relies on exactly this
+    const src = '---\nscene: arm\n---\na\n---\nlayout: center\n---\ntheory\n---\nscene: arm\n---\nc'
+    const slides = compileSlides(src)
+    expect(slides.map((s) => s.scene)).toEqual(['arm', undefined, 'arm'])
+  })
+
+  it('still seals a scene once a different scene runs, even across a scene-less gap', () => {
+    // arm → gripper → scene-less → arm: arm was sealed by gripper, so it can't return
+    const src =
+      '---\nscene: arm\n---\na\n---\nscene: gripper\n---\nb\n---\nlayout: center\n---\nt\n---\nscene: arm\n---\nd'
     expect(() => compileSlides(src)).toThrow(/non-contiguously/)
   })
 

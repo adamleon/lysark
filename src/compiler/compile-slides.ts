@@ -2,6 +2,7 @@ import MarkdownIt from 'markdown-it'
 import katex from 'katex'
 import { parse as parseYaml } from 'yaml'
 import { mergeCameraSpec } from '../engine/camera-merge'
+import { PROFILES, type ProfileName } from '../engine/time-scaling'
 import type {
   AnchoredSpec,
   CameraTargetSpec,
@@ -12,7 +13,8 @@ import type {
   WidgetSpec,
 } from '../engine/slide-types'
 
-const PROFILE_NAMES = ['cubic', 'quintic', 'trapezoidal']
+// single source of truth for valid profile names: the engine's profile registry
+const PROFILE_NAMES = Object.keys(PROFILES)
 const CURVE_SERIES = ['s', 'v', 'a']
 
 /**
@@ -314,7 +316,7 @@ function validateCompare(w: Record<string, unknown>, slideNo: number): WidgetSpe
   }
   return {
     type: 'compare',
-    profiles: w.profiles as ['cubic' | 'quintic' | 'trapezoidal', 'cubic' | 'quintic' | 'trapezoidal'],
+    profiles: w.profiles as [ProfileName, ProfileName],
     labels: w.labels as [string, string],
     quantities: quantities as ('s' | 'v' | 'a')[],
     ...(w.label !== undefined ? { label: w.label as string } : {}),
@@ -339,7 +341,7 @@ function validateCurve(w: Record<string, unknown>, slideNo: number): WidgetSpec 
   }
   return {
     type: 'curve',
-    profile: w.profile as 'cubic' | 'quintic' | 'trapezoidal',
+    profile: w.profile as ProfileName,
     show: show as ('s' | 'v' | 'a')[],
     ...(w.label !== undefined ? { label: w.label as string } : {}),
   }
@@ -599,8 +601,8 @@ function validateTrajectory(raw: unknown, slideNo: number): TrajectorySpec | und
     control,
     space,
     trace,
-    profile: profile as 'cubic' | 'quintic' | 'trapezoidal',
-    ...(compare ? { compare: compare as 'cubic' | 'quintic' | 'trapezoidal' } : {}),
+    profile: profile as ProfileName,
+    ...(compare ? { compare: compare as ProfileName } : {}),
     duration,
     dwell,
   }
@@ -611,7 +613,14 @@ function validateTrajectory(raw: unknown, slideNo: number): TrajectorySpec | und
 export function compileSlides(source: string): CompiledSlide[] {
   const raw = splitSlides(source)
   const out: CompiledSlide[] = []
-  const seenScenes = new Set<string>()
+  // A scene may span more than one run as long as only scene-less slides sit
+  // between the runs — the runtime suspends the scene on the way out and restores
+  // its serialized state on re-entry (§4.1). What stays forbidden is interleaving
+  // two DIFFERENT scenes: once another scene has run, the previous one is "sealed"
+  // and may not reappear (§3), since that would demand two scenes' state be juggled
+  // across the gap rather than one scene's suspend/restore.
+  const sealedScenes = new Set<string>()
+  let lastRealScene: string | undefined
   let currentScene: string | undefined
   let inDeck = false
   let joints: Record<string, number> = {}
@@ -630,10 +639,14 @@ export function compileSlides(source: string): CompiledSlide[] {
     if (!inDeck || scene !== currentScene) {
       // scene-run boundary (§3): targets never leak across it (§4.3, §4.1)
       if (scene !== undefined) {
-        if (seenScenes.has(scene)) {
-          throw new Error(`slides: scene '${scene}' reused non-contiguously at slide ${slideNo} — a scene spans one contiguous range (spec §3)`)
+        if (sealedScenes.has(scene)) {
+          throw new Error(`slides: scene '${scene}' reused non-contiguously at slide ${slideNo} — another scene ran since its last slide; a scene's runs may only be separated by scene-less slides (spec §3, §4.1)`)
         }
-        seenScenes.add(scene)
+        // a different real scene starting here seals whichever real scene ran last
+        if (lastRealScene !== undefined && lastRealScene !== scene) {
+          sealedScenes.add(lastRealScene)
+        }
+        lastRealScene = scene
       }
       joints = {}
       camera = undefined

@@ -11,6 +11,9 @@
  *                 impulse at start/stop. "Geometrisk glatt, men ikke fysisk glatt."
  *   trapezoidal — constant-acceleration ramps + a cruise phase. s̈ is piecewise
  *                 constant (discontinuous), simplest to implement on real drives.
+ *   s-curve     — seven bounded-jerk phases: the acceleration itself ramps up and
+ *                 down (a trapezoid), so a(0)=a(T)=0 AND the jerk stays finite.
+ *                 "Fysisk glatt, men med begrenset rykk."
  *   quintic     — ṡ AND s̈ both rest at the ends (a(0)=a(T)=0) → smooth jerk. The
  *                 smoothness win the whole lecture builds toward.
  *
@@ -103,11 +106,79 @@ export function trapezoidal(accelFraction = 0.25): TimeScaling {
   }
 }
 
+/**
+ * S-curve (double-S) time scaling: seven phases of piecewise-constant jerk, so the
+ * acceleration is itself a trapezoid — it ramps up from zero, holds, ramps back to
+ * zero for the accel half, then mirrors for the decel half. Because a(0)=a(T)=0 AND
+ * the jerk is finite everywhere (never impulsive), it is *physically* smooth like the
+ * quintic, but built the bounded-jerk way real motion controllers implement it —
+ * "fysisk glatt, men med begrenset rykk".
+ *
+ * Phases as fractions of the total time T (symmetric):
+ *   1  jerk +J   a: 0 → +A            (fj)
+ *   2  jerk  0   a: +A (const accel)  (fa)
+ *   3  jerk −J   a: +A → 0, ṡ = ṡ_max (fj)
+ *   4  jerk  0   a: 0  (cruise)       (fv)
+ *   5  jerk −J   a: 0 → −A            (fj)
+ *   6  jerk  0   a: −A (const decel)  (fa)
+ *   7  jerk +J   a: −A → 0            (fj)
+ * with 4·fj + 2·fa + fv = 1. `jerkFraction` = fj, `accelFraction` = fa, the cruise
+ * fills the remainder. The unit-jerk shape is integrated analytically once and scaled
+ * by k = 1/s_shape(1) so s(0)=0, s(T)=1; ṡ, s̈, ⃛s then divide by T, T², T³.
+ */
+export function sCurve(jerkFraction = 0.1, accelFraction = 0.1): TimeScaling {
+  const fj = Math.min(Math.max(jerkFraction, 1e-3), 0.25)
+  const fa = Math.min(Math.max(accelFraction, 0), 0.5 - 2 * fj)
+  const fv = 1 - 4 * fj - 2 * fa
+  // [duration in τ, unit-jerk sign] for the seven phases
+  const phases: Array<[number, number]> = [
+    [fj, 1],
+    [fa, 0],
+    [fj, -1],
+    [fv, 0],
+    [fj, -1],
+    [fa, 0],
+    [fj, 1],
+  ]
+  // precompute the state (a, v, p) at the start of each phase for the unit-jerk shape
+  interface Seg { t0: number; d: number; j: number; a0: number; v0: number; p0: number }
+  const segs: Seg[] = []
+  let t0 = 0
+  let a0 = 0
+  let v0 = 0
+  let p0 = 0
+  for (const [d, j] of phases) {
+    segs.push({ t0, d, j, a0, v0, p0 })
+    p0 += v0 * d + 0.5 * a0 * d * d + (j * d * d * d) / 6
+    v0 += a0 * d + 0.5 * j * d * d
+    a0 += j * d
+    t0 += d
+  }
+  const k = p0 > 0 ? 1 / p0 : 1 // p0 is now s_shape(1); normalize to land on 1
+  return (t, T) => {
+    if (T <= 0) return stepAt(t)
+    const tau = clamp01(t / T)
+    let seg = segs[segs.length - 1] // τ = 1 belongs to the final phase
+    for (const s of segs) {
+      if (tau >= s.t0 && tau <= s.t0 + s.d) {
+        seg = s
+        break
+      }
+    }
+    const l = tau - seg.t0
+    const a = seg.a0 + seg.j * l
+    const v = seg.v0 + seg.a0 * l + 0.5 * seg.j * l * l
+    const p = seg.p0 + seg.v0 * l + 0.5 * seg.a0 * l * l + (seg.j * l * l * l) / 6
+    return { s: k * p, v: (k * v) / T, a: (k * a) / (T * T), j: (k * seg.j) / (T * T * T) }
+  }
+}
+
 /** the profiles addressable by name from slide frontmatter (trajectory + curve widget) */
-export type ProfileName = 'cubic' | 'quintic' | 'trapezoidal'
+export type ProfileName = 'cubic' | 'quintic' | 'trapezoidal' | 'scurve'
 
 export const PROFILES: Record<ProfileName, TimeScaling> = {
   cubic,
   quintic,
   trapezoidal: trapezoidal(),
+  scurve: sCurve(),
 }
