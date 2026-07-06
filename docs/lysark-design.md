@@ -355,7 +355,9 @@ interactivity is lost by design.
   /scene         scene-layer.ts, camera-controller.ts, robot.ts (urdf), channels.ts
   /scenes        one module per scene (arm.ts, gripper.ts, …)
   /overlay       overlay.ts, anchor-projection.ts, katex-render.ts, widgets/ (slider, toggle, plot, video)
-  /content       deck.ts (manifest), slides.md (+ assets)
+  /content       one folder per deck: <deck>/deck.ts (manifest) + <deck>/slides.md (+ assets).
+                 The `@active-deck` alias resolves LYSARK_DECK (default 'demo') to one deck's
+                 manifest as a single static import — only that deck's code/assets bundle (§9b).
   /assets        models (glb/urdf), textures, video   (base64-inlined in singlefile mode)
 /scripts         export-pdf.mjs (playwright), encode-assets.mjs (base64)
 vite.config.ts   (base:'./', singlefile mode, slides.md compile plugin; no wasm plugins —
