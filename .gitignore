@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-offline/
+public/
 *.local
 pdf-export/
 # raw KUKA Agilus ROS package (37 MB, all variants); only the one variant we use
