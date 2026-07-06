@@ -58,6 +58,7 @@ export function createCurve(opts: CurveOptions): CurveHandle {
   el.appendChild(legend)
 
   const host = document.createElement('div')
+  host.className = 'plot-host'
   el.appendChild(host)
 
   // precompute the normalized curves once, over τ ∈ [0,1] at T = 1
@@ -93,10 +94,13 @@ export function createCurve(opts: CurveOptions): CurveHandle {
   const init = (): void => {
     const width = host.clientWidth || el.clientWidth
     if (width === 0) return // not laid out yet
+    // in the `graph` layout CSS gives the host a tall flex height; elsewhere it
+    // has none, so fall back to the compact default
+    const height = host.clientHeight || HEIGHT
     plot = new uPlot(
       {
         width,
-        height: HEIGHT,
+        height,
         title: opts.label,
         cursor: { show: false },
         legend: { show: false },

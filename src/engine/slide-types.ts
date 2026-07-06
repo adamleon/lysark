@@ -226,7 +226,9 @@ export interface CompiledSlide {
       used by the presenter overview (§11) — never rendered as markup */
   title: string
   scene?: string
-  layout: 'panel' | 'center'
+  /** panel: text bottom-left over the scene. center: title layout. graph: text +
+      a large plot fill the left ~55 %, leaving the scene framed to the right. */
+  layout: 'panel' | 'center' | 'graph'
   /**
    * Cumulative declared targets within this slide's contiguous scene run
    * (spec §4.3): per-key inheritance from earlier slides in the same range,

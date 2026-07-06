@@ -273,9 +273,10 @@ $$s(t) = 3\left(\tfrac{t}{T}\right)^2 - 2\left(\tfrac{t}{T}\right)^3$$
 ---
 id: kubisk
 scene: agilus
+layout: graph
 camera:
-  lookAt: [0, 0.55, 0]
-  offset: [0.6, 1.5, 3.4]
+  lookAt: [-1.1, 0.55, 0]
+  offset: [0.6, 1.5, 3.2]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
   profile: cubic
@@ -291,23 +292,20 @@ widgets:
 ---
 ## Tredjeordens polynom – geometrisk glatt
 
-Nå kjører **hele roboten** ruten $\mathbf{q}(s(t))$ fra $q_0$ til $q_f$ med den
-kubiske tidsskaleringen. Farten $\dot{s}$ hviler i null ved start og mål – men
-akselerasjonen gjør det ikke:
+Farten $\dot{s}$ hviler i null i endene, men akselerasjonen **hopper**:
 
 $$\ddot{s}(0) = \frac{6}{T^2}, \qquad \ddot{s}(T) = -\frac{6}{T^2}$$
 
-<!-- pause -->
-Akselerasjonen **hopper** fra null idet roboten setter av gårde. Det gir et
-uendelig **rykk** ($\dddot{s} \to \infty$) i endepunktene: *geometrisk* glatt,
+Uendelig **rykk** ($\dddot{s} \to \infty$) i endepunktene – *geometrisk* glatt,
 men ikke *fysisk* glatt. Roboten rykker i gang og stopper brått.
 
 ---
 id: trapes
 scene: agilus
+layout: graph
 camera:
-  lookAt: [0, 0.55, 0]
-  offset: [0.6, 1.5, 3.4]
+  lookAt: [-1.1, 0.55, 0]
+  offset: [0.6, 1.5, 3.2]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
   profile: trapezoidal
@@ -323,22 +321,20 @@ widgets:
 ---
 ## Trapes – enklest å implementere
 
-En **trapesprofil** holder farten konstant i midten, med konstant akselerasjon
-på ramper opp og ned. Tre faser:
+Konstant fart i midten, konstant akselerasjon på ramper opp og ned:
 
 $$\ddot{s}(t) = \begin{cases} +a & 0 \le t \le t_a \\ 0 & t_a \le t \le T - t_a \\ -a & T - t_a \le t \le T \end{cases}$$
 
-<!-- pause -->
-Akselerasjonen er **stykkevis konstant** og hopper mellom $+a$, $0$ og $-a$ ved
-faseskiftene. Enkel å kjøre på virkelige motorer, men hoppene gir fortsatt
-rykk – ikke fysisk glatt, bare billig og forutsigbar.
+**Stykkevis konstant** akselerasjon – hoppene gir fortsatt rykk. Enkel og billig,
+men ikke fysisk glatt.
 
 ---
 id: s-kurve
 scene: agilus
+layout: graph
 camera:
-  lookAt: [0, 0.55, 0]
-  offset: [0.6, 1.5, 3.4]
+  lookAt: [-1.1, 0.55, 0]
+  offset: [0.6, 1.5, 3.2]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
   profile: scurve
@@ -354,22 +350,19 @@ widgets:
 ---
 ## S-kurve – begrenset rykk
 
-S-kurven mykner opp trapesen: i stedet for å slå akselerasjonen på momentant,
-lar vi den **rampe opp og ned** med begrenset rykk. Akselerasjonen blir selv en
-trapes, satt sammen av sju faser.
+Akselerasjonen **ramper opp og ned** i stedet for å slås på momentant – den blir
+selv en trapes, satt sammen av sju faser.
 
-<!-- pause -->
-Nå hviler både farten *og* akselerasjonen i null i endene,
-$\dot{s}(0) = \ddot{s}(0) = 0$, mens rykket $\dddot{s}$ holder seg **endelig**
-overalt – aldri den kubiske impulsen. Fysisk glatt, med begrenset rykk – slik
-virkelige bevegelsesregulatorer gjør det.
+Både $\dot{s}$ og $\ddot{s}$ hviler i null i endene, og rykket $\dddot{s}$ er
+**endelig** overalt. Fysisk glatt, med begrenset rykk.
 
 ---
 id: femteordens
 scene: agilus
+layout: graph
 camera:
-  lookAt: [0, 0.55, 0]
-  offset: [0.6, 1.5, 3.4]
+  lookAt: [-1.1, 0.55, 0]
+  offset: [0.6, 1.5, 3.2]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
   profile: quintic
@@ -385,26 +378,20 @@ widgets:
 ---
 ## Femteordens polynom – fysisk glatt
 
-Krever vi at også **akselerasjonen** hviler i null i endene (seks
-randbetingelser: $s, \dot{s}, \ddot{s}$ ved begge ender), trengs et
-**femteordens** polynom:
-
-$$s(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5$$
-
-<!-- pause -->
-De seks betingelsene gir den lukkede formen
+Med **akselerasjonen** også hvilende i null i endene (seks randbetingelser) blir
+tidsskaleringen et femteordens polynom:
 
 $$s(t) = 10\left(\tfrac{t}{T}\right)^3 - 15\left(\tfrac{t}{T}\right)^4 + 6\left(\tfrac{t}{T}\right)^5$$
 
-Nå glir hele roboten mykt i gang og til ro: $\ddot{s} = 0$ i begge ender gir
-kontinuerlig, jevnt rykk. *Fysisk* glatt.
+$\ddot{s} = 0$ i begge ender gir kontinuerlig, jevnt rykk. *Fysisk* glatt.
 
 ---
 id: sammenligning
 scene: agilus-duo
+layout: graph
 camera:
-  lookAt: [0, 0.55, 0]
-  offset: [0.6, 1.5, 3.4]
+  lookAt: [-1.1, 0.55, 0]
+  offset: [0.6, 1.5, 3.2]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
   control: time
@@ -427,10 +414,6 @@ widgets:
 ---
 ## Kubisk vs. femteordens – samtidig
 
-Samme bane, samme tid, kjørt av **to roboter oppå hverandre**: den hvite med
-kubisk, den **grønne** med femteordens tidsskalering.
-
-<!-- pause -->
-De starter og stopper likt, men **skiller lag underveis** – den kubiske rykker
-fra, den femteordens glir mykt. Forskjellen er tydeligst i akselerasjonen:
-kubisk spretter fra $6/T^2$ til null i endene, femteordens hviler i null.
+**To roboter oppå hverandre**: hvit med kubisk, **grønn** med femteordens. De
+starter og stopper likt, men **skiller lag underveis** – tydeligst i
+akselerasjonen: kubisk spretter fra $6/T^2$ til null, femteordens hviler i null.

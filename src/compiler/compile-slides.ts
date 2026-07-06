@@ -691,7 +691,10 @@ export function compileSlides(source: string): CompiledSlide[] {
       id,
       title: extractTitle(body, id),
       scene,
-      layout: frontmatter.layout === 'center' ? 'center' : 'panel',
+      layout:
+        frontmatter.layout === 'center' || frontmatter.layout === 'graph'
+          ? frontmatter.layout
+          : 'panel',
       effective,
       widgets,
       anchored,

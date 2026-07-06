@@ -58,6 +58,7 @@ export function createJointGraph(opts: JointGraphOptions): JointGraphHandle {
   el.appendChild(legend)
 
   const host = document.createElement('div')
+  host.className = 'plot-host'
   el.appendChild(host)
 
   const data: number[][] = [opts.s, ...opts.series.map((serie) => serie.values)]
@@ -73,10 +74,11 @@ export function createJointGraph(opts: JointGraphOptions): JointGraphHandle {
   const init = (): void => {
     const width = host.clientWidth || el.clientWidth
     if (width === 0) return
+    const height = host.clientHeight || HEIGHT
     plot = new uPlot(
       {
         width,
-        height: HEIGHT,
+        height,
         cursor: { show: false },
         legend: { show: false },
         scales: { x: { time: false, range: [0, 1] } },

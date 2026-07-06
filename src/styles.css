@@ -86,6 +86,46 @@ body {
   max-width: 760px;
 }
 
+/* graph-hero layout: heading + a large plot fill the left column; the scene is
+   framed to the right (per-slide camera) so the robot sits beside the plot, not
+   behind it. Used by the trajectory-profile slides where the plot is the point. */
+.slide-content.layout-graph {
+  left: 48px;
+  right: auto;
+  top: 38px;
+  bottom: 38px;
+  max-width: none;
+  width: 56vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.slide-content.layout-graph .slide-widgets {
+  max-width: none;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  /* more opaque than the panel default so the reframed robot never bleeds through */
+  background: rgba(var(--surface-rgb), 0.94);
+}
+
+/* the plot stretches to fill the panel; its host reports that height to uPlot */
+.slide-content.layout-graph .slide-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.slide-content.layout-graph .plot-host {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .slide-content h1 {
   margin: 0 0 8px;
   font-size: 52px;
