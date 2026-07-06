@@ -61,13 +61,13 @@ camera:
     <line x1="394" y1="40" x2="452" y2="40" />
     <path d="M424,40 L424,102 L72,102 L72,54" />
   </g>
-  <circle cx="72" cy="40" r="13" fill="none" stroke="#f0a24a" stroke-width="1.5" />
-  <text x="72" y="45" text-anchor="middle" fill="#d7dade" font-size="14">Σ</text>
-  <text x="58" y="70" text-anchor="middle" fill="#e58a8a" font-size="15">−</text>
-  <rect x="150" y="24" width="92" height="32" rx="6" fill="rgba(240,162,74,0.12)" stroke="#f0a24a" />
-  <text x="196" y="45" text-anchor="middle" fill="#d7dade" font-size="14">PID</text>
-  <rect x="300" y="24" width="94" height="32" rx="6" fill="rgba(240,162,74,0.12)" stroke="#f0a24a" />
-  <text x="347" y="45" text-anchor="middle" fill="#d7dade" font-size="14">joint</text>
+  <circle cx="72" cy="40" r="13" fill="none" stroke="#ff3b3b" stroke-width="1.5" />
+  <text x="72" y="45" text-anchor="middle" fill="#f3eee7" font-size="14">Σ</text>
+  <text x="58" y="70" text-anchor="middle" fill="#f5c542" font-size="15">−</text>
+  <rect x="150" y="24" width="92" height="32" rx="6" fill="rgba(255,59,59,0.12)" stroke="#ff3b3b" />
+  <text x="196" y="45" text-anchor="middle" fill="#f3eee7" font-size="14">PID</text>
+  <rect x="300" y="24" width="94" height="32" rx="6" fill="rgba(255,59,59,0.12)" stroke="#ff3b3b" />
+  <text x="347" y="45" text-anchor="middle" fill="#f3eee7" font-size="14">joint</text>
   <text x="20" y="30" text-anchor="middle" fill="#9aa0a6" font-size="13">θ*</text>
   <text x="271" y="34" text-anchor="middle" fill="#9aa0a6" font-size="13">τ</text>
   <text x="458" y="30" text-anchor="end" fill="#9aa0a6" font-size="13">θ</text>
@@ -187,6 +187,50 @@ One channel, same PID loop: $\zeta \approx \dfrac{K_d}{2\sqrt{K_p}} \approx 0.05
 on this slide.
 
 Drag the setpoint — the pendulum rings hard before it settles.
+
+---
+id: agilus-intro
+scene: agilus
+idle:
+  joint_1: { amp: 0.5, freq: 0.07 }
+  joint_2: { amp: 0.22, freq: 0.06, phase: 1.6 }
+  joint_4: { amp: 0.7, freq: 0.09, phase: 3.0 }
+---
+## A real robot
+
+This is a **KUKA KR 6 R900** — a real 6-axis URDF with Collada meshes, loaded
+entirely from memory: no fetch, so it runs the same offline.
+
+<!-- pause -->
+Same engine, same PID loop — six joints instead of three.
+
+---
+id: agilus-joint
+scene: agilus
+joints:
+  joint_2: -0.6
+camera:
+  lookAt: tool0
+  offset: [1.5, 0.7, 1.5]
+  spring: { omega: 5, zeta: 1.0 }
+widgets:
+  - type: slider
+    bind: joint_2
+    label: joint 2 (shoulder)
+    pid: { kp: 12, ki: 0, kd: 0.8 }
+  - type: plot
+    bind: joint_2.error
+    label: tracking error e (rad)
+    window: 8
+anchored:
+  - anchor: tool0
+    offset: [32, -18]
+    content: "$x_e$"
+---
+## Six joints, one loop
+
+Drag joint 2 and watch the same overshoot-and-settle — the mesh robot is driven
+by the identical controller, hard-stopped at the real KUKA joint limits.
 
 ---
 id: outro

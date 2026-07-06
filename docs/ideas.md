@@ -5,6 +5,22 @@ scope; this file is a growing list of candidate features and extensions we've di
 scheduled. Items here are ideas, not commitments — promote one into a milestone/spec change when
 we decide to build it. Newest ideas near the top of their section.
 
+## Build & assets
+
+### Mesh-based URDF robots in the single file (spec §9b, not yet built)
+The current arm is primitive geometry only, so the offline build needed no mesh pipeline. A real
+mesh robot (GLB) still works in the SAME single file — no student/teacher model swap. Mechanism:
+`scripts/encode-assets.mjs` base64-encodes each GLB at build time; the runtime loads via
+`URDFLoader.parse(urdf)` with a custom `loadMeshCb` that runs `GLTFLoader.parse(arrayBuffer, '', …)`
+on the in-memory buffer instead of fetching — so `package://` refs resolve from memory, no fetch,
+`file://`-safe. Textures embed inside the GLB (best) or as `data:` URIs. Prefer GLB; avoid Collada
+(references external textures). The real constraint is SIZE, not feasibility: base64 +33%, no gzip
+under `file://`, budget < ~50 MB (§13). Mitigations: down-res textures, Draco/meshopt with the
+decoder INLINED (Draco's default decoder is fetched/worker-loaded → must be embedded, like the
+Rapier-compat WASM approach in §2), fflate for the largest blobs. Escape hatch if one model is too
+heavy for the single file: build modes can ship a lighter offline variant — but avoid it, since
+"what students see == what you present" is the point. Scope when a mesh robot is actually added.
+
 ## Widgets & content
 
 ### Curve / trajectory widget (path-planning plots)
