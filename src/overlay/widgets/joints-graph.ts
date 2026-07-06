@@ -10,7 +10,10 @@ import uPlot from 'uplot'
 
 const AXIS = '#8b9096'
 const GRID = 'rgba(255, 255, 255, 0.07)'
-const HEIGHT = 150
+// a touch shorter than the profile `curve` plots: the PTP/Lin slides this sits on
+// carry more body text, so the plot is sized to keep the heading on-screen even on
+// a short (720p) viewport.
+const HEIGHT = 178
 const COLORS = ['#ff6b6b', '#4dabf7', '#51cf66', '#ffd43b', '#cc5de8', '#ff922b']
 
 export interface JointSeries {

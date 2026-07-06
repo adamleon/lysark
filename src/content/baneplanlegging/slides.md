@@ -154,14 +154,14 @@ interpoleres lineært (Lin, MoveL):
 
 $$\mathbf{x}(s) = s\,\mathbf{x}_B + (1-s)\,\mathbf{x}_A, \qquad \dot{\mathbf{x}}(s) = \mathbf{x}_B - \mathbf{x}_A, \qquad \ddot{\mathbf{x}}(s) = 0$$
 
-Her er $\mathbf{x}_A = f(q_0)$ og $\mathbf{x}_B = f(q_f)$ start- og målposisjonen i
-arbeidsrommet – samme start og mål som PTP. Invers kinematikk løser leddvinklene
-$q$ i hvert steg slik at verktøyet holder seg på den rette linjen (grønn).
+Invers kinematikk løser leddvinklene $q$ i hvert steg slik at verktøyet følger den
+rette linjen (grønn). Endepunktene $\mathbf{x}_A = f(q_0)$ og $\mathbf{x}_B = f(q_f)$
+er de samme som i PTP.
 
 <!-- pause -->
-Prisen: leddene må nå vri seg **ulineært** – leddkurvene blir krumme. Og $x$ er
-bare posisjonen; verktøyet har også en **orientering** som må dreies jevnt fra
-start til mål. Hvordan interpolerer man en rotasjon?
+Prisen: leddene vrir seg **ulineært** – leddkurvene blir krumme. Og verktøyet har
+også en **orientering** som må dreies jevnt fra start til mål: hvordan
+interpolerer man en rotasjon?
 
 ---
 id: translasjon-rotasjon

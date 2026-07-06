@@ -16,7 +16,7 @@ import { PROFILES, type ProfileName } from '../../engine/time-scaling'
 
 const AXIS = '#8b9096'
 const GRID = 'rgba(255, 255, 255, 0.07)'
-const HEIGHT = 150
+const HEIGHT = 210
 const N = 121
 
 type Series = 's' | 'v' | 'a'

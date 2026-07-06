@@ -12,7 +12,7 @@ import { PROFILES, type ProfileName, type TimeScaling } from '../../engine/time-
 
 const AXIS = '#8b9096'
 const GRID = 'rgba(255, 255, 255, 0.07)'
-const HEIGHT = 150
+const HEIGHT = 210
 const N = 121
 const COLORS = ['#e0574f', '#3fc46a'] // profile 0, profile 1 (green matches the ghost)
 

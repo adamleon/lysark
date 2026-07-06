@@ -17,7 +17,7 @@ export interface PlotHandle {
   dispose(): void
 }
 
-const PLOT_HEIGHT = 116
+const PLOT_HEIGHT = 160
 const ACCENT = '#ff3b3b'
 const AXIS = '#8b9096'
 const GRID = 'rgba(255, 255, 255, 0.07)'

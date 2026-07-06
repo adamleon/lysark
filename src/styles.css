@@ -164,7 +164,7 @@ body {
   pointer-events: auto;
   margin-top: 18px;
   padding: 12px 14px;
-  max-width: 320px;
+  max-width: 440px;
   background: rgba(var(--surface-rgb), 0.88);
   border: 1px solid var(--border);
   border-radius: 10px;
