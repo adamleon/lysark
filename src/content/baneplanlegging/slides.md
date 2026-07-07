@@ -2,6 +2,10 @@
 id: tittel
 scene: agilus
 layout: center
+camera:
+  lookAt: [-1.75, 0.5, 0]
+  offset: [0.7, 1.2, 3.6]
+  spring: { omega: 4, zeta: 1.0 }
 idle:
   joint_1: { amp: 0.5, freq: 0.07 }
   joint_2: { amp: 0.22, freq: 0.06, phase: 1.6 }
@@ -11,8 +15,8 @@ idle:
 
 ## AIS2105 – Mekatronikk og robotikk
 
-Fra **konfigurasjon** til ferdig **rute**: hvordan vi får en robot til å flytte
-seg fra A til B – og hvorfor *hvordan* er like viktig som *hvor*.
+Fra **konfigurasjon** til ferdig **rute** – og hvorfor *hvordan* er like viktig
+som *hvor*.
 
 ---
 id: konfigurasjon
@@ -28,8 +32,8 @@ joints:
   joint_5: 0.9
   joint_6: 0.0
 camera:
-  lookAt: tool0
-  offset: [1.6, 0.7, 1.6]
+  lookAt: [-0.5, 0.62, 0]
+  offset: [1.15, 0.72, 2.6]
   spring: { omega: 5, zeta: 1.0 }
 widgets:
   - type: slider
@@ -60,16 +64,15 @@ $\mathcal{C}$. For denne KUKA-en er $n = 6$: hvert punkt i $\mathcal{C}$ svarer
 til nøyaktig én stilling.
 
 <!-- pause -->
-Verktøyets stilling i rommet er den direkte (forover-)kinematikken $x = f(q)$ –
-en *ulineær* avbildning fra leddrommet til arbeidsrommet. Den ulineariteten er
-kjernen i hele forelesningen.
+Verktøyets stilling er forover-kinematikken $x = f(q)$ – en *ulineær* avbildning
+fra ledd- til arbeidsrom. Den ulineariteten er kjernen i forelesningen.
 
 ---
 id: bane
 scene: agilus
 camera:
-  lookAt: [0, 0.55, 0]
-  offset: [0.6, 1.5, 3.4]
+  lookAt: [-1.1, 0.55, 0]
+  offset: [0.6, 1.5, 3.2]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
   control: slider
@@ -99,7 +102,7 @@ $$\mathbf{q}(s) = q_0 + s\,(q_f - q_0)$$
 id: ptp
 scene: agilus
 camera:
-  lookAt: [0, 0.5, 0]
+  lookAt: [-1.1, 0.5, 0]
   offset: [0.4, 2.3, 2.5]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
@@ -132,7 +135,7 @@ men verktøyet svinger ut.
 id: lin
 scene: agilus
 camera:
-  lookAt: [0, 0.5, 0]
+  lookAt: [-1.1, 0.5, 0]
   offset: [0.4, 2.3, 2.5]
   spring: { omega: 4, zeta: 1.0 }
 trajectory:
