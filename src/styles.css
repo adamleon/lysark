@@ -212,11 +212,12 @@ body {
 
 .slide-content .katex-display {
   margin: 14px 0;
-  /* display math is enlarged on the wrapper, NOT on .katex itself — a font-size
-     on the .katex element shifts KaTeX's multi-piece delimiters (e.g. tall matrix
-     brackets) down below their content. Its .katex stays at the 1em reference
-     below, so the size is unchanged but the brackets sit correctly. */
-  font-size: 1.15em;
+  /* Enlarge display math by scaling the RENDERED output, not the font-size. A
+     font-size bump on the .katex element mis-stacks KaTeX's multi-piece
+     delimiters — the tall matrix brackets drop well below their values. Rendering
+     at the base size keeps the brackets correct; the transform restores the
+     larger visual size (its box stays base-size, absorbed by the 14px margins). */
+  transform: scale(1.15);
 }
 
 .slide-content .katex-display > .katex {
