@@ -92,12 +92,17 @@ body {
 .slide-content.layout-graph {
   left: 48px;
   right: auto;
-  top: 38px;
+  top: 92px; /* clear the centered title band */
   bottom: 38px;
   max-width: none;
   width: 56vw;
   display: flex;
   flex-direction: column;
+}
+
+/* the equation/caption above the graph centre-align to match the title band */
+.slide-content.layout-graph > div:not(.slide-widgets) {
+  text-align: center;
 }
 
 .slide-content.layout-graph .slide-widgets {
@@ -124,6 +129,50 @@ body {
 .slide-content.layout-graph .plot-host {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* Centered title band at the top of the content slides, so every slide's title
+   is centred (the theory + title slides already centre theirs). The heading
+   leaves the column flow and spans the slide; the body/graph fills below. */
+.slide-content.layout-panel h2,
+.slide-content.layout-graph h2 {
+  position: fixed;
+  top: 30px;
+  left: 8vw;
+  right: 8vw;
+  margin: 0;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* panel body flows from below the title band (was bottom-anchored, which let a
+   tall slide's content grow up into the centred title) */
+.slide-content.layout-panel {
+  top: 92px;
+  bottom: auto;
+}
+
+/* Static (scene-less) slides show the same grid floor as the 3D scenes: this
+   pseudo-element sits BEHIND the WebGL canvas (z-index -1), so a live scene's
+   opaque canvas hides it and a scene-less slide (canvas hidden) reveals it.
+   Grid tone matches the GridHelper in stage.ts, over the #17161b background. */
+#scene-layer::before {
+  content: '';
+  position: fixed;
+  left: -25%;
+  right: -25%;
+  bottom: -8%;
+  height: 62%;
+  z-index: -1;
+  background-image:
+    linear-gradient(to right, rgba(74, 68, 84, 0.5) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(74, 68, 84, 0.5) 1px, transparent 1px);
+  background-size: 4.2% 9%;
+  transform: perspective(420px) rotateX(60deg);
+  transform-origin: center bottom;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 55%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 55%);
+  pointer-events: none;
 }
 
 .slide-content h1 {
