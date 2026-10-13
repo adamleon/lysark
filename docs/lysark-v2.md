@@ -442,7 +442,7 @@ where noted.
   Chromium (cheap to add once the course CI exists).
 - **Rendering:** stylized shading, adaptive quality, a lighter KUKA base against the dark ground,
   GLB meshes to shrink the offline file.
-- **From `ideas.md`:** plots with static data on scene-less slides; an overlay-only ticker so
+- **From the archived `ideas.md`:** plots with static data on scene-less slides; an overlay-only ticker so
   animated widgets keep running on scene-less slides; curves whose parameters sliders change.
 
 ## 8. Decisions

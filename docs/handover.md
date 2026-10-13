@@ -1,16 +1,24 @@
 # Lysark — handover
 
-Snapshot for resuming after a context clear. The authoritative spec is
-[docs/lysark-design.md](lysark-design.md); working style is in the repo-root
-[CLAUDE.md](../CLAUDE.md); the candidate backlog is [docs/ideas.md](ideas.md).
+Snapshot for resuming after a context clear. Direction, work order, and the backlog
+are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
+[docs/lysark-design.md](lysark-design.md); working style and the working agreement
+are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is
+## Where the project is (2026-10-13)
+
+**v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) (documents and branches)
+is done: the lecture branch is merged into `main`, the docs are updated, and the
+engine feature freeze is in force until step 2 is done. Still open from step 0: the
+author confirming or changing the *proposed* decisions in lysark-v2.md section 8.
+Next is step 1, the split into an engine repo and per-course repos.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
-— is built out to 8 slides, and drove a set of reusable framework additions
-(kinematic trajectory playback, numeric IK, several plot/transport widgets, a
-two-robot comparison scene). All committed on this branch; **not yet pushed**.
+— has 15 slides, and drove a set of framework additions (kinematic trajectory
+playback, numeric IK, several plot/transport widgets, a two-robot comparison scene).
+Everything is on `main` and pushed. Until step 1 moves it to a course repo, the
+lecture lives in this repo under `src/content/baneplanlegging/`.
 
 Milestones M1–M7: motion (PID torque joints, spring-damper camera, settle) ·
 markdown+frontmatter slide engine · scene lifecycle (multi-scene, suspend/restore,
@@ -119,7 +127,7 @@ keep it green.
 
 ## Commands
 
-- `npm run dev` — dev server · `npm test` — vitest (**84**) · `npx tsc --noEmit`
+- `npm run dev` — dev server · `npm test` — vitest (**94**) · `npx tsc --noEmit`
 - `npm run build` — classroom `dist/` · `npm run build:offline` →
   `dist-offline/<deck>-offline.html` · `npm run verify:offline` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact)
@@ -157,10 +165,9 @@ keep it green.
   proves 0 requests fire. The raw 37 MB `assets/kuka_agilus/` is gitignored; only
   `src/assets/agilus/` (~2.9 MB) ships.
 
-## Suggested next steps
+## Next steps
 
-- Push the branch / open a PR if desired.
-- More lecture polish or more lectures under the seam (each a new `content/<deck>/`).
-- [docs/ideas.md](ideas.md): `onEnter`/`onLeave` hooks, static-data plots on
-  scene-less slides, an overlay-only ticker; mesh polish (lighten the black KUKA
-  base against the dark ground); GLB conversion to shrink the offline file.
+Follow [lysark-v2.md](lysark-v2.md) section 6: step 1 (the split) is next. The
+backlog is lysark-v2.md section 7, the only one; the old `ideas.md` is archived in
+[docs/archive/](archive/), and its unbuilt items, plus the mesh polish and GLB ideas
+that used to be listed here, are in that section.

@@ -1,6 +1,11 @@
 # Lysark — Design Document
 
-The authoritative spec. It consolidates the original research report and the design addendum; where
+> **Status (2026-10-13):** this is the reference for how the runtime works: scene lifecycle,
+> motion, overlays, and the `file://` rules. Direction and the work order are in
+> [lysark-v2.md](lysark-v2.md), which supersedes this document where the two conflict. Sections
+> that describe things never built are marked "Outdated" in place.
+
+It consolidates the original research report and the design addendum; where
 they conflicted, the addendum's decisions won (see §12 for the resolved conflicts). The originals are
 archived in `docs/archive/` — the research report keeps the full evidence, citations, and framework
 comparison behind the decisions recorded in §2. Working instructions for Claude Code live in the
@@ -325,6 +330,12 @@ opened directly. Full resolution, all interactivity.
 **b) Student offline (one file):** `vite build --mode singlefile` with `vite-plugin-singlefile`
 (`useRecommendedBuildConfig: true`, `removeViteModuleLoader: true`). Hard constraints:
 
+> **Outdated (2026-10):** no GLB pipeline was built, and `scripts/encode-assets.mjs` does not exist.
+> The Agilus meshes are Collada `.dae` files imported as text (`?raw`) and parsed with
+> `ColladaLoader.parse` inside a custom `URDFLoader` `loadMeshCb`. The output is
+> `dist-offline/<deck>-offline.html`, not `lysark-offline.html`. The rules themselves (no runtime
+> `fetch`, no dynamic `import()`, no workers from URLs, parse from strings) still hold.
+
 - **No `fetch` anywhere at runtime.** All GLB/URDF/textures pre-encoded to base64 constants
   (`scripts/encode-assets.mjs`); robot loaded via `URDFLoader.parse(urdfString)` plus a
   `loadMeshCb(path, manager, onComplete)` override that runs
@@ -348,6 +359,12 @@ overlay at full resolution, composites one page per slide. `node scripts/export-
 interactivity is lost by design.
 
 ## 10. Project structure
+
+> **Outdated (2026-10):** this listing was the plan. These files were never written:
+> `engine/scene-lifecycle.ts` (the lifecycle lives in `engine/scene-manager.ts`), `scene/robot.ts`,
+> `scene/channels.ts`, `scenes/gripper.ts`, `overlay/anchor-projection.ts`,
+> `overlay/katex-render.ts`, and `scripts/encode-assets.mjs`. See
+> [handover.md](handover.md) for the current layout.
 
 ```
 /src
