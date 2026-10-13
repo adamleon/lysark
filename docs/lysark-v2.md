@@ -265,7 +265,7 @@ here: it is only useful together with a Lysark course.
 - **Live preview.** The panel recompiles the lecture as you type. While the text is invalid it
   keeps showing the last valid version, with the error. The panel follows the cursor to the slide
   being edited, and clicking a slide in the panel moves the cursor there.
-- **Writing edits.** Scene files are YAML (proposed, section 8), like each slide's frontmatter.
+- **Writing edits.** Scene files are YAML (section 8), like each slide's frontmatter.
   Writing "into the current slide" means into that slide's frontmatter block, found by its `---`
   fences as the compiler finds it. Values are changed through the `yaml` library's low-level API
   (the CST API, for concrete syntax tree), which works on the file's exact text and returns it
@@ -458,8 +458,9 @@ Decided by the author:
   from any computer.
 - The extension is published publicly on the VS Code Marketplace, since github.dev can install it
   no other way (section 5).
+- The first course repo is `adamleon/ais2105-lectures`.
 
-Proposed in this document and not yet confirmed. Confirm before building on them:
+Proposed in this document and confirmed by the author on 2026-10-13, at the start of step 1:
 
 - Lysark never handles GitHub logins or tokens; editing uses GitHub's own editors.
 - The extension is a thin host that loads the engine from the course's Pages site, if step 3's
@@ -471,7 +472,6 @@ Proposed in this document and not yet confirmed. Confirm before building on them
 
 ## 9. Open questions
 
-- Course repo name, for example `ais2105-lectures`.
 - Marketplace publisher ID. It becomes part of the extension's ID and can't be changed later; the
   display name can. The author creates it when step 3's test needs it.
 - Whether the classroom PC wipes browser profiles between sessions; if it does, the extension has

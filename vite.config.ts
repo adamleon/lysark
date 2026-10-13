@@ -1,19 +1,19 @@
 import { defineConfig, type Plugin } from 'vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
-import { rename } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { slidesPlugin } from './vite-plugin-slides'
+import { lecturePlugin } from './vite-plugin-lecture'
 
-// Deck selection (spec §7): one folder per deck under src/content/, chosen by
-// LYSARK_DECK (default 'demo'). The `@active-deck` alias resolves to a single
-// static import of that deck's manifest, so only the selected deck's code and
-// assets bundle — no dynamic import(), file://-safe (spec §9b).
-const DECK = process.env.LYSARK_DECK || 'demo'
-const DECK_ENTRY = fileURLToPath(new URL(`./src/content/${DECK}/deck.ts`, import.meta.url))
+// The engine's own folder: index.html, src/, and the scenes live here, also
+// when the engine is installed under a course's node_modules.
+const ENGINE_ROOT = dirname(fileURLToPath(import.meta.url))
 
-const OFFLINE_DIR = 'dist-offline'
-const OFFLINE_HTML = `${DECK}-offline.html`
+// Set by bin/lysark.mjs (lysark-v2.md §3). Without them, the engine's own
+// lectures/ folder is used, which is what the engine's tests and dev use.
+const LECTURES_ROOT = process.env.LYSARK_LECTURES_ROOT || join(ENGINE_ROOT, 'lectures')
+const LECTURE = process.env.LYSARK_LECTURE || null
+const COURSE_ROOT = process.env.LYSARK_COURSE_ROOT || ENGINE_ROOT
 
 /**
  * Size pass (spec §11): KaTeX ships every glyph as woff2 + woff + ttf, and the
@@ -45,49 +45,38 @@ function katexWoff2Only(): Plugin {
   }
 }
 
-/**
- * After the single-file bundle is written, rename index.html → lysark-offline.html
- * so the student-offline deliverable has its documented name (spec §9b). It is
- * the only file in the output dir, so a plain rename is safe.
- */
-function renameOfflineHtml(): Plugin {
-  return {
-    name: 'lysark-rename-offline-html',
-    enforce: 'post',
-    async closeBundle() {
-      await rename(join(OFFLINE_DIR, 'index.html'), join(OFFLINE_DIR, OFFLINE_HTML)).catch(
-        () => undefined,
-      )
-    },
-  }
-}
-
-// Three delivery targets from one codebase (spec §9), selected by --mode:
-//   vite build                    → classroom static dist/ (base './' survives file:// too)
-//   vite build --mode singlefile  → one self-contained dist-offline/<deck>-offline.html
-// base './' so relative asset paths survive all targets. The offline build has
-// NO runtime fetch/dynamic-import: the URDF is primitive-only (?raw string), KaTeX
-// fonts inline as base64 data URIs (assetsInlineLimit via useRecommendedBuildConfig),
-// and vite-plugin-singlefile folds every JS/CSS chunk into one inline <script>/<style>.
-export default defineConfig(({ mode }) => {
-  const singlefile = mode === 'singlefile'
-  return {
-    base: './',
-    resolve: { alias: { '@active-deck': DECK_ENTRY } },
-    plugins: [
-      slidesPlugin(),
-      katexWoff2Only(),
-      ...(singlefile
-        ? [
-            viteSingleFile({ removeViteModuleLoader: true, useRecommendedBuildConfig: true }),
-            renameOfflineHtml(),
-          ]
-        : []),
+// `lysark build` produces one self-contained HTML file per lecture, the student
+// file (lysark-v2.md §2). vite-plugin-singlefile folds every JS/CSS chunk into
+// one inline <script>/<style>, and KaTeX fonts inline as base64 data URIs, so
+// the file has no runtime fetch or dynamic import (lysark-design.md §9).
+export default defineConfig(({ command }) => ({
+  root: ENGINE_ROOT,
+  base: './',
+  publicDir: false,
+  cacheDir: join(COURSE_ROOT, 'node_modules', '.vite'),
+  plugins: [
+    slidesPlugin(),
+    lecturePlugin({ engineRoot: ENGINE_ROOT, lecturesRoot: LECTURES_ROOT, lecture: LECTURE }),
+    katexWoff2Only(),
+    ...(command === 'build'
+      ? [viteSingleFile({ removeViteModuleLoader: true, useRecommendedBuildConfig: true })]
+      : []),
+  ],
+  // the engine runs from inside the course's node_modules, so its own source
+  // isn't crawled for dependencies; list them so dev doesn't re-optimize mid-load
+  optimizeDeps: {
+    include: [
+      'three',
+      'three/addons/controls/OrbitControls.js',
+      'three/addons/loaders/ColladaLoader.js',
+      'three/addons/utils/BufferGeometryUtils.js',
+      'urdf-loader',
+      'uplot',
     ],
-    build: singlefile ? { outDir: OFFLINE_DIR } : {},
-    server: {
-      port: process.env.PORT ? Number(process.env.PORT) : 5173,
-      strictPort: true,
-    },
-  }
-})
+  },
+  server: {
+    port: process.env.PORT ? Number(process.env.PORT) : 5173,
+    strictPort: !!process.env.PORT,
+    fs: { allow: [ENGINE_ROOT, LECTURES_ROOT, COURSE_ROOT] },
+  },
+}))

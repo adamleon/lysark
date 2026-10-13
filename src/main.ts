@@ -23,7 +23,7 @@ import { SlideEngine } from './engine/slide-engine'
 import { parseBinding, readField } from './engine/channel-binding'
 import type { SceneInstance } from './engine/scene-types'
 import type { CameraTargetSpec, CompiledSlide, TrajectorySpec, WidgetSpec } from './engine/slide-types'
-import deck from '@active-deck'
+import deck from 'virtual:lysark-deck'
 
 const sceneLayer = new SceneLayer(document.getElementById('scene-layer')!)
 const motion = new MotionSystem()

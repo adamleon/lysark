@@ -7,18 +7,21 @@ are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
 ## Where the project is (2026-10-13)
 
-**v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) (documents and branches)
-is done: the lecture branch is merged into `main`, the docs are updated, and the
-engine feature freeze is in force until step 2 is done. Still open from step 0: the
-author confirming or changing the *proposed* decisions in lysark-v2.md section 8.
-Next is step 1, the split into an engine repo and per-course repos.
+**v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
+confirmed the section 8 decisions. **Step 1 (the split) is landing:** lectures live in
+per-course repos and the engine is a package with a `lysark` command; how that works
+is in [step-1-split.md](step-1-split.md). The first course repo is
+[adamleon/ais2105-lectures](https://github.com/adamleon/ais2105-lectures), pinned to
+engine `v2.0.0`. Step 1 is done only when its "Done when" check in lysark-v2.md
+passes: a github.dev typo fix live on Pages within about two minutes, and a second
+computer set up from the course's `SETUP.md` alone. The engine feature freeze holds
+until step 2 is done.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
 — has 15 slides, and drove a set of framework additions (kinematic trajectory
 playback, numeric IK, several plot/transport widgets, a two-robot comparison scene).
-Everything is on `main` and pushed. Until step 1 moves it to a course repo, the
-lecture lives in this repo under `src/content/baneplanlegging/`.
+The lecture now lives in the course repo at `lectures/baneplanlegging/slides.md`.
 
 Milestones M1–M7: motion (PID torque joints, spring-damper camera, settle) ·
 markdown+frontmatter slide engine · scene lifecycle (multi-scene, suspend/restore,
@@ -30,12 +33,13 @@ URDF + Collada meshes, runs from the offline file with no fetch.
 Each milestone ended with an adversarial multi-agent review (`git log`); worth
 continuing for substantial changes.
 
-## The Baneplanlegging lecture — 15 slides, Norwegian ([src/content/baneplanlegging/slides.md](../src/content/baneplanlegging/slides.md))
+## The Baneplanlegging lecture — 15 slides, Norwegian (course repo: `lectures/baneplanlegging/slides.md`)
 
 Built out to full parity with the source pptx (`AIS2105/.../Baneplanlegging.pptx`):
 equation-rich, and **presenter-facing** — the lecturer drives the live scenes, so
-every student-directed "drag/click here" instruction was removed. Build/run with
-`LYSARK_DECK=baneplanlegging`. Scene runs: `agilus` (1–5), scene-less theory (6–10),
+every student-directed "drag/click here" instruction was removed. To work on the
+engine against it, clone the course next to the engine and run
+`npm run dev -- ../ais2105-lectures/lectures/baneplanlegging`. Scene runs: `agilus` (1–5), scene-less theory (6–10),
 `agilus` again (11–14, resumed after the gap — see the contiguity gotcha), then
 `agilus-duo` (15).
 
@@ -67,10 +71,9 @@ tool stays within 0.7 mm of the line. The pptx's rendered-equation slides 6–8 
 
 ## Framework capabilities the lecture added (all reusable, unit-tested, file://-safe)
 
-- **Multi-deck seam**: one folder per deck under `src/content/<deck>/`
-  (`deck.ts` manifest + `slides.md`). `main.ts` imports `@active-deck`, a Vite
-  alias resolved from `LYSARK_DECK` (default `demo`) — one static import, only the
-  selected deck bundles. Offline/PDF outputs are deck-named.
+- **Lecture folders** (since v2 step 1): a lecture is a folder with a `slides.md`.
+  `vite-plugin-lecture.ts` generates its deck module (`virtual:lysark-deck`) from
+  the `scene:` names, importing only those scenes from `src/scenes/registry.ts`.
 - **Time-scaling** ([src/engine/time-scaling.ts](../src/engine/time-scaling.ts)):
   `cubic`/`quintic`/`trapezoidal`/`scurve` as pure `s(t)→{s,ṡ,s̈,⃛s}`, plus a
   `PROFILES` map. `scurve` = 7-phase bounded-jerk (accel is a trapezoid, a(0)=a(T)=0,
@@ -99,7 +102,7 @@ tool stays within 0.7 mm of the line. The pptx's rendered-equation slides 6–8 
   green). agilus default gains critically damped (kd 7 → no wobble at rest).
 - **Live config-vector** anchored variant (`anchored: … vector: {joints,…}`).
 
-## The demo deck — regression showcase ([src/content/demo/slides.md](../src/content/demo/slides.md))
+## The demo lecture — regression showcase ([lectures/demo/slides.md](../lectures/demo/slides.md))
 
 11 slides, 3 scenes (arm/pendulum/agilus): title idle wave · PID control + loop
 SVG · overshoot slider+plot · anchored `$x_e$` · damping regimes · pendulum ·
@@ -120,27 +123,31 @@ keep it green.
   joints-graph), project.
 - `src/main.ts` — wiring: camera, idle, trajectory (playback + IK + traces + all
   the widget factories), debug panel, frame loop.
-- `src/content/<deck>/` — one folder per deck; `demo/` + `baneplanlegging/`.
-- `src/styles.css` — theme tokens in `:root`. `scripts/` — check-offline, export-pdf.
-- `vite.config.ts` — `@active-deck` alias from `LYSARK_DECK`, singlefile mode,
-  KaTeX woff2-only, deck-named HTML rename.
+- `lectures/demo/` — the engine's test lecture.
+- `bin/lysark.mjs` — the `lysark` command (plain JS). `scripts/` — lectures.mjs
+  (find/build lectures, dev server), check-offline.mjs, export-pdf.mjs, site.mjs
+  (course CI publishing), browser.mjs (playwright-core launch).
+- `src/styles.css` — theme tokens in `:root`.
+- `vite.config.ts` — reads the lecture from `LYSARK_*` env vars set by the command;
+  singlefile build, KaTeX woff2-only. `vite-plugin-lecture.ts` — generated deck
+  module + dev lecture picker. `vite-plugin-slides.ts` — `.md` compile.
 
 ## Commands
 
-- `npm run dev` — dev server · `npm test` — vitest (**94**) · `npx tsc --noEmit`
-- `npm run build` — classroom `dist/` · `npm run build:offline` →
-  `dist-offline/<deck>-offline.html` · `npm run verify:offline` — Playwright
-  file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact)
-- `npm run export:pdf` → `pdf-export/<deck>.pdf` (needs `build:offline` first)
-- **Deck selection** — all default to `demo`. For the lecture, set the env var
-  first: PowerShell `$env:LYSARK_DECK='baneplanlegging'; npm run build:offline`
-  (output/verify/pdf paths all derive from it).
+See [step-1-split.md](step-1-split.md) for the full `lysark` command.
+
+- `npm run dev` — preview the demo · `npm test` — vitest (**94**) · `npm run typecheck`
+- `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
+  file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
+  `npx playwright-core install chromium`.
+- `node bin/lysark.mjs pdf dist/demo.html` → `dist/demo.pdf`.
+- Against a course lecture: `npm run dev -- ../ais2105-lectures/lectures/baneplanlegging`.
 
 ## Gotchas worth remembering
 
 - **Preview tab rAF pause**: the Claude preview tab is backgrounded → `rAF` paused,
   render loop looks frozen, `preview_screenshot` times out. NOT a bug. Verify via
-  **Playwright against `dist-offline`** (rAF runs there) — this is how every visual
+  **Playwright against a built `dist/<lecture>.html`** (rAF runs there) — this is how every visual
   check in the lecture work was done. `window.__lysark` exposes engine, motion,
   sceneManager, cameraCtl, overlay, anchorLayer, presenter, getTrajS, …. The active
   scene's `ik` is reachable at `__lysark.sceneManager.active.ik`.
@@ -161,13 +168,14 @@ keep it green.
   `(path, manager, material, onComplete)` — the typings drop `material`; (2) hand
   the DAE back un-rotated or links separate at extended poses; faceting → `toCreasedNormals(…, 40°)`.
 - **file:// build**: no runtime fetch / dynamic import / workers-from-URL. The
-  `fetch(` left in the bundle (three/urdf-loader) are dead code — `verify:offline`
+  `fetch(` left in the bundle (three/urdf-loader) are dead code — `lysark check`
   proves 0 requests fire. The raw 37 MB `assets/kuka_agilus/` is gitignored; only
   `src/assets/agilus/` (~2.9 MB) ships.
 
 ## Next steps
 
-Follow [lysark-v2.md](lysark-v2.md) section 6: step 1 (the split) is next. The
+Follow [lysark-v2.md](lysark-v2.md) section 6: finish step 1 by passing its "Done
+when" check (see "Where the project is"), then step 2 (images and the print PDF). The
 backlog is lysark-v2.md section 7, the only one; the old `ideas.md` is archived in
 [docs/archive/](archive/), and its unbuilt items, plus the mesh polish and GLB ideas
 that used to be listed here, are in that section.

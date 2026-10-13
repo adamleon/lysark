@@ -1,11 +1,14 @@
-name: Build decks
+name: Engine checks
 
-# Typecheck, run the unit tests, and build every deck's self-contained offline
-# HTML. The built files are uploaded as a downloadable build artifact ("lysark-
-# decks") on each run — grab them from the run's Summary page. No deployment.
+# Every engine change is tested against a real lecture before any course pins
+# it (lysark-v2.md §3). The demo lecture is built and offline-checked twice:
+# from this checkout (the quick developer path), and with the engine packed by
+# npm and installed into a scratch course with production dependencies only,
+# which is how a course gets it. The course-style build is uploaded as the
+# downloadable "demo" artifact.
 on:
   push:
-    branches: [main, baneplanlegging-lecture]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -13,34 +16,56 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci
+
+      - name: Package rules (lysark-v2.md §3)
+        run: |
+          node -e "
+            const p = require('./package.json')
+            const bad = ['build', 'prepare', 'prepack', 'preinstall', 'install', 'postinstall'].filter((s) => p.scripts?.[s])
+            if (p.workspaces) bad.push('workspaces')
+            if (bad.length) {
+              console.error('::error::package.json must not have: ' + bad.join(', ') + ' (npm would build the engine during every course install)')
+              process.exit(1)
+            }"
 
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Unit tests
         run: npm test
 
-      - name: Build offline decks
+      - name: Install Chromium for the offline check
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Build and check the demo from this checkout
         run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          for deck in baneplanlegging demo; do
-            LYSARK_DECK="$deck" npm run build:offline
-            cp "dist-offline/${deck}-offline.html" "artifacts/${deck}.html"
-          done
+          node bin/lysark.mjs build demo
+          node bin/lysark.mjs check dist/demo.html
+
+      - name: Build and check the demo with the engine installed as a course installs it
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          course="$RUNNER_TEMP/course"
+          mkdir -p "$course/lectures"
+          cp -r lectures/demo "$course/lectures/"
+          cd "$course"
+          echo '{"name":"course","private":true,"type":"module"}' > package.json
+          npm install --omit=dev --no-audit --no-fund "$RUNNER_TEMP"/lysark-*.tgz
+          npx --no lysark build demo
+          npx --no lysark check dist/demo.html
 
       - uses: actions/upload-artifact@v4
         with:
-          name: lysark-decks
-          path: artifacts/
+          name: demo
+          path: ${{ runner.temp }}/course/dist/demo.html
           if-no-files-found: error

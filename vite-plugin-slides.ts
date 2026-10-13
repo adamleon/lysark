@@ -2,7 +2,7 @@ import type { Plugin } from 'vite'
 import { compileSlides } from './src/compiler/compile-slides'
 
 /**
- * Compiles src/content/*.md decks to slide objects at build time (spec §8).
+ * Compiles a lecture's slides.md to slide objects at build time (spec §8).
  * The browser imports plain data; markdown-it/yaml/katex never ship.
  */
 export function slidesPlugin(): Plugin {
