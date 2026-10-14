@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-10-13)
+## Where the project is (2026-10-14)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -17,9 +17,19 @@ The first publish (2026-10-13) passed: HTML live 81 s after the push (HTML job 7
 Chromium install 24 s, build + offline check 17 s, deploy 18 s), then the PDF job
 109 s. The author's github.dev typo fix was live 64 s after the commit. Still open
 from step 1: setting up a second computer from the course's `SETUP.md` alone,
-deferred until the author has one (not critical). The engine feature freeze holds
-until step 2 is done. **Next is step 2:** images embedded at build time, and the light
-print PDF.
+deferred until the author has one (not critical).
+
+**Step 2 (images and the print PDF) is released as engine `v2.1.0`**; how it works is
+in [step-2-images-print.md](step-2-images-print.md). Images referenced from slides are
+built into the lecture file; the PDF uses a light print theme, and theme colours now
+come from the CSS tokens (see the colour rule in CLAUDE.md). The course still pins
+`v2.0.0` until the author runs **Update engine** with `v2.1.0`; step 2 is done once
+that publish shows the light PDF on the course site. The engine feature freeze lifts
+then. **Next is step 3:** the VS Code extension and the visual scene editor.
+
+Proposal noted during step 2 (not built): course CI installs Chromium (~27 s) even
+when no lecture changed. The HTML job could skip the install, and the offline check,
+when `lysark site` has nothing to build.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
@@ -178,8 +188,9 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
 ## Next steps
 
-Follow [lysark-v2.md](lysark-v2.md) section 6: step 2 (images and the print PDF) is
-next. When a second computer is available, run step 1's deferred `SETUP.md` check. The
-backlog is lysark-v2.md section 7, the only one; the old `ideas.md` is archived in
+Follow [lysark-v2.md](lysark-v2.md) section 6: finish step 2 by updating the course to
+`v2.1.0`, then step 3 (the extension and the visual editor), which starts with a test
+and needs the author's Marketplace publisher ID. When a second computer is available,
+run step 1's deferred `SETUP.md` check. The backlog is lysark-v2.md section 7, the only one; the old `ideas.md` is archived in
 [docs/archive/](archive/), and its unbuilt items, plus the mesh polish and GLB ideas
 that used to be listed here, are in that section.
