@@ -15,10 +15,10 @@ scenes, with PID/spring-damper motion as pedagogical content.
 - Work happens in the steps of lysark-v2.md, one step at a time. Each step lands on `main` small
   enough for the author to run it and understand it before the next starts, with a short
   plain-language note in `docs/` on how it works.
-- **Engine feature freeze until v2 step 2 is done.** No engine features outside the current step.
-  Anything else that comes up is written down as a proposal for the author instead of being built.
-  After step 2, an engine feature a lecture needs is its own small change, landed and understood
-  before the lecture uses it — never a side effect of writing a lecture.
+- The engine feature freeze ended with v2 step 2 (2026-10-15). An engine feature a lecture needs
+  is its own small change, landed and understood before the lecture uses it — never a side effect
+  of writing a lecture. Anything outside the current step is still written down as a proposal for
+  the author first.
 - Decisions marked "Proposed" in lysark-v2.md section 8 are not confirmed. Don't build on one
   without the author's confirmation.
 

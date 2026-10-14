@@ -19,13 +19,14 @@ Chromium install 24 s, build + offline check 17 s, deploy 18 s), then the PDF jo
 from step 1: setting up a second computer from the course's `SETUP.md` alone,
 deferred until the author has one (not critical).
 
-**Step 2 (images and the print PDF) is released as engine `v2.1.0`**; how it works is
-in [step-2-images-print.md](step-2-images-print.md). Images referenced from slides are
-built into the lecture file; the PDF uses a light print theme, and theme colours now
-come from the CSS tokens (see the colour rule in CLAUDE.md). The course still pins
-`v2.0.0` until the author runs **Update engine** with `v2.1.0`; step 2 is done once
-that publish shows the light PDF on the course site. The engine feature freeze lifts
-then. **Next is step 3:** the VS Code extension and the visual scene editor.
+**Step 2 (images and the print PDF) is done (2026-10-15)**, released as engine
+`v2.1.0`; how it works is in [step-2-images-print.md](step-2-images-print.md). Images
+referenced from slides are built into the lecture file; the PDF uses a light print
+theme, and theme colours come from the CSS tokens (see the colour rule in CLAUDE.md).
+The course runs `v2.1.0`: the author moved it with the Update engine workflow (its first
+real use), and the published PDF is light. The engine feature freeze has ended.
+**Next is step 3:** the VS Code extension and the visual scene editor, starting with a
+test that needs the author (Firefox on their own PC, and a Marketplace publisher ID).
 
 Proposal noted during step 2 (not built): course CI installs Chromium (~27 s) even
 when no lecture changed. The HTML job could skip the install, and the offline check,
@@ -188,9 +189,10 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
 ## Next steps
 
-Follow [lysark-v2.md](lysark-v2.md) section 6: finish step 2 by updating the course to
-`v2.1.0`, then step 3 (the extension and the visual editor), which starts with a test
-and needs the author's Marketplace publisher ID. When a second computer is available,
-run step 1's deferred `SETUP.md` check. The backlog is lysark-v2.md section 7, the only one; the old `ideas.md` is archived in
+Follow [lysark-v2.md](lysark-v2.md) section 6: step 3 (the extension and the visual
+editor) is next. It starts with a test that needs the author: Firefox on their own PC,
+and a Marketplace publisher ID. When a second computer is available, run step 1's
+deferred `SETUP.md` check. The backlog is lysark-v2.md section 7, the only one; the old
+`ideas.md` is archived in
 [docs/archive/](archive/), and its unbuilt items, plus the mesh polish and GLB ideas
 that used to be listed here, are in that section.

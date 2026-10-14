@@ -406,6 +406,12 @@ available, and fix `SETUP.md` wherever it falls short.
 
 How it works: [step-2-images-print.md](step-2-images-print.md).
 
+**Status: done on 2026-10-15**, released as engine `v2.1.0`. The author moved the course to it
+with the Update engine workflow, its first real use, and the published PDF is light. Images were
+tested in a copy of the course: a PNG, a JPEG, and an SVG in `assets/`, one of them used on two
+slides, went through the real publishing logic against the live site. Each was stored once, the
+file passed the offline check, and all three rendered.
+
 ### Step 3: The extension and the visual editor
 
 - **Test first.** Build a minimal extension that shows the Agilus in a panel, saves one camera
