@@ -133,7 +133,6 @@ function build(): SceneInstance & { ik: IkSolver } {
 
   return {
     root,
-    background: 0x17161b,
     anchors: {
       base: robot.links['base_link'],
       tool0: robot.links['tool0'],

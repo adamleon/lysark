@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { themeColor } from '../theme'
 import type { SceneLayer } from '../scene/scene-layer'
 import { disposeSceneGraph } from '../scene/dispose'
 import type { MotionSystem } from './motion-system'
@@ -12,7 +13,6 @@ export interface TransitionResult {
 
 const SNAPSHOT_FADE_MS = 350
 const CANVAS_FADE_MS = 280
-const DEFAULT_BACKGROUND = 0x17161b
 
 /**
  * Owns the scene lifecycle (spec §4.1): at most one scene's GPU resources
@@ -137,7 +137,7 @@ export class SceneManager {
     }
     this.layer.scene.add(instance.root)
     const background = this.layer.scene.background as THREE.Color
-    background.set(instance.background ?? DEFAULT_BACKGROUND)
+    background.set(themeColor('--bg'))
     for (const [name, channel] of Object.entries(instance.channels)) {
       this.motion.add(`${sceneId}.${name}`, channel)
     }

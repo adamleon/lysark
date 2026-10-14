@@ -15,8 +15,6 @@ export interface GainDefaults {
  */
 export interface SceneInstance {
   root: THREE.Object3D
-  /** scene-specific clear color, applied while this scene is active */
-  background?: number
   anchors: Record<string, THREE.Object3D>
   channels: Record<string, PidChannel>
   /** effective-target base for slide 1 of the scene's range (§4.3) */

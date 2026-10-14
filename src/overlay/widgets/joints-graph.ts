@@ -1,4 +1,5 @@
 import uPlot from 'uplot'
+import { themeColor } from '../../theme'
 
 /**
  * Joint-space plot for the PTP/Lin slides: each driven joint's value against the
@@ -8,13 +9,10 @@ import uPlot from 'uplot'
  * live s.
  */
 
-const AXIS = '#8b9096'
-const GRID = 'rgba(255, 255, 255, 0.07)'
 // a touch shorter than the profile `curve` plots: the PTP/Lin slides this sits on
 // carry more body text, so the plot is sized to keep the heading on-screen even on
 // a short (720p) viewport.
 const HEIGHT = 178
-const COLORS = ['#ff6b6b', '#4dabf7', '#51cf66', '#ffd43b', '#cc5de8', '#ff922b']
 
 export interface JointSeries {
   label: string
@@ -37,6 +35,10 @@ export interface JointGraphHandle {
 }
 
 export function createJointGraph(opts: JointGraphOptions): JointGraphHandle {
+  // colours come from the theme tokens (src/theme.ts), read when the plot is made
+  const AXIS = themeColor('--plot-axis')
+  const GRID = themeColor('--plot-grid')
+  const COLORS = [1, 2, 3, 4, 5, 6].map((n) => themeColor(`--plot-joint-${n}`))
   const el = document.createElement('div')
   el.className = 'slide-plot joints-plot'
 

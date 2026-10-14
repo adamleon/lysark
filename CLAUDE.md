@@ -49,5 +49,11 @@ Section numbers refer to docs/lysark-design.md.
 - At most one scene's GPU resources alive at a time; render loop fully stopped on scene-less
   slides. See §4.1.
 - Text is never rendered inside the WebGL scene. See §4.2.
+- Theme colours (page and 3D background, text, accents, grid, plots, traces, ghost) come from the
+  CSS tokens at the top of `src/styles.css`. Scripts read them with `themeColor()` from
+  `src/theme.ts` when they draw, never at import time, or the print theme breaks (lysark-v2.md
+  step 2). New code adds a token rather than a colour literal. The remaining literals (scene
+  object materials and lights) stay until the postponed theme work in lysark-v2.md section 7;
+  don't remove them as a side task.
 - The slide compiler never reads files; it reports what it needs and the caller reads them, so it
   can also run in the browser (lysark-v2.md section 5, design rules).

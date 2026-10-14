@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { themeColor } from '../theme'
 
 /**
  * Owns ONLY the persistent pieces (spec §4): the single WebGLRenderer +
@@ -20,7 +21,7 @@ export class SceneLayer {
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color(0x17161b)
+    this.scene.background = new THREE.Color(themeColor('--bg'))
 
     this.camera = new THREE.PerspectiveCamera(
       45,

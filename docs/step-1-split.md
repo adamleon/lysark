@@ -79,9 +79,11 @@ followed by committing both files does the same.
 
 ## Releasing a new engine version
 
-1. Make the change in the engine repo and push it to `main`. The engine's CI typechecks, runs
-   the tests, builds the demo lecture, and offline-checks it.
-2. When the CI is green, tag it: `git tag v2.1.0` and `git push origin v2.1.0`.
+1. Make the change in the engine repo. Set the version to the new tag's number, without the v:
+   `npm version 2.1.0 --no-git-tag-version` updates both package.json and package-lock.json.
+   Commit and push to `main`. The engine's CI typechecks, runs the tests, builds the demo lecture,
+   and offline-checks it.
+2. When the CI is green, tag that commit: `git tag v2.1.0` and `git push origin v2.1.0`.
 3. Run **Update engine** in each course that should get it.
 
 ## Developing the engine against a course lecture

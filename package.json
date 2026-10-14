@@ -1,7 +1,7 @@
 {
   "name": "lysark",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Interactive robotics lecture slides: Markdown slides with live three.js robot scenes",
   "type": "module",
   "bin": {

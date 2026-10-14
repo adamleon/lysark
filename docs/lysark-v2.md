@@ -404,6 +404,8 @@ available, and fix `SETUP.md` wherever it falls short.
   being hardcoded in several source files. It is the one piece of the postponed theme work that
   goal 2 needs.
 
+How it works: [step-2-images-print.md](step-2-images-print.md).
+
 ### Step 3: The extension and the visual editor
 
 - **Test first.** Build a minimal extension that shows the Agilus in a panel, saves one camera
@@ -443,6 +445,9 @@ where noted.
   label placement, widgets placed in the text flow.
 - **Theme file:** color roles shared by text, math, plots, and 3D, and removing the remaining
   hardcoded colors. The print variant is not postponed; it is part of step 2.
+- **Video and audio** built into the lecture file. Step 2 refuses `<video>` and `<audio>` with a
+  clear build error; embedding them works the same way as images, but video makes the student
+  file large.
 - **PDF and browsers:** vector PDF; running the offline check in Firefox and WebKit as well as
   Chromium (cheap to add once the course CI exists).
 - **Rendering:** stylized shading, adaptive quality, a lighter KUKA base against the dark ground,

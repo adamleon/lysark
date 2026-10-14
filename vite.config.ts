@@ -55,7 +55,7 @@ export default defineConfig(({ command }) => ({
   publicDir: false,
   cacheDir: join(COURSE_ROOT, 'node_modules', '.vite'),
   plugins: [
-    slidesPlugin(),
+    slidesPlugin({ courseRoot: COURSE_ROOT }),
     lecturePlugin({ engineRoot: ENGINE_ROOT, lecturesRoot: LECTURES_ROOT, lecture: LECTURE }),
     katexWoff2Only(),
     ...(command === 'build'

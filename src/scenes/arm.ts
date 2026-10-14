@@ -56,7 +56,6 @@ function build(): SceneInstance {
 
   return {
     root,
-    background: 0x17161b,
     anchors: {
       base: robot,
       end_effector: robot.links['end_effector'],

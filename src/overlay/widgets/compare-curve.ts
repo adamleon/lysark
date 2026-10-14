@@ -1,5 +1,6 @@
 import uPlot from 'uplot'
 import { PROFILES, type ProfileName, type TimeScaling } from '../../engine/time-scaling'
+import { themeColor } from '../../theme'
 
 /**
  * Comparison plot (trajectory-planning lecture): one selectable quantity —
@@ -10,11 +11,8 @@ import { PROFILES, type ProfileName, type TimeScaling } from '../../engine/time-
  * time; tabs switch the quantity.
  */
 
-const AXIS = '#8b9096'
-const GRID = 'rgba(255, 255, 255, 0.07)'
 const HEIGHT = 210
 const N = 121
-const COLORS = ['#e0574f', '#3fc46a'] // profile 0, profile 1 (green matches the ghost)
 
 type Series = 's' | 'v' | 'a'
 const QNAME: Record<Series, string> = { s: 'posisjon', v: 'hastighet', a: 'akselerasjon' }
@@ -39,6 +37,11 @@ function sample(prof: TimeScaling, q: Series, t: number): number {
 }
 
 export function createCompare(opts: CompareOptions): CompareHandle {
+  // colours come from the theme tokens (src/theme.ts), read when the plot is made
+  const AXIS = themeColor('--plot-axis')
+  const GRID = themeColor('--plot-grid')
+  // profile 0, profile 1 (green matches the ghost robot)
+  const COLORS = [themeColor('--plot-compare'), themeColor('--ghost')]
   const el = document.createElement('div')
   el.className = 'slide-plot compare-plot'
 

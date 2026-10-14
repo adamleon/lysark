@@ -59,7 +59,6 @@ function build(): SceneInstance {
 
   return {
     root,
-    background: 0x17161b,
     anchors: { pivot, bob },
     channels,
     defaults: {

@@ -1,7 +1,8 @@
 // Static PDF exporter (lysark-design.md §9c): drive a student file through every
 // slide with Playwright, wait for each to settle (§5) with a generous fixed
 // fallback, screenshot canvas + overlay at full resolution, and composite one
-// page per slide. Loads the file over file:// — no server needed.
+// page per slide. Loads the file over file:// — no server needed. The deck runs
+// in the light print theme (lysark-v2.md step 2), so the PDF prints on white.
 import { PDFDocument } from 'pdf-lib'
 import { pathToFileURL } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -23,6 +24,10 @@ export async function exportPdf(file, outFile, log = () => {}) {
   const shots = []
   try {
     const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: SCALE })
+    // the light print theme (src/theme.ts): set before any of the deck's scripts run
+    await page.addInitScript(() => {
+      window.__LYSARK_THEME__ = 'print'
+    })
     const pageErrors = []
     page.on('pageerror', (e) => pageErrors.push(e.message))
     try {

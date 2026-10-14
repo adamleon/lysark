@@ -609,10 +609,96 @@ function validateTrajectory(raw: unknown, slideNo: number): TrajectorySpec | und
 }
 
 // ---------------------------------------------------------------------------
+// Images (lysark-v2.md step 2). The compiler never reads files (design rule in
+// lysark-v2.md §5): it swaps each <img src> for a placeholder and reports the
+// sources, and the caller reads the files and fills the placeholders in.
 
+/** an image a lecture uses, as written in its slides.md */
+export interface ImageRef {
+  /** the src as written (HTML entities decoded); relative to slides.md */
+  src: string
+  /** id of the first slide that uses it, for error messages */
+  slide: string
+}
+
+export interface CompiledLecture {
+  slides: CompiledSlide[]
+  /** images[n] fills every `${IMAGE_TOKEN}n` in the slides' HTML */
+  images: ImageRef[]
+}
+
+export const IMAGE_TOKEN = 'lysark-image:'
+
+// a whole <img> tag; a '>' inside a quoted attribute value doesn't end it
+const IMG_TAG = /<img\b(?:"[^"]*"|'[^']*'|[^'">])*>/gi
+// one attribute in a tag: its name, and a value quoted either way or unquoted
+const IMG_ATTR = /(\s)([^\s"'>/=]+)(?:(\s*=\s*)("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g
+const MEDIA_TAG = /<(video|audio|source|iframe|embed|object)\b/i
+// other ways to reference a file, which the build can't inline: an SVG <image>, or a
+// CSS url() that isn't inline data or an in-document #id (SVG markers and gradients)
+const OTHER_IMAGE = /<image\b|<[^>]*\burl\((?!\s*['"]?\s*(?:data:|#))/i
+
+function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|amp|quot|lt|gt|apos);/gi, (whole, e: string) => {
+    const lower = e.toLowerCase()
+    if (lower.startsWith('#x')) return String.fromCodePoint(parseInt(lower.slice(2), 16))
+    if (lower.startsWith('#')) return String.fromCodePoint(Number(lower.slice(1)))
+    return ({ amp: '&', quot: '"', lt: '<', gt: '>', apos: "'" } as Record<string, string>)[lower] ?? whole
+  })
+}
+
+/** swap image sources for placeholders in one slide's HTML, collecting them */
+function collectImages(slide: CompiledSlide, slideNo: number, images: ImageRef[], index: Map<string, number>): void {
+  const where = `slides: slide ${slideNo} ('${slide.id}')`
+  const rewrite = (html: string): string => {
+    // comments never render: don't refuse or inline what's commented out. Code
+    // blocks are safe here, since markdown-it has already escaped their `<!--`.
+    html = html.replace(/<!--[\s\S]*?-->/g, '')
+    const media = MEDIA_TAG.exec(html)
+    if (media) {
+      throw new Error(`${where}: <${media[1].toLowerCase()}> can't be built into the lecture file; only images can (lysark-v2.md §7)`)
+    }
+    if (OTHER_IMAGE.test(html)) {
+      throw new Error(
+        `${where}: only <img> and Markdown images are built into the lecture file; an SVG <image> or a CSS url() image would be missing offline`,
+      )
+    }
+    return html.replace(IMG_TAG, (tag) =>
+      tag.replace(IMG_ATTR, (whole, space: string, name: string, eq?: string, value?: string) => {
+        const attr = name.toLowerCase()
+        if (attr === 'srcset') {
+          throw new Error(`${where}: an image uses srcset, which isn't supported; give it a single src`)
+        }
+        if (attr !== 'src' || value === undefined) return whole
+        const src = decodeEntities(/^["']/.test(value) ? value.slice(1, -1) : value)
+        if (/^data:/i.test(src)) return whole // already inline
+        let n = index.get(src)
+        if (n === undefined) {
+          n = images.length
+          images.push({ src, slide: slide.id })
+          index.set(src, n)
+        }
+        return `${space}${name}${eq}"${IMAGE_TOKEN}${n}"`
+      }),
+    )
+  }
+  slide.fragments = slide.fragments.map(rewrite)
+  for (const a of slide.anchored) {
+    if (a.kind === 'label') a.html = rewrite(a.html)
+    else a.symbolHtml = rewrite(a.symbolHtml)
+  }
+}
+
+/** the slides alone; image placeholders stay in place (tests, scene lookup) */
 export function compileSlides(source: string): CompiledSlide[] {
+  return compileLecture(source).slides
+}
+
+export function compileLecture(source: string): CompiledLecture {
   const raw = splitSlides(source)
   const out: CompiledSlide[] = []
+  const images: ImageRef[] = []
+  const imageIndex = new Map<string, number>()
   // A scene may span more than one run as long as only scene-less slides sit
   // between the runs — the runtime suspends the scene on the way out and restores
   // its serialized state on re-entry (§4.1). What stays forbidden is interleaving
@@ -687,7 +773,7 @@ export function compileSlides(source: string): CompiledSlide[] {
       .filter((html) => html.length > 0)
 
     const id = (frontmatter.id as string | undefined) ?? `slide-${slideNo}`
-    out.push({
+    const slide: CompiledSlide = {
       id,
       title: extractTitle(body, id),
       scene,
@@ -701,7 +787,9 @@ export function compileSlides(source: string): CompiledSlide[] {
       ...(idle ? { idle } : {}),
       ...(trajectory ? { trajectory } : {}),
       fragments: fragments.length > 0 ? fragments : [''],
-    })
+    }
+    collectImages(slide, slideNo, images, imageIndex)
+    out.push(slide)
   })
 
   const ids = new Set<string>()
@@ -709,5 +797,5 @@ export function compileSlides(source: string): CompiledSlide[] {
     if (ids.has(slide.id)) throw new Error(`slides: duplicate slide id '${slide.id}'`)
     ids.add(slide.id)
   }
-  return out
+  return { slides: out, images }
 }

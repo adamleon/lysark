@@ -1,5 +1,6 @@
 import uPlot from 'uplot'
 import { PROFILES, type ProfileName } from '../../engine/time-scaling'
+import { themeColor } from '../../theme'
 
 /**
  * Static profile plot (trajectory-planning lecture): draws a time-scaling's
@@ -14,17 +15,15 @@ import { PROFILES, type ProfileName } from '../../engine/time-scaling'
  * ends), not absolute magnitude.
  */
 
-const AXIS = '#8b9096'
-const GRID = 'rgba(255, 255, 255, 0.07)'
 const HEIGHT = 210
 const N = 121
 
 type Series = 's' | 'v' | 'a'
 
-const SERIES: Record<Series, { color: string; label: string }> = {
-  s: { color: '#ff3b3b', label: 's(t)' }, // position — red
-  v: { color: '#5ac26a', label: 'ṡ(t)' }, // velocity — green
-  a: { color: '#f5c542', label: 's̈(t)' }, // acceleration — cheese
+const SERIES: Record<Series, { token: string; label: string }> = {
+  s: { token: '--accent', label: 's(t)' }, // position — red
+  v: { token: '--plot-v', label: 'ṡ(t)' }, // velocity — green
+  a: { token: '--cheese', label: 's̈(t)' }, // acceleration — gold
 }
 
 export interface CurveOptions {
@@ -42,6 +41,10 @@ export interface CurveHandle {
 }
 
 export function createCurve(opts: CurveOptions): CurveHandle {
+  // colours come from the theme tokens (src/theme.ts), read when the plot is made
+  const AXIS = themeColor('--plot-axis')
+  const GRID = themeColor('--plot-grid')
+  const seriesColor = (key: Series) => themeColor(SERIES[key].token)
   const el = document.createElement('div')
   el.className = 'slide-plot curve-plot'
 
@@ -51,7 +54,7 @@ export function createCurve(opts: CurveOptions): CurveHandle {
     const item = document.createElement('span')
     item.className = 'curve-legend-item'
     const dot = document.createElement('i')
-    dot.style.background = SERIES[key].color
+    dot.style.background = seriesColor(key)
     item.append(dot, document.createTextNode(SERIES[key].label))
     legend.appendChild(item)
   }
@@ -82,7 +85,7 @@ export function createCurve(opts: CurveOptions): CurveHandle {
   const series: uPlot.Series[] = [{}]
   for (const key of opts.show) {
     data.push(normalize(raw[key]))
-    series.push({ stroke: SERIES[key].color, width: 2, points: { show: false } })
+    series.push({ stroke: seriesColor(key), width: 2, points: { show: false } })
   }
 
   // marker: a DOM line in uPlot's `over` layer (which covers the plot area

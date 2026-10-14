@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { themeColor } from '../theme'
 
 export { disposeSceneGraph } from '../scene/dispose'
 
@@ -26,7 +27,7 @@ export function buildStage(): THREE.Group {
   key.shadow.normalBias = 0.02
   stage.add(hemi, key)
 
-  const grid = new THREE.GridHelper(5, 25, 0x3a3640, 0x26232b)
+  const grid = new THREE.GridHelper(5, 25, themeColor('--grid-major'), themeColor('--grid-minor'))
   stage.add(grid)
 
   // shadow catcher just below the grid to avoid z-fighting

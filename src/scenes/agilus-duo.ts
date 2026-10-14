@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { themeColor } from '../theme'
 import { PID } from '../engine/pid'
 import { PidChannel } from '../engine/motion-system'
 import type { GainDefaults, SceneInstance, SceneModule } from '../engine/scene-types'
@@ -27,14 +28,14 @@ export interface AgilusDuoSceneState {
 }
 
 const GHOST_OPACITY = 0.36
-// green tint so the ghost is unmistakable against the white solid robot
-const GHOST_COLOR = new THREE.Color(0x3fc46a)
 // slightly smaller so, when the two poses coincide, the ghost tucks INSIDE the
 // solid (which then occludes it) instead of blending green over the whole robot
 const GHOST_SCALE = 0.99
 
 /** make a whole robot solid (its real colours) or a translucent green ghost */
 function setRobotGhost(robot: AgilusRobot, ghost: boolean): void {
+  // green tint so the ghost is unmistakable against the solid robot
+  const ghostColor = new THREE.Color(themeColor('--ghost'))
   robot.scale.setScalar(ghost ? GHOST_SCALE : 1)
   robot.traverse((obj) => {
     const mesh = obj as THREE.Mesh
@@ -56,10 +57,10 @@ function setRobotGhost(robot: AgilusRobot, ghost: boolean): void {
       mat.polygonOffset = ghost
       mat.polygonOffsetFactor = ghost ? 1 : 0
       mat.polygonOffsetUnits = ghost ? 2 : 0
-      mat.color.copy(ghost ? GHOST_COLOR : (mat.userData.origColor as THREE.Color))
+      mat.color.copy(ghost ? ghostColor : (mat.userData.origColor as THREE.Color))
       if (mat.emissive) {
         // a little self-illumination so the green reads even where unlit
-        if (ghost) mat.emissive.copy(GHOST_COLOR).multiplyScalar(0.3)
+        if (ghost) mat.emissive.copy(ghostColor).multiplyScalar(0.3)
         else mat.emissive.copy(mat.userData.origEmissive as THREE.Color)
       }
       mat.needsUpdate = true
@@ -112,7 +113,6 @@ function build(): SceneInstance & { setSolid(index: number): void } {
 
   return {
     root,
-    background: 0x17161b,
     anchors: {
       base: robots[0].links['base_link'],
       tool0: robots[0].links['tool0'],

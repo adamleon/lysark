@@ -24,6 +24,10 @@ import { parseBinding, readField } from './engine/channel-binding'
 import type { SceneInstance } from './engine/scene-types'
 import type { CameraTargetSpec, CompiledSlide, TrajectorySpec, WidgetSpec } from './engine/slide-types'
 import deck from 'virtual:lysark-deck'
+import { initTheme, themeColor } from './theme'
+
+// before anything reads a colour (src/theme.ts)
+initTheme()
 
 const sceneLayer = new SceneLayer(document.getElementById('scene-layer')!)
 const motion = new MotionSystem()
@@ -50,7 +54,7 @@ function clearTraces(): void {
   traceGroup.clear()
 }
 
-function drawTrace(points: THREE.Vector3[], color: number): void {
+function drawTrace(points: THREE.Vector3[], color: string): void {
   const geometry = new THREE.BufferGeometry().setFromPoints(points)
   const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })
   traceGroup.add(new THREE.Line(geometry, material))
@@ -70,11 +74,11 @@ function applyTraces(spec: TrajectorySpec, ik: IkSolver | null): void {
       for (const n of names) q[n] = spec.from[n] + s * (spec.to[n] - spec.from[n])
       pts.push(ik.fk(q))
     }
-    drawTrace(pts, 0xf5c542) // cheese/gold curve
+    drawTrace(pts, themeColor('--cheese')) // gold curve
   }
   if (spec.trace.includes('task')) {
     // Lin: the straight line between the two tool poses
-    drawTrace([ik.fk(spec.from), ik.fk(spec.to)], 0x3fc46a) // green straight line
+    drawTrace([ik.fk(spec.from), ik.fk(spec.to)], themeColor('--ghost')) // green straight line
   }
 }
 

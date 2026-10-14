@@ -1,4 +1,5 @@
 import uPlot from 'uplot'
+import { themeColor } from '../../theme'
 
 export interface PlotOptions {
   label: string
@@ -18,9 +19,6 @@ export interface PlotHandle {
 }
 
 const PLOT_HEIGHT = 160
-const ACCENT = '#ff3b3b'
-const AXIS = '#8b9096'
-const GRID = 'rgba(255, 255, 255, 0.07)'
 
 /**
  * Live channel plot (spec §8, §12): uPlot renders to its OWN 2D canvas in the
@@ -28,6 +26,10 @@ const GRID = 'rgba(255, 255, 255, 0.07)'
  * `window` seconds; the x-scale follows the newest sample so the trace scrolls.
  */
 export function createPlot(opts: PlotOptions): PlotHandle {
+  // colours come from the theme tokens (src/theme.ts), read when the plot is made
+  const AXIS = themeColor('--plot-axis')
+  const GRID = themeColor('--plot-grid')
+  const ACCENT = themeColor('--accent')
   const el = document.createElement('div')
   el.className = 'slide-plot'
 

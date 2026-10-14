@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 170" width="300" height="170">
+  <title>Two-link planar arm with joint angles θ1 and θ2</title>
+  <!-- neutral grey and red read on both the dark screen theme and the white print theme -->
+  <g fill="none" stroke="#8a8f98" stroke-width="2">
+    <line x1="20" y1="150" x2="120" y2="150" stroke-dasharray="4 4" />
+    <path d="M 78 150 A 38 38 0 0 0 71.5 129" />
+    <line x1="150" y1="80" x2="210" y2="52" stroke-dasharray="4 4" />
+    <path d="M 186 63 A 40 40 0 0 1 189 96" />
+  </g>
+  <g stroke="#e04040" stroke-width="7" stroke-linecap="round">
+    <line x1="40" y1="150" x2="150" y2="80" />
+    <line x1="150" y1="80" x2="250" y2="122" />
+  </g>
+  <g fill="#e04040">
+    <circle cx="40" cy="150" r="8" />
+    <circle cx="150" cy="80" r="7" />
+    <circle cx="250" cy="122" r="5" />
+  </g>
+  <g fill="#8a8f98" font-family="system-ui, sans-serif" font-size="15" font-style="italic">
+    <text x="90" y="140">θ₁</text>
+    <text x="196" y="86">θ₂</text>
+    <text x="256" y="140">x</text>
+  </g>
+</svg>

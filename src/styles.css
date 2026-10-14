@@ -18,6 +18,65 @@
   --good-rgb: 51, 225, 124;
   --border: rgba(255, 255, 255, 0.09);
   --border-soft: rgba(255, 255, 255, 0.14);
+  --text-rgb: 243, 238, 231;
+  --shadow-text: 0 1px 8px rgba(0, 0, 0, 0.55); /* keeps slide text legible over the scene */
+  --shadow-label: 0 1px 6px rgba(0, 0, 0, 0.6);
+  --floor-grid: rgba(74, 68, 84, 0.5); /* grid floor behind scene-less slides */
+  --bad: #ff6b6b; /* "unstable" state */
+
+  /* colours read by scripts (src/theme.ts): 3D grid, plots, reference paths */
+  --grid-major: #3a3640;
+  --grid-minor: #26232b;
+  --plot-axis: #8b9096;
+  --plot-grid: rgba(255, 255, 255, 0.07);
+  --plot-v: #5ac26a; /* velocity curve */
+  --plot-compare: #e0574f; /* first profile in a comparison */
+  --ghost: #3fc46a; /* ghost robot, its plot line, the straight-line path */
+  --plot-joint-1: #ff6b6b;
+  --plot-joint-2: #4dabf7;
+  --plot-joint-3: #51cf66;
+  --plot-joint-4: #ffd43b;
+  --plot-joint-5: #cc5de8;
+  --plot-joint-6: #ff922b;
+}
+
+/* Print theme, used only by the PDF build (lysark-v2.md step 2): white page and
+   3D background, dark text, and accents dark enough to read on white and print. */
+:root[data-theme='print'] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-rgb: 255, 255, 255;
+  --surface-rgb: 244, 242, 246;
+  --surface-hi: #e9e6ec;
+  --surface-hi2: #dedae2;
+  --text: #1c1a1f;
+  --text-rgb: 28, 26, 31;
+  --text-dim: #5d5862;
+  --accent: #c41e1e;
+  --accent-rgb: 196, 30, 30;
+  --cheese: #a66f00;
+  --cheese-rgb: 166, 111, 0;
+  --good: #1b8a4a;
+  --good-rgb: 27, 138, 74;
+  --border: rgba(0, 0, 0, 0.12);
+  --border-soft: rgba(0, 0, 0, 0.18);
+  --shadow-text: 0 0 4px rgba(var(--bg-rgb), 0.95), 0 0 10px rgba(var(--bg-rgb), 0.8);
+  --shadow-label: 0 0 4px rgba(var(--bg-rgb), 0.9);
+  --floor-grid: rgba(0, 0, 0, 0.1);
+  --bad: #c41e1e;
+  --grid-major: #b9b6bd;
+  --grid-minor: #dddae0;
+  --plot-axis: #4f4b54;
+  --plot-grid: rgba(0, 0, 0, 0.09);
+  --plot-v: #237a35;
+  --plot-compare: #c0392b;
+  --ghost: #1d8f4c;
+  --plot-joint-1: #d63031;
+  --plot-joint-2: #1971c2;
+  --plot-joint-3: #2b8a3e;
+  --plot-joint-4: #a66f00;
+  --plot-joint-5: #9c36b5;
+  --plot-joint-6: #d9480f;
 }
 
 html,
@@ -70,7 +129,7 @@ body {
   max-width: 620px;
   opacity: 0;
   transition: opacity 160ms ease;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+  text-shadow: var(--shadow-text);
 }
 
 .slide-content.shown {
@@ -155,7 +214,7 @@ body {
 /* Static (scene-less) slides show the same grid floor as the 3D scenes: this
    pseudo-element sits BEHIND the WebGL canvas (z-index -1), so a live scene's
    opaque canvas hides it and a scene-less slide (canvas hidden) reveals it.
-   Grid tone matches the GridHelper in stage.ts, over the #17161b background. */
+   Grid tone matches the GridHelper in stage.ts (tokens --floor-grid, --grid-major). */
 #scene-layer::before {
   content: '';
   position: fixed;
@@ -165,8 +224,8 @@ body {
   height: 62%;
   z-index: -1;
   background-image:
-    linear-gradient(to right, rgba(74, 68, 84, 0.5) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(74, 68, 84, 0.5) 1px, transparent 1px);
+    linear-gradient(to right, var(--floor-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--floor-grid) 1px, transparent 1px);
   background-size: 4.2% 9%;
   transform: perspective(420px) rotateX(60deg);
   transform-origin: center bottom;
@@ -237,6 +296,17 @@ body {
   max-width: 100%;
   height: auto;
   margin: 14px 0;
+}
+
+/* images are block boxes, so centre the box itself on centred slides */
+.slide-content.layout-center img {
+  margin-inline: auto;
+}
+
+/* KaTeX draws the root sign and stretchy symbols as positioned <svg> inside clipping
+   spans; the media margin above pushes them out of their clip */
+.slide-content .katex svg {
+  margin: 0;
 }
 
 .slide-content figure {
@@ -310,7 +380,7 @@ body {
   bottom: 0;
   width: 2px;
   margin-left: -1px;
-  background: rgba(243, 238, 231, 0.6);
+  background: rgba(var(--text-rgb), 0.6);
   pointer-events: none;
 }
 
@@ -335,7 +405,7 @@ body {
   background: rgba(var(--bg-rgb), 0.75);
   border: 1px solid rgba(var(--accent-rgb), 0.55);
   border-radius: 7px;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  text-shadow: var(--shadow-label);
   /* fade-in choreography: hidden until the scene settles (§5) */
   opacity: 0;
   transition: opacity 380ms ease;
@@ -502,7 +572,7 @@ body {
   font-size: 11px;
   letter-spacing: 0.03em;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--text-rgb), 0.06);
   border-radius: 999px;
 }
 
@@ -624,7 +694,7 @@ body {
 
 .badge.unstable {
   background: rgba(var(--accent-rgb), 0.2);
-  color: #ff6b6b;
+  color: var(--bad);
 }
 
 .widget-slider {
@@ -743,7 +813,7 @@ body {
   font-size: 12px;
   color: var(--text-dim);
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   cursor: pointer;
 }

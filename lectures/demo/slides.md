@@ -51,26 +51,26 @@ camera:
 <svg viewBox="0 0 470 130" role="img" aria-label="PID feedback control loop">
   <defs>
     <marker id="lysark-arrow" markerWidth="8" markerHeight="8" refX="5.5" refY="3" orient="auto">
-      <path d="M0,0 L6,3 L0,6 Z" fill="#8b9096" />
+      <path d="M0,0 L6,3 L0,6 Z" style="fill: var(--plot-axis)" />
     </marker>
   </defs>
-  <g fill="none" stroke="#8b9096" stroke-width="1.5" marker-end="url(#lysark-arrow)">
+  <g fill="none" style="stroke: var(--plot-axis)" stroke-width="1.5" marker-end="url(#lysark-arrow)">
     <line x1="26" y1="40" x2="58" y2="40" />
     <line x1="86" y1="40" x2="150" y2="40" />
     <line x1="242" y1="40" x2="300" y2="40" />
     <line x1="394" y1="40" x2="452" y2="40" />
     <path d="M424,40 L424,102 L72,102 L72,54" />
   </g>
-  <circle cx="72" cy="40" r="13" fill="none" stroke="#ff3b3b" stroke-width="1.5" />
-  <text x="72" y="45" text-anchor="middle" fill="#f3eee7" font-size="14">Σ</text>
-  <text x="58" y="70" text-anchor="middle" fill="#f5c542" font-size="15">−</text>
-  <rect x="150" y="24" width="92" height="32" rx="6" fill="rgba(255,59,59,0.12)" stroke="#ff3b3b" />
-  <text x="196" y="45" text-anchor="middle" fill="#f3eee7" font-size="14">PID</text>
-  <rect x="300" y="24" width="94" height="32" rx="6" fill="rgba(255,59,59,0.12)" stroke="#ff3b3b" />
-  <text x="347" y="45" text-anchor="middle" fill="#f3eee7" font-size="14">joint</text>
-  <text x="20" y="30" text-anchor="middle" fill="#9aa0a6" font-size="13">θ*</text>
-  <text x="271" y="34" text-anchor="middle" fill="#9aa0a6" font-size="13">τ</text>
-  <text x="458" y="30" text-anchor="end" fill="#9aa0a6" font-size="13">θ</text>
+  <circle cx="72" cy="40" r="13" fill="none" style="stroke: var(--accent)" stroke-width="1.5" />
+  <text x="72" y="45" text-anchor="middle" style="fill: var(--text)" font-size="14">Σ</text>
+  <text x="58" y="70" text-anchor="middle" style="fill: var(--cheese)" font-size="15">−</text>
+  <rect x="150" y="24" width="92" height="32" rx="6" style="fill: rgba(var(--accent-rgb), 0.12); stroke: var(--accent)" />
+  <text x="196" y="45" text-anchor="middle" style="fill: var(--text)" font-size="14">PID</text>
+  <rect x="300" y="24" width="94" height="32" rx="6" style="fill: rgba(var(--accent-rgb), 0.12); stroke: var(--accent)" />
+  <text x="347" y="45" text-anchor="middle" style="fill: var(--text)" font-size="14">joint</text>
+  <text x="20" y="30" text-anchor="middle" style="fill: var(--text-dim)" font-size="13">θ*</text>
+  <text x="271" y="34" text-anchor="middle" style="fill: var(--text-dim)" font-size="13">τ</text>
+  <text x="458" y="30" text-anchor="end" style="fill: var(--text-dim)" font-size="13">θ</text>
 </svg>
 <figcaption>Setpoint θ*, controller, plant, and the measured angle θ fed back — negative at the summing junction.</figcaption>
 </figure>
@@ -242,7 +242,9 @@ The canvas is gone and the render loop is **stopped** — zero GPU work
 right now.
 
 <!-- pause -->
-Text, math, and media still work, because the overlay never depended on
+Text, math, and images still work, because the overlay never depended on
 WebGL:
 
 $$e^{i\pi} + 1 = 0$$
+
+![A two-link arm with joint angles θ₁ and θ₂](images/two-link-arm.svg)
