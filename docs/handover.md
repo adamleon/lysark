@@ -12,10 +12,13 @@ confirmed the section 8 decisions. **Step 1 (the split) is landing:** lectures l
 per-course repos and the engine is a package with a `lysark` command; how that works
 is in [step-1-split.md](step-1-split.md). The first course repo is
 [adamleon/ais2105-lectures](https://github.com/adamleon/ais2105-lectures), pinned to
-engine `v2.0.0`. Step 1 is done only when its "Done when" check in lysark-v2.md
-passes: a github.dev typo fix live on Pages within about two minutes, and a second
-computer set up from the course's `SETUP.md` alone. The engine feature freeze holds
-until step 2 is done.
+engine `v2.0.0`, and published at https://adamleon.github.io/ais2105-lectures/.
+The first publish (2026-10-13) passed: HTML live 81 s after the push (HTML job 73 s:
+Chromium install 24 s, build + offline check 17 s, deploy 18 s), then the PDF job
+109 s. Step 1 is done only when its "Done when" check in lysark-v2.md passes; the
+author still has to run it: a typo fixed in github.dev showing on Pages after F5
+within about two minutes, and a second computer set up from the course's `SETUP.md`
+alone. The engine feature freeze holds until step 2 is done.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
