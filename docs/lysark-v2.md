@@ -388,6 +388,11 @@ lecture needs is its own small change, landed and understood before the lecture 
 Done when a typo fixed in github.dev appears on the Pages link after a reload within about two
 minutes of the commit, measured, and a second computer has been set up from `SETUP.md` alone.
 
+**Status: done on 2026-10-14.** The author's github.dev fix was live 64 seconds after the commit
+(build and offline check 18 s); the PDF followed at 199 s. The second-computer check is deferred:
+the author has only one PC for now, and judged it not critical. Run it when a second computer is
+available, and fix `SETUP.md` wherever it falls short.
+
 ### Step 2: Images and the print PDF
 
 - Embed images at build time. A missing file or a web URL fails the build with a message that
@@ -477,5 +482,6 @@ Proposed in this document and confirmed by the author on 2026-10-13, at the star
 - Whether the classroom PC wipes browser profiles between sessions; if it does, the extension has
   to be reinstalled each session. (Its Firefox is updated often and private windows aren't used
   for presenting, so the Firefox limit in section 5 doesn't apply there.)
-- Is about two minutes from commit to live acceptable for hot fixes? Step 1 measures it, and the
-  answer decides whether live mode is ever needed.
+- ~~Is about two minutes from commit to live acceptable for hot fixes?~~ Answered in step 1: a
+  github.dev fix was live in 64 seconds, which the author confirmed works as intended. Live mode
+  (section 7) stays postponed.

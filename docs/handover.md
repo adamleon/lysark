@@ -8,17 +8,18 @@ are in the repo-root [CLAUDE.md](../CLAUDE.md).
 ## Where the project is (2026-10-13)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
-confirmed the section 8 decisions. **Step 1 (the split) is landing:** lectures live in
-per-course repos and the engine is a package with a `lysark` command; how that works
-is in [step-1-split.md](step-1-split.md). The first course repo is
+confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
+lectures live in per-course repos and the engine is a package with a `lysark`
+command; how that works is in [step-1-split.md](step-1-split.md). The first course repo is
 [adamleon/ais2105-lectures](https://github.com/adamleon/ais2105-lectures), pinned to
 engine `v2.0.0`, and published at https://adamleon.github.io/ais2105-lectures/.
 The first publish (2026-10-13) passed: HTML live 81 s after the push (HTML job 73 s:
 Chromium install 24 s, build + offline check 17 s, deploy 18 s), then the PDF job
-109 s. Step 1 is done only when its "Done when" check in lysark-v2.md passes; the
-author still has to run it: a typo fixed in github.dev showing on Pages after F5
-within about two minutes, and a second computer set up from the course's `SETUP.md`
-alone. The engine feature freeze holds until step 2 is done.
+109 s. The author's github.dev typo fix was live 64 s after the commit. Still open
+from step 1: setting up a second computer from the course's `SETUP.md` alone,
+deferred until the author has one (not critical). The engine feature freeze holds
+until step 2 is done. **Next is step 2:** images embedded at build time, and the light
+print PDF.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
@@ -177,8 +178,8 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
 ## Next steps
 
-Follow [lysark-v2.md](lysark-v2.md) section 6: finish step 1 by passing its "Done
-when" check (see "Where the project is"), then step 2 (images and the print PDF). The
+Follow [lysark-v2.md](lysark-v2.md) section 6: step 2 (images and the print PDF) is
+next. When a second computer is available, run step 1's deferred `SETUP.md` check. The
 backlog is lysark-v2.md section 7, the only one; the old `ideas.md` is archived in
 [docs/archive/](archive/), and its unbuilt items, plus the mesh polish and GLB ideas
 that used to be listed here, are in that section.
