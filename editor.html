@@ -3,13 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Only the runtime's own script files run: the page shows the HTML in the
-         lecture text it is sent, and that must never run script here
-         (src/editor/panel-origin.ts) -->
+    <!-- The editor runtime's build entry. On the course site this page only lists
+         the runtime's files: the VS Code extension reads it and loads those files
+         into its own panel page (src/editor/panel-page.js). Opened directly, the
+         runtime only shows a note. Only its own script files may run here. -->
     <meta
       http-equiv="Content-Security-Policy"
       content="script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
+    <!-- the version of the messages this runtime speaks; EDITOR_PROTOCOL in
+         src/editor/panel-page.js (a test checks they match) -->
+    <meta name="lysark-editor-protocol" content="2" />
     <title>Lysark editor</title>
   </head>
   <body>

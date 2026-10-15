@@ -2,7 +2,7 @@
   "name": "lysark",
   "displayName": "Lysark",
   "description": "Preview Lysark lecture slides beside the text and save 3D camera views into them, also in github.dev",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "simply-wyvern",
   "license": "MIT",
   "repository": {
@@ -19,11 +19,19 @@
   ],
   "main": "./dist/extension.js",
   "browser": "./dist/extension.js",
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
   "activationEvents": [],
   "capabilities": {
     "virtualWorkspaces": true,
     "untrustedWorkspaces": {
-      "supported": true
+      "supported": "limited",
+      "description": "In Restricted Mode the lysark.editorUrl setting from the workspace is ignored; the preview loads from the course homepage.",
+      "restrictedConfigurations": [
+        "lysark.editorUrl"
+      ]
     }
   },
   "contributes": {
@@ -80,7 +88,7 @@
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "package": "npx --yes @vscode/vsce@3.9.2 package",
-    "test-web": "npx --yes @vscode/test-web@0.0.80 --extensionDevelopmentPath=. --browserType=none --port=3000"
+    "test-web": "npx --yes @vscode/test-web@0.0.80 --extensionDevelopmentPath=. --browserType=none --port=3000 --coi"
   },
   "devDependencies": {
     "@types/vscode": "1.100.0",

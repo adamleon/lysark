@@ -10,8 +10,8 @@
     },
     {
       "name": "lysark-editor-runtime",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "preview", "--mode", "editor", "--outDir", "dist/editor", "--port", "4173", "--strictPort"],
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/editor-server.mjs", "dist/editor", "4173"],
       "port": 4173
     }
   ]

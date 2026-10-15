@@ -1,24 +1,31 @@
 import { compileLecture } from '../compiler/compile-slides'
 import { SCENE_NAMES } from '../scenes/registry'
-import { isPanelOrigin } from './panel-origin'
+import { EDITOR_PROTOCOL } from './panel-page.js'
 
 /**
- * The editor runtime (lysark-v2.md §5, step 3): this page runs inside the
- * Lysark panel in VS Code. The panel sends the lecture text; this page checks
- * that it compiles, then starts the deck with it. New text that compiles
- * reloads the page ('accepted'), and the panel answers the reload's 'ready'
- * with that text. Text that doesn't compile leaves the last good version
- * running and shows the error.
+ * The editor runtime (lysark-v2.md §5, step 3). It runs as the page of the
+ * Lysark panel in VS Code (src/editor/panel-page.js), loaded from the course
+ * site, and talks to the extension through VS Code's webview messages. The
+ * extension sends the lecture text; this page checks that it compiles, then
+ * starts the deck with it. New text that compiles is 'accepted', and the
+ * extension then loads the panel afresh and sends that text again on 'ready'.
+ * Text that doesn't compile leaves the last good version running and shows
+ * the error.
  *
- * Every text the panel sends carries a number (seq). The page names the one it
- * shows in 'shown', 'slide' and 'save-view', so the panel knows which text a
- * slide number counts in (docs/step-3-editor-test.md).
+ * Every text the extension sends carries a number (seq). The page names the
+ * one it shows in 'shown', 'slide' and 'save-view', so the extension knows
+ * which text a slide number counts in (docs/step-3-editor-test.md).
  *
  * Messages, all { type: 'lysark:…' }:
- *   page → panel  ready · shown { seq } · accepted { seq } · slide { index, seq }
- *                 save-view { slide, seq, view } · error { message, seq? }
- *   panel → page  source { text, seq, slide } · goto { slide } · request-view
+ *   page → extension  ready { protocol, render } · shown { seq, index } · accepted { seq }
+ *                     slide { index, seq } · save-view { slide, seq, view }
+ *                     error { message, seq? }
+ *   extension → page  source { text, seq, slide, protocol } · goto { slide }
+ *                     request-view
  */
+
+/** VS Code defines this in its panels; it may be called once per page */
+declare function acquireVsCodeApi(): { postMessage(message: unknown): void }
 
 interface Vec3Like {
   x: number
@@ -49,11 +56,26 @@ interface LysarkHandle {
 const ANCHOR_TOLERANCE = 0.005
 
 const lysark = () => (window as unknown as { __lysark?: LysarkHandle }).__lysark
-const post = (message: Record<string, unknown>) => window.parent.postMessage({ ...message }, '*')
-const embedded = window.parent !== window
+const vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null
+const post = (message: Record<string, unknown>) => vscode?.postMessage({ ...message })
 let booted = false
 /** the number of the text this page shows */
 let shownSeq: number | null = null
+function goTo(slide: number): void {
+  const engine = lysark()?.engine
+  if (!engine) {
+    // still starting: the deck starts on the slide in the address, so a slide
+    // asked for now just goes there (before the text arrives, 'source' names it)
+    if (booted) location.hash = `#${slide + 1}`
+    return
+  }
+  if (slide !== engine.currentIndex && slide < engine.slideCount) {
+    engine.goTo(slide, slide < engine.currentIndex ? 'backward' : 'forward')
+  }
+}
+
+/** the panel page's "Loading…" text, until the deck has started or failed to */
+const clearLoading = () => document.getElementById('lysark-loading')?.remove()
 
 // ---- small status banner (errors, saved views) -----------------------------
 
@@ -66,7 +88,7 @@ hint.textContent = 'V or the camera button above: save this camera view into the
 hint.style.cssText =
   'position:fixed;left:12px;top:10px;z-index:1000;padding:3px 8px;border-radius:6px;font:12px system-ui,sans-serif;' +
   'color:var(--text-dim);background:rgba(var(--surface-rgb),0.8);pointer-events:none'
-document.addEventListener('DOMContentLoaded', () => document.body.append(banner, hint))
+document.addEventListener('DOMContentLoaded', () => document.body.append(banner, ...(vscode ? [hint] : [])))
 
 let bannerTimer: number | undefined
 function showBanner(text: string | null, kind: 'error' | 'ok' = 'error'): void {
@@ -77,8 +99,8 @@ function showBanner(text: string | null, kind: 'error' | 'ok' = 'error'): void {
   }
   banner.textContent = text
   banner.style.display = 'block'
-  banner.style.background = kind === 'error' ? 'rgba(196,30,30,0.92)' : 'rgba(27,138,74,0.92)'
-  banner.style.color = '#fff'
+  banner.style.background = kind === 'error' ? 'rgba(var(--accent-rgb), 0.92)' : 'rgba(var(--good-rgb), 0.92)'
+  banner.style.color = kind === 'error' ? 'var(--text)' : 'var(--bg)'
   if (kind === 'ok') bannerTimer = window.setTimeout(() => showBanner(null), 2500)
 }
 
@@ -95,28 +117,34 @@ function problemWith(text: string): string | null {
   }
 }
 
-// ---- messages from the panel -----------------------------------------------
+// ---- messages from the extension -------------------------------------------
 
 window.addEventListener('message', async (event) => {
-  if (event.source !== window.parent) return
-  const message = event.data as { type?: string; text?: string; slide?: number; seq?: number }
-  if (!isPanelOrigin(event.origin, location.hostname)) {
-    if (typeof message?.type === 'string' && message.type.startsWith('lysark:')) {
-      showBanner(`Ignored the lecture from ${event.origin}: only the Lysark panel in VS Code can use this page.`)
-    }
-    return
-  }
+  // VS Code delivers the extension's messages from its own frames, which share
+  // this page's origin. A frame inside the slides has another origin (or none),
+  // so it can't pose as the extension. (window.parent is no help: VS Code's
+  // panel script sets it to the page itself.)
+  if (!vscode || event.origin !== window.origin) return
+  const message = event.data as { type?: string; text?: string; slide?: number; seq?: number; protocol?: number }
   if (message?.type === 'lysark:source' && typeof message.text === 'string' && typeof message.seq === 'number') {
+    // the same text again (a message that crossed a reload): already showing it
+    if (booted && message.seq === shownSeq) return
+    if (message.protocol !== EDITOR_PROTOCOL) {
+      const problem = `This Lysark extension doesn't match the course's engine (messages version ${message.protocol ?? 'unknown'}, the engine has ${EDITOR_PROTOCOL}). Update the extension, or the course's engine.`
+      showBanner(problem)
+      post({ type: 'lysark:error', message: problem, seq: message.seq })
+      return
+    }
     const problem = problemWith(message.text)
     if (problem) {
+      if (!booted) clearLoading() // nothing to show yet but the error
       showBanner(`Not updated, the slides have an error:\n${problem}`)
       post({ type: 'lysark:error', message: problem, seq: message.seq })
       return
     }
     if (booted) {
-      // new text: reload, and the panel sends this text again on 'ready'
+      // new text: the extension loads this page afresh and sends it again on 'ready'
       post({ type: 'lysark:accepted', seq: message.seq })
-      location.reload()
       return
     }
     showBanner(null)
@@ -126,19 +154,20 @@ window.addEventListener('message', async (event) => {
     booted = true
     try {
       await import('../main')
-      post({ type: 'lysark:shown', seq: shownSeq })
+      clearLoading()
+      post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
     } catch (err) {
+      // the deck's files didn't load (a network failure, or the site was
+      // republished meanwhile): only loading the panel afresh helps
       const text = String((err as Error)?.message ?? err)
-      showBanner(text)
-      post({ type: 'lysark:error', message: text })
+      clearLoading()
+      showBanner(`The preview failed to start:\n${text}`)
+      post({ type: 'lysark:error', message: text, fatal: true })
     }
   } else if (message?.type === 'lysark:request-view') {
     saveView()
   } else if (message?.type === 'lysark:goto' && typeof message.slide === 'number') {
-    const engine = lysark()?.engine
-    if (engine && message.slide !== engine.currentIndex && message.slide < engine.slideCount) {
-      engine.goTo(message.slide, message.slide < engine.currentIndex ? 'backward' : 'forward')
-    }
+    goTo(message.slide)
   }
 })
 
@@ -194,10 +223,33 @@ window.addEventListener('hashchange', () => {
 
 window.addEventListener('error', (e) => post({ type: 'lysark:error', message: String(e.message) }))
 
-if (embedded) {
-  post({ type: 'lysark:ready' })
+// a link to another slide (`[back to the setup](#3)`): VS Code's panel swallows
+// the click (it looks for an element with that id), so follow it here first
+document.addEventListener('click', (e) => {
+  const link = vscode && e.target instanceof Element ? e.target.closest('a[href^="#"]') : null
+  if (!link) return
+  e.preventDefault()
+  e.stopPropagation()
+  location.hash = link.getAttribute('href') ?? ''
+})
+
+// VS Code gives every panel default styles (body padding, code and image
+// styling) where the deck sets nothing; without them the panel looks like
+// the student file
+document.getElementById('_defaultStyles')?.remove()
+
+if (vscode) {
+  // the panel page's render number (src/editor/panel-page.js), so the extension
+  // can tell this page's 'ready' from a late one sent by the page it replaced
+  const render = Number(document.querySelector('meta[name="lysark-render"]')?.getAttribute('content') ?? NaN)
+  post({ type: 'lysark:ready', protocol: EDITOR_PROTOCOL, render })
 } else {
-  document.addEventListener('DOMContentLoaded', () =>
-    showBanner('This is the Lysark editor runtime. Open a slides.md in VS Code and click "Open Lysark Preview".'),
-  )
+  // Framed, this page is in the panel of Lysark extension 0.1.0, which framed
+  // the site's editor page (VS Code's own panel page has window.parent ===
+  // window). Opened directly, it's someone looking at the course site.
+  const note =
+    window.parent !== window
+      ? "This Lysark extension is older than the course's engine: update the Lysark extension (0.2.0 or later)."
+      : 'This is the Lysark editor runtime. It runs inside the Lysark panel in VS Code: open a slides.md and click "Open Lysark Preview".'
+  document.addEventListener('DOMContentLoaded', () => showBanner(note))
 }

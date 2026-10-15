@@ -231,10 +231,14 @@ course's pinned engine. Two things follow:
 - The preview always uses the engine version the course pins, so it matches the student file.
 - Engine changes reach the editor through course CI, not through a new extension release.
 
-This design is untested. Step 3 starts with a test that checks whether the panel may load scripts
-from Pages. If it may not, the fallback is to bundle the engine into the extension, show a banner
-when the course pins a different version, and upload a new extension version for each engine
-release.
+Step 3's test checks whether the panel may load scripts from Pages. The first try showed it may
+not frame a Pages page: github.dev makes its panels cross-origin isolated, and a framed page must
+then send headers Pages can't send. Files loaded with CORS are allowed, and Pages allows CORS for
+every file, so the second version's panel page loads the runtime's files from the site
+(step-3-editor-test.md). That works under the same isolation in CI and in VS Code for the web on
+this PC; the check in github.dev itself decides. If it fails, the fallback is to bundle the engine
+into the extension, show a banner when the course pins a different version, and upload a new
+extension version for each engine release.
 
 ### Publishing the extension
 
@@ -436,14 +440,21 @@ file passed the offline check, and all three rendered.
 
 How the test version works: [step-3-editor-test.md](step-3-editor-test.md).
 
-**Status (2026-10-15): the test version is built**, and waits for the author's check in github.dev
-and desktop VS Code. The extension (publisher `simply-wyvern`) shows the live lecture in a panel
-whose code comes from the course's Pages site, follows the cursor, updates on save, and saves a
-camera view into the slide as a text edit. Course CI publishes the panel's code at
-`_lysark/editor/`. All of it was checked in VS Code for the web on this PC (`@vscode/test-web`),
-with the panel's code served locally. One change to the plan: the test goes straight to the
+**Status (2026-10-15): the test is under way.** The extension (publisher `simply-wyvern`) shows
+the live lecture in a panel whose code comes from the course's Pages site, follows the cursor,
+updates on save, and saves a camera view into the slide as a text edit. Course CI publishes the
+panel's code at `_lysark/editor/`. One change to the plan: the test goes straight to the
 Marketplace, since the publisher exists, instead of first installing in vscode.dev from a local
 HTTPS server.
+
+- First result (extension 0.1.0, engine v2.2.0): in github.dev in Firefox the panel stayed empty
+  (`NS_ERROR_DOM_COEP_FAILED`). The panel framed the site's editor page, which github.dev's
+  cross-origin isolation forbids for a site that can't send the matching headers, as Pages can't.
+- Second version (extension 0.2.0, engine v2.3.0): the panel's own page loads the runtime's files
+  from the site with CORS, which isolation allows. Engine CI now checks this in Chromium and
+  Firefox under the same isolation, and it was checked end to end in VS Code for the web with
+  isolation on (`@vscode/test-web --coi`). Waiting for the author's check in github.dev and
+  desktop VS Code.
 
 ## 7. Postponed
 

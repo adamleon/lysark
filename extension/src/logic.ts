@@ -41,17 +41,29 @@ export function matchSlide(from: string, to: string, index: number): number {
   return -1
 }
 
+/**
+ * Text for a VS Code notification. VS Code turns `[label](command:…)` (or
+ * https:, file:) in an extension's message into a link that runs or opens it
+ * when clicked, even in Restricted Mode; messages here carry text from the
+ * workspace and the course site. Breaking `](` keeps the text readable and
+ * makes no link.
+ */
+export function notificationText(text: string): string {
+  return text.replace(/\]\s*\(/g, '] (')
+}
+
 /** the folder the course site publishes the editor runtime in (scripts/site.mjs) */
 export const EDITOR_PATH = '_lysark/editor/'
 
 /**
- * Where to load the editor runtime from: the `lysark.editorUrl` setting if set,
- * otherwise the course package.json's `homepage` (its GitHub Pages address)
- * plus `_lysark/editor/`. Throws with a message for the author if neither works.
+ * Where to load the editor runtime from, as a folder address ending in `/`:
+ * the `lysark.editorUrl` setting if set, otherwise the course package.json's
+ * `homepage` (its GitHub Pages address) plus `_lysark/editor/`. Throws with a
+ * message for the author if neither works.
  */
 export function editorUrl(setting: string, packageJson: unknown): string {
   const fromSetting = setting.trim()
-  if (fromSetting) return checkedUrl(fromSetting, 'The lysark.editorUrl setting')
+  if (fromSetting) return checkedFolder(fromSetting, 'The lysark.editorUrl setting')
   const homepage = (packageJson as { homepage?: unknown } | null)?.homepage
   if (typeof homepage !== 'string' || !homepage.trim()) {
     throw new Error(
@@ -59,11 +71,12 @@ export function editorUrl(setting: string, packageJson: unknown): string {
         'for example "homepage": "https://adamleon.github.io/ais2105-lectures/".',
     )
   }
-  const base = checkedUrl(homepage.trim(), 'The "homepage" in package.json')
-  return new URL(EDITOR_PATH, base.endsWith('/') ? base : `${base}/`).href
+  const site = checkedFolder(homepage.trim(), 'The "homepage" in package.json')
+  return new URL(EDITOR_PATH, site).href
 }
 
-function checkedUrl(text: string, what: string): string {
+/** a web address as a folder: https (or http on this computer), no query, ending in `/` */
+function checkedFolder(text: string, what: string): string {
   let url: URL
   try {
     url = new URL(text)
@@ -73,6 +86,12 @@ function checkedUrl(text: string, what: string): string {
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocal(url.hostname))) {
     throw new Error(`${what} must start with https:// (got ${text})`)
   }
+  url.search = ''
+  url.hash = ''
+  if (!url.pathname.endsWith('/')) url.pathname += '/'
+  // the address goes into the panel's Content-Security-Policy, where these
+  // characters would end or split it
+  if (/[\s;,'"]/.test(url.href)) throw new Error(`${what} contains a character it can't have: ${text}`)
   return url.href
 }
 

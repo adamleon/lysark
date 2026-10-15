@@ -7,7 +7,8 @@ name: Engine checks
 # which is how a course gets it. The course-style build is uploaded as the
 # downloadable "demo" artifact. The editor runtime is built the same way, as
 # the course site builds it for the VS Code extension, and booted in Chromium
-# the way the extension's panel uses it (scripts/check-editor.mjs).
+# and Firefox the way the extension's panel in github.dev loads it: from a
+# Pages-like server into a cross-origin-isolated page (scripts/check-editor.mjs).
 #
 # The extension job builds the VS Code extension (extension/), which uses
 # engine code, and uploads the .vsix that is published to the Marketplace.
@@ -49,8 +50,8 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Install Chromium for the offline check
-        run: npx playwright-core install --with-deps chromium
+      - name: Install Chromium for the offline check, and Firefox for the editor check
+        run: npx playwright-core install --with-deps chromium firefox
 
       - name: Build and check the demo from this checkout
         run: |
@@ -69,7 +70,8 @@ jobs:
           npx --no lysark build demo
           npx --no lysark check dist/demo.html
           npx --no lysark editor-build --out-dir editor
-          node "$GITHUB_WORKSPACE/scripts/check-editor.mjs" editor lectures/demo/slides.md
+          node "$GITHUB_WORKSPACE/scripts/check-editor.mjs" editor lectures/demo/slides.md --browser chromium
+          node "$GITHUB_WORKSPACE/scripts/check-editor.mjs" editor lectures/demo/slides.md --browser firefox
 
       - uses: actions/upload-artifact@v4
         with:

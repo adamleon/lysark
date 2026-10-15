@@ -26,17 +26,20 @@ theme, and theme colours come from the CSS tokens (see the colour rule in CLAUDE
 The course runs `v2.1.0`: the author moved it with the Update engine workflow (its first
 real use), and the published PDF is light. The engine feature freeze has ended.
 
-**Step 3 (the VS Code extension and the visual editor) is under way.** The test
-version is built; how it works is in [step-3-editor-test.md](step-3-editor-test.md).
-The extension (`extension/`, Marketplace publisher `simply-wyvern`, ID
-`simply-wyvern.lysark`) is a thin host: its panel frames the editor runtime
-(`src/editor/`, built by `lysark editor-build`) that course CI publishes at
-`<site>/_lysark/editor/`. The panel follows the cursor, reloads on save, and saves a
-camera view into the slide's frontmatter (V in the panel, or the camera button in its
-title bar). Checked end to end in `@vscode/test-web` with a local runtime. Waiting on
-the author: the course on the release with the editor runtime (Update engine), the
-`.vsix` uploaded to the Marketplace, then the check in github.dev (Firefox) and desktop
-VS Code. After that: the scene file format, then the editor items of lysark-v2.md §5.
+**Step 3 (the VS Code extension and the visual editor) is under way**, at its test;
+how it works is in [step-3-editor-test.md](step-3-editor-test.md). The extension
+(`extension/`, Marketplace publisher `simply-wyvern`, ID `simply-wyvern.lysark`) is
+a thin host: its panel page loads the editor runtime's files (`src/editor/`, built by
+`lysark editor-build`) from `<site>/_lysark/editor/`, where course CI publishes them.
+The panel follows the cursor, reloads on save, and saves a camera view into the slide's
+frontmatter (V in the panel, or the camera button in its title bar). The first version
+(0.1.0, engine v2.2.0) framed the site's page and failed in github.dev in Firefox
+(`NS_ERROR_DOM_COEP_FAILED`: github.dev isolates its panels); 0.2.0 with engine v2.3.0
+loads the files with CORS instead, checked in CI in Chromium and Firefox under the same
+isolation and end to end in `@vscode/test-web --coi`. Waiting on the author: the course
+on v2.3.0 (Update engine), the 0.2.0 `.vsix` uploaded, then the check in github.dev
+(Firefox) and desktop VS Code. After that: the scene file format, then the editor items
+of lysark-v2.md §5.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -45,6 +48,8 @@ Proposals (not built):
 - From step 3: show the deck in the editor panel at the projector's 16:9 shape
   (letterboxed), so saved views and text size look as in the classroom. The deck has
   no fixed stage today; see step-3-editor-test.md.
+- From step 3: in the panel, change slides with history.replaceState instead of a new
+  `#n` entry, so browser Back in github.dev doesn't step through preview slides.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
@@ -155,7 +160,8 @@ keep it green.
 - `src/editor/` — the editor runtime (step 3): `runtime.ts` (bridge to the VS Code
   panel), `deck-from-source.ts` (stands in for `virtual:lysark-deck`, compiles the
   text in the browser), `camera-edit.ts` (writes a view into a slide, byte for byte),
-  `panel-origin.ts` (which pages may drive it). `editor.html` is its page.
+  `panel-page.js` (the panel's page and the runtime's file list, shared with the
+  extension and the CI check). `editor.html` is its build entry.
   `src/compiler/slide-ranges.ts` — where each slide sits, shared by the compiler
   and the extension. `src/scenes/all.ts` — every scene, for the editor.
 - `extension/` — the VS Code extension: own `package.json`, esbuild bundle, `.vsix`
@@ -173,14 +179,16 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**150**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**159**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.
 - `node bin/lysark.mjs pdf dist/demo.html` → `dist/demo.pdf`.
 - Against a course lecture: `npm run dev -- ../ais2105-lectures/lectures/baneplanlegging`.
 - `node bin/lysark.mjs editor-build` → `dist/editor/` (the editor runtime);
-  `node scripts/check-editor.mjs dist/editor lectures/demo/slides.md` boots it as the panel does.
+  `node scripts/check-editor.mjs dist/editor lectures/demo/slides.md [--browser firefox]` boots it
+  as the panel in github.dev does; `node scripts/editor-server.mjs dist/editor 4173` serves it
+  like Pages.
 - In `extension/`: `npm run build`, `npm run typecheck`, `npm run package` (→ `.vsix`),
   `npm run test-web -- <course folder>` (VS Code for the web on port 3000).
 
@@ -191,7 +199,8 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
   no events), so V can't be exercised there; the camera button in the panel's
   title bar can, since it is workbench DOM. Extension-host `console.log` shows up in
   the page console; the panel's frames don't. The panel goes black whenever the
-  pane stops painting (same cause as the rAF pause below).
+  pane stops painting (same cause as the rAF pause below). Run test-web with `--coi`
+  (the `test-web` script does), or isolation problems like the 0.1.0 one stay hidden.
 
 - **Preview tab rAF pause**: the Claude preview tab is backgrounded → `rAF` paused,
   render loop looks frozen, `preview_screenshot` times out. NOT a bug. Verify via

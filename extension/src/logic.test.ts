@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { editorUrl, isCameraView, isCoursePackage, matchSlide, singleEdit } from './logic'
+import { editorUrl, isCameraView, isCoursePackage, matchSlide, notificationText, singleEdit } from './logic'
+
+describe('notificationText', () => {
+  // VS Code's link parser for extension messages (workbench notifications)
+  const LINK = /\[([^\]]+)\]\(((?:https?:\/\/|command:|file:)[^)\s]+)(?:\s+"([^"]+)")?\)/gi
+
+  it('leaves no text VS Code would turn into a link', () => {
+    for (const text of [
+      'version [Update](command:workbench.action.terminal.sendSequence?%7B%22text%22%3A%22x%22%7D)',
+      'outside https://x/: /[a](https://evil.example/)',
+      '[a]  (file:///etc/passwd)',
+    ]) {
+      expect(notificationText(text).match(LINK), text).toBeNull()
+    }
+  })
+
+  it('keeps ordinary text, brackets included', () => {
+    expect(notificationText('lookAt: [0, 1, 2] (a point)')).toBe('lookAt: [0, 1, 2] (a point)')
+  })
+})
 
 describe('matchSlide', () => {
   const deck = (...bodies: string[]) => bodies.map((b, i) => `---\nscene: arm\ncamera:\n  offset: [${i}, 1, 1]\n---\n${b}\n`).join('')
@@ -38,8 +57,14 @@ describe('editorUrl', () => {
     expect(editorUrl('', { homepage: 'https://adamleon.github.io/ais2105-lectures' })).toBe(want)
   })
 
-  it('prefers the setting, used as given', () => {
+  it('prefers the setting, as a folder address', () => {
     expect(editorUrl(' http://localhost:4173/ ', { homepage: 'https://x.github.io/c/' })).toBe('http://localhost:4173/')
+    expect(editorUrl('http://127.0.0.1:4173/_lysark/editor?x=1#y', null)).toBe('http://127.0.0.1:4173/_lysark/editor/')
+  })
+
+  it('refuses characters that would break the panel security policy', () => {
+    expect(() => editorUrl('https://x.github.io/a;b/', null)).toThrow(/character/)
+    expect(() => editorUrl('', { homepage: 'https://x.github.io/a,b' })).toThrow(/character/)
   })
 
   it('explains a missing or unusable address', () => {
