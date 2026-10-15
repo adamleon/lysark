@@ -11,7 +11,13 @@ export async function launchBrowser(name) {
   const browserType = { chromium, firefox }[name]
   if (!browserType) throw new Error(`unknown browser '${name}' (chromium or firefox)`)
   try {
-    return await browserType.launch({ timeout: 60_000 })
+    return await browserType.launch({
+      timeout: 60_000,
+      // CI machines have no GPU, and Firefox's graphics blocklist then refuses
+      // WebGL 2 ("AllowWebgl2:false restricts context creation on this
+      // system"); Chromium falls back to software rendering on its own
+      ...(name === 'firefox' ? { firefoxUserPrefs: { 'webgl.force-enabled': true } } : {}),
+    })
   } catch (err) {
     // only the missing-browser case gets the friendly hint; any other launch
     // failure (missing system libraries, a crash) keeps its own message and logs
