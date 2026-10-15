@@ -51,7 +51,9 @@ jobs:
         run: npm test
 
       - name: Install Chromium for the offline check, and Firefox for the editor check
-        run: npx playwright-core install --with-deps chromium firefox
+        run: |
+          npx playwright-core install --with-deps chromium firefox
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libegl1
 
       - name: Build and check the demo from this checkout
         run: |
@@ -71,7 +73,9 @@ jobs:
           npx --no lysark check dist/demo.html
           npx --no lysark editor-build --out-dir editor
           node "$GITHUB_WORKSPACE/scripts/check-editor.mjs" editor lectures/demo/slides.md --browser chromium
-          node "$GITHUB_WORKSPACE/scripts/check-editor.mjs" editor lectures/demo/slides.md --browser firefox
+          # Firefox finds no OpenGL on the GPU-less runner when headless; in a
+          # window on a virtual display it uses Mesa's software OpenGL
+          xvfb-run -a node "$GITHUB_WORKSPACE/scripts/check-editor.mjs" editor lectures/demo/slides.md --browser firefox --headed
 
       - uses: actions/upload-artifact@v4
         with:

@@ -19,7 +19,7 @@
 // links, a form), no errors, and no requests anywhere else. Engine CI runs it
 // on the course-style build in Chromium and Firefox.
 //
-//   node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png]
+//   node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png] [--headed]
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -127,7 +127,7 @@ id: script-test
 `
 
 /** @returns {Promise<{ ok: boolean, lines: string[] }>} */
-export async function checkEditor(editorDir, slidesFile, { browser: browserName = 'chromium', screenshot } = {}) {
+export async function checkEditor(editorDir, slidesFile, { browser: browserName = 'chromium', screenshot, headed = false } = {}) {
   const lectureText = readFileSync(slidesFile, 'utf8')
   const site = await serveEditor(editorDir)
   const sitePort = site.address().port
@@ -172,7 +172,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
   let allowCspReports = false
   let browser
   try {
-    browser = await launchBrowser(browserName)
+    browser = await launchBrowser(browserName, { headed })
     const page = await browser.newPage()
     page.on('console', (msg) => {
       if (msg.type() !== 'error') return
@@ -307,13 +307,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   const browser = option('browser') ?? 'chromium'
   const screenshot = option('screenshot')
+  // a visible window (CI runs Firefox like this under a virtual display, for its OpenGL)
+  const headed = args.includes('--headed')
+  if (headed) args.splice(args.indexOf('--headed'), 1)
   const [dir, slides] = args
   if (!dir || !slides) {
     console.error('Usage: node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png]')
     process.exit(1)
   }
   const started = Date.now()
-  const report = await checkEditor(dir, slides, { browser, screenshot })
+  const report = await checkEditor(dir, slides, { browser, screenshot, headed })
   console.log(`${report.ok ? '✓' : '✗'} editor runtime in ${dir} (${browser}, ${Math.round((Date.now() - started) / 1000)} s)`)
   for (const line of report.lines) console.log(`   ${line}`)
   if (!report.ok && process.env.GITHUB_ACTIONS) {

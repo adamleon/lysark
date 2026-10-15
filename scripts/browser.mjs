@@ -7,11 +7,12 @@ export function launchChromium() {
 }
 
 /** 'chromium' or 'firefox' (the editor check runs in both) */
-export async function launchBrowser(name) {
+export async function launchBrowser(name, { headed = false } = {}) {
   const browserType = { chromium, firefox }[name]
   if (!browserType) throw new Error(`unknown browser '${name}' (chromium or firefox)`)
   try {
     return await browserType.launch({
+      headless: !headed,
       timeout: 60_000,
       // CI machines have no GPU, and Firefox's graphics blocklist then refuses
       // WebGL 2 ("AllowWebgl2:false restricts context creation on this
