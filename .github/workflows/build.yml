@@ -5,7 +5,12 @@ name: Engine checks
 # from this checkout (the quick developer path), and with the engine packed by
 # npm and installed into a scratch course with production dependencies only,
 # which is how a course gets it. The course-style build is uploaded as the
-# downloadable "demo" artifact.
+# downloadable "demo" artifact. The editor runtime is built the same way, as
+# the course site builds it for the VS Code extension, and booted in Chromium
+# the way the extension's panel uses it (scripts/check-editor.mjs).
+#
+# The extension job builds the VS Code extension (extension/), which uses
+# engine code, and uploads the .vsix that is published to the Marketplace.
 on:
   push:
     branches: [main]
@@ -63,9 +68,43 @@ jobs:
           npm install --omit=dev --no-audit --no-fund "$RUNNER_TEMP"/lysark-*.tgz
           npx --no lysark build demo
           npx --no lysark check dist/demo.html
+          npx --no lysark editor-build --out-dir editor
+          node "$GITHUB_WORKSPACE/scripts/check-editor.mjs" editor lectures/demo/slides.md
 
       - uses: actions/upload-artifact@v4
         with:
           name: demo
           path: ${{ runner.temp }}/course/dist/demo.html
+          if-no-files-found: error
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extension/package-lock.json
+
+      # the engine's own packages too: the extension bundles engine code that uses them
+      - run: npm ci
+      - run: npm ci
+        working-directory: extension
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: extension
+
+      - name: Package the extension
+        run: npm run package
+        working-directory: extension
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: extension/*.vsix
           if-no-files-found: error

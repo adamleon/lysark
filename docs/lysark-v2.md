@@ -434,6 +434,17 @@ file passed the offline check, and all three rendered.
 - Rewrite `SETUP.md` for the extension: github.dev with nothing installed, or desktop VS Code with
   a clone and no Node.
 
+How the test version works: [step-3-editor-test.md](step-3-editor-test.md).
+
+**Status (2026-10-15): the test version is built**, and waits for the author's check in github.dev
+and desktop VS Code. The extension (publisher `simply-wyvern`) shows the live lecture in a panel
+whose code comes from the course's Pages site, follows the cursor, updates on save, and saves a
+camera view into the slide as a text edit. Course CI publishes the panel's code at
+`_lysark/editor/`. All of it was checked in VS Code for the web on this PC (`@vscode/test-web`),
+with the panel's code served locally. One change to the plan: the test goes straight to the
+Marketplace, since the publisher exists, instead of first installing in vscode.dev from a local
+HTTPS server.
+
 ## 7. Postponed
 
 Each item waits until a real lecture needs it. Details are in the archived review notes, except
@@ -488,8 +499,8 @@ Proposed in this document and confirmed by the author on 2026-10-13, at the star
 
 ## 9. Open questions
 
-- Marketplace publisher ID. It becomes part of the extension's ID and can't be changed later; the
-  display name can. The author creates it when step 3's test needs it.
+- ~~Marketplace publisher ID.~~ Answered in step 3: `simply-wyvern`, so the extension's ID is
+  `simply-wyvern.lysark`.
 - Whether the classroom PC wipes browser profiles between sessions; if it does, the extension has
   to be reinstalled each session. (Its Firefox is updated often and private windows aren't used
   for presenting, so the Firefox limit in section 5 doesn't apply there.)

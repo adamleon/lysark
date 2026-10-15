@@ -2,6 +2,7 @@ import MarkdownIt from 'markdown-it'
 import katex from 'katex'
 import { parse as parseYaml } from 'yaml'
 import { mergeCameraSpec } from '../engine/camera-merge'
+import { slideRanges, splitLines } from './slide-ranges'
 import { PROFILES, type ProfileName } from '../engine/time-scaling'
 import type {
   AnchoredSpec,
@@ -45,41 +46,16 @@ interface RawSlide {
 }
 
 function splitSlides(source: string): RawSlide[] {
-  const lines = source
-    .replace(/^﻿/, '')
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-  // tolerate trailing whitespace on fences — the classic invisible authoring error
-  const isSep = (line: string) => line.trimEnd() === '---'
-  const slides: RawSlide[] = []
-  let i = 0
-  while (i < lines.length) {
-    if (lines[i].trim() === '') {
-      i++
-      continue
-    }
-    if (!isSep(lines[i])) {
-      throw new Error(`slides: expected '---' frontmatter fence at line ${i + 1}, got: ${lines[i]}`)
-    }
-    const yamlStart = ++i
-    while (i < lines.length && !isSep(lines[i])) i++
-    if (i >= lines.length) throw new Error('slides: unterminated frontmatter block')
-    const yamlText = lines.slice(yamlStart, i).join('\n')
-    i++ // skip closing fence
-    const bodyStart = i
-    let inFence = false
-    while (i < lines.length && !(isSep(lines[i]) && !inFence)) {
-      if (FENCE.test(lines[i].trimStart())) inFence = !inFence
-      i++
-    }
-    const body = lines.slice(bodyStart, i).join('\n')
-    const frontmatter = parseYaml(yamlText) ?? {}
+  // fences tolerate trailing whitespace (the classic invisible authoring error)
+  // and are ignored inside code fences; slide-ranges.ts holds the rules
+  const lines = splitLines(source)
+  return slideRanges(source).map((r, k) => {
+    const frontmatter = parseYaml(lines.slice(r.yamlStart, r.yamlEnd).join('\n')) ?? {}
     if (typeof frontmatter !== 'object' || Array.isArray(frontmatter)) {
-      throw new Error(`slides: frontmatter of slide ${slides.length + 1} must be a YAML mapping`)
+      throw new Error(`slides: frontmatter of slide ${k + 1} must be a YAML mapping`)
     }
-    slides.push({ frontmatter: frontmatter as Record<string, unknown>, body })
-  }
-  return slides
+    return { frontmatter: frontmatter as Record<string, unknown>, body: lines.slice(r.bodyStart, r.bodyEnd).join('\n') }
+  })
 }
 
 /**

@@ -1,0 +1,90 @@
+{
+  "name": "lysark",
+  "displayName": "Lysark",
+  "description": "Preview Lysark lecture slides beside the text and save 3D camera views into them, also in github.dev",
+  "version": "0.1.0",
+  "publisher": "simply-wyvern",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adamleon/lysark",
+    "directory": "extension"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Visualization",
+    "Education"
+  ],
+  "main": "./dist/extension.js",
+  "browser": "./dist/extension.js",
+  "activationEvents": [],
+  "capabilities": {
+    "virtualWorkspaces": true,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "lysark.openPreview",
+        "title": "Open Lysark Preview",
+        "icon": "$(play)"
+      },
+      {
+        "command": "lysark.saveView",
+        "title": "Save Camera View into the Slide (V)",
+        "category": "Lysark",
+        "icon": "$(device-camera)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "lysark.openPreview",
+          "when": "resourceFilename == slides.md",
+          "group": "navigation"
+        },
+        {
+          "command": "lysark.saveView",
+          "when": "activeWebviewPanelId == 'lysark.preview'",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lysark.openPreview",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lysark.saveView",
+          "when": "activeWebviewPanelId == 'lysark.preview'"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Lysark",
+      "properties": {
+        "lysark.editorUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Where to load the Lysark editor from. Leave empty to use the course's `homepage` in package.json plus `_lysark/editor/`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node build.mjs",
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "package": "npx --yes @vscode/vsce@3.9.2 package",
+    "test-web": "npx --yes @vscode/test-web@0.0.80 --extensionDevelopmentPath=. --browserType=none --port=3000"
+  },
+  "devDependencies": {
+    "@types/vscode": "1.100.0",
+    "esbuild": "0.25.12",
+    "typescript": "6.0.3"
+  }
+}

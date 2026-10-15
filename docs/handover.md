@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-10-14)
+## Where the project is (2026-10-15)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -25,12 +25,26 @@ referenced from slides are built into the lecture file; the PDF uses a light pri
 theme, and theme colours come from the CSS tokens (see the colour rule in CLAUDE.md).
 The course runs `v2.1.0`: the author moved it with the Update engine workflow (its first
 real use), and the published PDF is light. The engine feature freeze has ended.
-**Next is step 3:** the VS Code extension and the visual scene editor, starting with a
-test that needs the author (Firefox on their own PC, and a Marketplace publisher ID).
 
-Proposal noted during step 2 (not built): course CI installs Chromium (~27 s) even
-when no lecture changed. The HTML job could skip the install, and the offline check,
-when `lysark site` has nothing to build.
+**Step 3 (the VS Code extension and the visual editor) is under way.** The test
+version is built; how it works is in [step-3-editor-test.md](step-3-editor-test.md).
+The extension (`extension/`, Marketplace publisher `simply-wyvern`, ID
+`simply-wyvern.lysark`) is a thin host: its panel frames the editor runtime
+(`src/editor/`, built by `lysark editor-build`) that course CI publishes at
+`<site>/_lysark/editor/`. The panel follows the cursor, reloads on save, and saves a
+camera view into the slide's frontmatter (V in the panel, or the camera button in its
+title bar). Checked end to end in `@vscode/test-web` with a local runtime. Waiting on
+the author: the course on the release with the editor runtime (Update engine), the
+`.vsix` uploaded to the Marketplace, then the check in github.dev (Firefox) and desktop
+VS Code. After that: the scene file format, then the editor items of lysark-v2.md §5.
+
+Proposals (not built):
+- From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
+  HTML job could skip the install, and the offline check, when `lysark site` has
+  nothing to build.
+- From step 3: show the deck in the editor panel at the projector's 16:9 shape
+  (letterboxed), so saved views and text size look as in the classroom. The deck has
+  no fixed stage today; see step-3-editor-test.md.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
@@ -138,6 +152,14 @@ keep it green.
   joints-graph), project.
 - `src/main.ts` — wiring: camera, idle, trajectory (playback + IK + traces + all
   the widget factories), debug panel, frame loop.
+- `src/editor/` — the editor runtime (step 3): `runtime.ts` (bridge to the VS Code
+  panel), `deck-from-source.ts` (stands in for `virtual:lysark-deck`, compiles the
+  text in the browser), `camera-edit.ts` (writes a view into a slide, byte for byte),
+  `panel-origin.ts` (which pages may drive it). `editor.html` is its page.
+  `src/compiler/slide-ranges.ts` — where each slide sits, shared by the compiler
+  and the extension. `src/scenes/all.ts` — every scene, for the editor.
+- `extension/` — the VS Code extension: own `package.json`, esbuild bundle, `.vsix`
+  via `npm run package`. Not part of the engine package (`.npmignore`).
 - `lectures/demo/` — the engine's test lecture.
 - `bin/lysark.mjs` — the `lysark` command (plain JS). `scripts/` — lectures.mjs
   (find/build lectures, dev server), check-offline.mjs, export-pdf.mjs, site.mjs
@@ -151,14 +173,25 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**94**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**150**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.
 - `node bin/lysark.mjs pdf dist/demo.html` → `dist/demo.pdf`.
 - Against a course lecture: `npm run dev -- ../ais2105-lectures/lectures/baneplanlegging`.
+- `node bin/lysark.mjs editor-build` → `dist/editor/` (the editor runtime);
+  `node scripts/check-editor.mjs dist/editor lectures/demo/slides.md` boots it as the panel does.
+- In `extension/`: `npm run build`, `npm run typecheck`, `npm run package` (→ `.vsix`),
+  `npm run test-web -- <course folder>` (VS Code for the web on port 3000).
 
 ## Gotchas worth remembering
+
+- **Testing the extension in the browser pane**: clicks and keys from the pane's
+  tools don't reach inside VS Code's webview frames (the panel and the runtime get
+  no events), so V can't be exercised there; the camera button in the panel's
+  title bar can, since it is workbench DOM. Extension-host `console.log` shows up in
+  the page console; the panel's frames don't. The panel goes black whenever the
+  pane stops painting (same cause as the rAF pause below).
 
 - **Preview tab rAF pause**: the Claude preview tab is backgrounded → `rAF` paused,
   render loop looks frozen, `preview_screenshot` times out. NOT a bug. Verify via
@@ -190,8 +223,8 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 ## Next steps
 
 Follow [lysark-v2.md](lysark-v2.md) section 6: step 3 (the extension and the visual
-editor) is next. It starts with a test that needs the author: Firefox on their own PC,
-and a Marketplace publisher ID. When a second computer is available, run step 1's
+editor) is under way. Its test needs the author (see "Where the project is"); then the
+scene file format, then the editor items in the order of section 5. When a second computer is available, run step 1's
 deferred `SETUP.md` check. The backlog is lysark-v2.md section 7, the only one; the old
 `ideas.md` is archived in
 [docs/archive/](archive/), and its unbuilt items, plus the mesh polish and GLB ideas

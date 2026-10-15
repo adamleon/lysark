@@ -49,34 +49,52 @@ function katexWoff2Only(): Plugin {
 // file (lysark-v2.md §2). vite-plugin-singlefile folds every JS/CSS chunk into
 // one inline <script>/<style>, and KaTeX fonts inline as base64 data URIs, so
 // the file has no runtime fetch or dynamic import (lysark-design.md §9).
-export default defineConfig(({ command }) => ({
-  root: ENGINE_ROOT,
-  base: './',
-  publicDir: false,
-  cacheDir: join(COURSE_ROOT, 'node_modules', '.vite'),
-  plugins: [
-    slidesPlugin({ courseRoot: COURSE_ROOT }),
-    lecturePlugin({ engineRoot: ENGINE_ROOT, lecturesRoot: LECTURES_ROOT, lecture: LECTURE }),
-    katexWoff2Only(),
-    ...(command === 'build'
-      ? [viteSingleFile({ removeViteModuleLoader: true, useRecommendedBuildConfig: true })]
-      : []),
-  ],
-  // the engine runs from inside the course's node_modules, so its own source
-  // isn't crawled for dependencies; list them so dev doesn't re-optimize mid-load
-  optimizeDeps: {
-    include: [
-      'three',
-      'three/addons/controls/OrbitControls.js',
-      'three/addons/loaders/ColladaLoader.js',
-      'three/addons/utils/BufferGeometryUtils.js',
-      'urdf-loader',
-      'uplot',
-    ],
-  },
-  server: {
-    port: process.env.PORT ? Number(process.env.PORT) : 5173,
-    strictPort: !!process.env.PORT,
-    fs: { allow: [ENGINE_ROOT, LECTURES_ROOT, COURSE_ROOT] },
-  },
-}))
+//
+// `--mode editor` builds the editor runtime instead (lysark-v2.md §5, step 3): a
+// normal multi-file site, published at _lysark/editor/ on the course's Pages site
+// and shown inside the VS Code extension's panel. It compiles lecture text in the
+// browser (src/editor/deck-from-source.ts stands in for the generated deck), so it
+// never goes into the student file.
+export default defineConfig(({ command, mode }) => {
+  const editor = mode === 'editor'
+  return {
+    root: ENGINE_ROOT,
+    base: './',
+    publicDir: false,
+    cacheDir: join(COURSE_ROOT, 'node_modules', '.vite'),
+    plugins: editor
+      ? [katexWoff2Only()]
+      : [
+          slidesPlugin({ courseRoot: COURSE_ROOT }),
+          lecturePlugin({ engineRoot: ENGINE_ROOT, lecturesRoot: LECTURES_ROOT, lecture: LECTURE }),
+          katexWoff2Only(),
+          ...(command === 'build'
+            ? [viteSingleFile({ removeViteModuleLoader: true, useRecommendedBuildConfig: true })]
+            : []),
+        ],
+    ...(editor
+      ? {
+          resolve: { alias: { 'virtual:lysark-deck': join(ENGINE_ROOT, 'src', 'editor', 'deck-from-source.ts') } },
+          // the scene meshes make one large chunk; it loads once, from the course site
+          build: { rollupOptions: { input: join(ENGINE_ROOT, 'editor.html') }, chunkSizeWarningLimit: 8000 },
+        }
+      : {}),
+    // the engine runs from inside the course's node_modules, so its own source
+    // isn't crawled for dependencies; list them so dev doesn't re-optimize mid-load
+    optimizeDeps: {
+      include: [
+        'three',
+        'three/addons/controls/OrbitControls.js',
+        'three/addons/loaders/ColladaLoader.js',
+        'three/addons/utils/BufferGeometryUtils.js',
+        'urdf-loader',
+        'uplot',
+      ],
+    },
+    server: {
+      port: process.env.PORT ? Number(process.env.PORT) : 5173,
+      strictPort: !!process.env.PORT,
+      fs: { allow: [ENGINE_ROOT, LECTURES_ROOT, COURSE_ROOT] },
+    },
+  }
+})

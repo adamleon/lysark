@@ -10,11 +10,15 @@
 //
 // A lecture's version is a hash of its folder, `assets/`, and
 // `package-lock.json` (which records the engine version), as committed.
+//
+// `site` also builds the editor runtime into _lysark/editor/, where the VS Code
+// extension loads it from (lysark-v2.md §5, step 3). It is rebuilt every run,
+// from the engine version the course uses; it takes a few seconds.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { buildLecture, lecturesIn } from './lectures.mjs'
+import { buildEditor, buildLecture, lecturesIn } from './lectures.mjs'
 
 const STATE_FILE = 'lysark-state.json'
 // marks an output folder as site's own while a run is writing it, so a run that
@@ -250,6 +254,19 @@ export async function site({ courseRoot, out, live, checkOffline }) {
       }
       state.summary.push(`! ${name}: FAILED, ${kept ? 'kept the previous version' : 'not published (never was)'}`)
     }
+  }
+
+  const editorDir = join(out, '_lysark', 'editor')
+  try {
+    console.log('\n── building the editor runtime')
+    await buildEditor(editorDir, { quiet: true })
+    state.summary.push('+ editor runtime: built')
+  } catch (err) {
+    // the lectures still publish; only the VS Code preview is missing until the next run
+    rmSync(editorDir, { recursive: true, force: true })
+    state.failed.push({ name: 'editor runtime', stage: 'editor', message: errorText(err) })
+    console.log(`   ${errorText(err)}`)
+    state.summary.push('! editor runtime: FAILED, not published')
   }
 
   writeFileSync(join(out, 'versions.json'), JSON.stringify(manifest, null, 2))

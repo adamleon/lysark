@@ -3,7 +3,7 @@
 // lectures live in ./lectures/<name>/slides.md, or from the engine repo, whose
 // ./lectures/demo is the engine's test lecture.
 import { basename, join } from 'node:path'
-import { buildLecture, devServer, lecturesIn, resolveLecture } from '../scripts/lectures.mjs'
+import { buildEditor, buildLecture, devServer, lecturesIn, resolveLecture } from '../scripts/lectures.mjs'
 
 const HELP = `Usage: lysark <command>
 
@@ -14,6 +14,8 @@ const HELP = `Usage: lysark <command>
   check <file.html...>       Offline check: open each file from disk in Chromium,
                              step every slide, and fail on any error or request.
   pdf <file.html>            Make the PDF. Option: --out <file.pdf>
+  editor-build               Build the editor runtime that the VS Code extension
+                             shows. Option: --out-dir <dir> (default dist/editor)
 
   site --out <dir> [--live <url>]   CI: build changed lectures for GitHub Pages
   site-pdf                           CI: add PDFs for the lectures 'site' rebuilt
@@ -88,6 +90,13 @@ async function main() {
       const { exportPdf } = await import('../scripts/export-pdf.mjs')
       const pages = await exportPdf(file, out, (msg) => process.stdout.write(`  ${msg}\r`))
       console.log(`\n✓ ${out} (${pages} pages)`)
+      return true
+    }
+
+    case 'editor-build': {
+      const outDir = typeof options['out-dir'] === 'string' ? options['out-dir'] : join('dist', 'editor')
+      await buildEditor(outDir)
+      console.log(`✓ ${join(outDir, 'index.html')}`)
       return true
     }
 

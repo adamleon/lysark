@@ -1,0 +1,4 @@
+# The extension is published to the VS Code Marketplace on its own; it is not
+# part of the engine that courses install. (npm still ships its README and
+# LICENSE, about 2 kB: it always includes those.)
+*

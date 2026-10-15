@@ -2,7 +2,7 @@
 // JavaScript: Node won't run TypeScript from inside node_modules, so the
 // TypeScript parts (compiler, Vite plugins) are reached through Vite, which
 // compiles vite.config.ts and what it imports (lysark-v2.md §3).
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,6 +67,36 @@ export async function buildLecture(lecture, outFile, { quiet = false } = {}) {
     })
     mkdirSync(dirname(resolve(outFile)), { recursive: true })
     copyFileSync(join(tmp, 'index.html'), outFile)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
+/**
+ * build the editor runtime (lysark-v2.md §5, step 3) into outDir as an
+ * ordinary multi-file site with index.html at its top. It holds every scene and
+ * compiles lecture text in the browser, so it needs no lecture. outDir is
+ * replaced only if it is missing, empty, or an earlier editor build.
+ */
+export async function buildEditor(outDir, { quiet = false } = {}) {
+  outDir = resolve(outDir)
+  if (existsSync(outDir) && !readdirSync(outDir).every((name) => name === 'index.html' || name === 'assets')) {
+    throw new Error(`${outDir} is not empty and is not an earlier editor build; remove it or pick another folder`)
+  }
+  selectLecture({ lecturesRoot: join(ENGINE_ROOT, 'lectures'), courseRoot: ENGINE_ROOT, dir: null })
+  const { build } = await import('vite')
+  const tmp = mkdtempSync(join(tmpdir(), 'lysark-editor-'))
+  try {
+    await build({
+      configFile: CONFIG_FILE,
+      mode: 'editor',
+      logLevel: quiet ? 'warn' : 'info',
+      build: { outDir: tmp, emptyOutDir: true },
+    })
+    renameSync(join(tmp, 'editor.html'), join(tmp, 'index.html'))
+    rmSync(outDir, { recursive: true, force: true })
+    mkdirSync(dirname(outDir), { recursive: true })
+    cpSync(tmp, outDir, { recursive: true })
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

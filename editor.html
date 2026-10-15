@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Only the runtime's own script files run: the page shows the HTML in the
+         lecture text it is sent, and that must never run script here
+         (src/editor/panel-origin.ts) -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Lysark editor</title>
+  </head>
+  <body>
+    <div id="scene-layer"></div>
+    <div id="overlay-layer"></div>
+    <script type="module" src="/src/editor/runtime.ts"></script>
+  </body>
+</html>
