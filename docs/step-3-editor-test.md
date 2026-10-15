@@ -12,14 +12,16 @@ camera view into the slide. Written for the author; no engine knowledge needed.
    the text. The first time for a course, VS Code asks whether to load the course's editor from
    its site (the address in the course's `package.json`); click **Load**. The answer is kept in
    that browser, or in desktop VS Code.
-3. **The panel follows the cursor:** click in another slide's text and the panel shows that slide.
+3. **The panel follows the cursor:** click in another slide's text, or jump there (Go to Line,
+   a search result), and the panel shows that slide.
 4. **The panel updates when you save with Ctrl+S**, or click ▷ again. The whole panel reloads,
    so the camera goes back to the slide's own view. Text with an error leaves the last good version
    showing, with the error in a red box. Auto-save (on by default in github.dev) doesn't update the
    panel, or it would reload at every pause in your typing.
 5. **Save a camera view:** move the camera with the mouse, then press **V** in the panel (click in
    the 3D view first) or click the camera button in the panel's title bar. The view goes into that
-   slide's `camera:` as `lookAt` and `offset`, rounded to two decimals, as an unsaved change.
+   slide's `camera:` as `lookAt` and `offset`, rounded to two decimals, as an unsaved change,
+   and the panel uses it at once: leave the slide and come back, and the camera returns to it.
    Nothing else in the file changes, so Source Control shows exactly those lines. Ctrl+Z in the
    text undoes it.
    - A slide that looks at an anchor (`lookAt: tool`) keeps it; only `offset` changes.
@@ -54,7 +56,10 @@ part of a student file. Its `index.html` there is only a list of its files.
 
 **The panel page** (`src/editor/panel-page.js`, shared by the extension and the CI check) loads
 those files. The extension reads the site's `_lysark/editor/index.html` for their names each time
-it shows the page, since every publish renames them, and for the message version it speaks. If the
+it shows the page, since every publish renames them, and for the message version it speaks.
+New text that only changes cameras (a saved view, or camera values edited by hand on another
+slide) goes into the running deck without loading the panel afresh; anything else loads it
+afresh. If the
 site can't be reached (it gives up after 15 seconds), the panel keeps showing what it has, or says
 in the panel what went wrong, and the notification has a Retry button; saving the file, or
 clicking ▷ again, also retries. If the site redirects (a custom domain, say), the extension
@@ -78,7 +83,7 @@ extension" in its panel.
 | --- | --- | --- |
 | panel | `ready` | loaded (with its message version and page number); send the text |
 | extension | `source` | a numbered text of `slides.md`, and which slide to show |
-| panel | `shown` | showing text number N |
+| panel | `shown` | showing text number N (after loading, or at once when only cameras changed) |
 | panel | `accepted` | text N compiles; the extension loads the panel afresh and sends it |
 | panel | `error` | text N has an error, so the last good one stays (also in the status bar) |
 | extension | `goto` | the cursor moved to another slide |

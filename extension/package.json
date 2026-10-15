@@ -2,7 +2,7 @@
   "name": "lysark",
   "displayName": "Lysark",
   "description": "Preview Lysark lecture slides beside the text and save 3D camera views into them, also in github.dev",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "simply-wyvern",
   "license": "MIT",
   "repository": {

@@ -35,10 +35,12 @@ The panel follows the cursor, reloads on save, and saves a camera view into the 
 frontmatter (V in the panel, or the camera button in its title bar). The first version
 (0.1.0, engine v2.2.0) framed the site's page and failed in github.dev in Firefox
 (`NS_ERROR_DOM_COEP_FAILED`: github.dev isolates its panels); 0.2.0 with engine v2.3.0
-loads the files with CORS instead, checked in CI in Chromium and Firefox under the same
-isolation and end to end in `@vscode/test-web --coi`. Waiting on the author: the course
-on v2.3.0 (Update engine), the 0.2.0 `.vsix` uploaded, then the check in github.dev
-(Firefox) and desktop VS Code. After that: the scene file format, then the editor items
+loads the files with CORS instead, and the author confirmed the preview shows in github.dev
+and vscode.dev (2026-10-16). A saved view only reached the panel on Ctrl+S, so leaving
+the slide and coming back flew to the old view; 0.2.1 with engine v2.3.1 sends it at once
+and the runtime puts camera-only changes into the running deck without reloading.
+Waiting on the author: the course on v2.3.1, the 0.2.1 `.vsix` uploaded, then V and the
+camera button checked in github.dev (Firefox) and desktop VS Code. After that: the scene file format, then the editor items
 of lysark-v2.md §5.
 
 Proposals (not built):

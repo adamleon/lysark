@@ -126,6 +126,34 @@ id: script-test
 <form id="t4" action="/form-submitted"><button>go</button></form>
 `
 
+/**
+ * The lecture with its second slide's camera offset moved, as a saved view
+ * would: only that value changes. null if the second slide's frontmatter has
+ * no `offset: [x, y, z]`.
+ * @param {string} text
+ * @returns {{ text: string, offset: number[] } | null}
+ */
+function moveSecondSlideCamera(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const fences = []
+  let inCode = false
+  for (let i = 0; i < lines.length && fences.length < 4; i++) {
+    if (/^(`{3,}|~{3,})/.test(lines[i].trimStart())) inCode = !inCode
+    else if (!inCode && lines[i].trimEnd() === '---') fences.push(i)
+  }
+  if (fences.length < 4) return null
+  for (let i = fences[2] + 1; i < fences[3]; i++) {
+    const m = lines[i].match(/^(\s*offset:\s*)\[([^\]]*)\](.*)$/)
+    if (!m) continue
+    const old = m[2].split(',').map(Number)
+    if (old.length !== 3 || old.some((n) => !Number.isFinite(n))) return null
+    const offset = old.map((n, k) => Number((n + [0.4, 0.3, 0.4][k]).toFixed(2)))
+    lines[i] = `${m[1]}[${offset.join(', ')}]${m[3]}`
+    return { text: lines.join('\n'), offset }
+  }
+  return null
+}
+
 /** @returns {Promise<{ ok: boolean, lines: string[] }>} */
 export async function checkEditor(editorDir, slidesFile, { browser: browserName = 'chromium', screenshot, headed = false } = {}) {
   const lectureText = readFileSync(slidesFile, 'utf8')
@@ -237,21 +265,55 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       await page.screenshot({ path: screenshot })
     }
 
-    // 3. new text is accepted; the extension loads the page afresh and sends it on 'ready'
-    await source(`${lectureText}\n`, 2)
-    if (!(await fromRuntime({ type: 'lysark:accepted', seq: 2 }))) return fail('a new, valid text was not accepted')
+    // 2b. text that only changes another slide's camera (what saving a view sends)
+    //     goes into the running deck without loading afresh, and flying to that
+    //     slide then lands on the new view
+    let shownText = lectureText
+    const moved = moveSecondSlideCamera(lectureText)
+    if (moved) {
+      await source(moved.text, 2)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: 2 }, 10000))) return fail('a camera-only change was not shown')
+      const reloaded = await page.evaluate(() => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === 2))
+      if (reloaded) return fail('a camera-only change made the panel load afresh instead of updating in place')
+      shownText = moved.text
+      await toRuntime({ type: 'lysark:goto', slide: 1 })
+      // ask for the view until the flight there has settled
+      let settled = null
+      let last = null
+      for (let i = 0; i < 30 && !settled; i++) {
+        await page.waitForTimeout(500)
+        await page.evaluate(() => (window.__toExtension = window.__toExtension.filter((m) => m.type !== 'lysark:save-view')))
+        await toRuntime({ type: 'lysark:request-view' })
+        const v = await fromRuntime({ type: 'lysark:save-view', seq: 2, slide: 1 }, 1000)
+        if (v && last && v.view.offset.every((n, k) => Math.abs(n - last.view.offset[k]) < 0.002)) settled = v
+        last = v
+      }
+      if (!settled) return fail('the camera never settled on the second slide')
+      const off = settled.view.offset
+      if (!off.every((n, k) => Math.abs(n - moved.offset[k]) < 0.02)) {
+        return fail(`the second slide flew to the old view: offset ${JSON.stringify(off)}, expected ${JSON.stringify(moved.offset)}`)
+      }
+      lines.push(`camera-only change put in place, no reload; slide 2 now flies to offset ${JSON.stringify(moved.offset)}`)
+    } else {
+      lines.push('(the lecture has no camera offset on its second slide, so the in-place camera update was not checked)')
+    }
+
+    // 3. other new text is accepted; the extension loads the page afresh and sends it on 'ready'
+    const added = `${shownText}\n---\nid: added-by-check\n---\n# Added\n`
+    await source(added, 3)
+    if (!(await fromRuntime({ type: 'lysark:accepted', seq: 3 }))) return fail('a new, valid text was not accepted')
     await page.evaluate((html) => window.setHtml(html), pageFor(2))
     await toRuntime({ type: 'lysark:goto', slide: 1 }) // sent during the swap: may be dropped, must do no harm
     if (!(await fromRuntime({ type: 'lysark:ready', render: 2 }))) return fail('the runtime did not say ready after loading afresh')
-    await source(`${lectureText}\n`, 2)
-    if (!(await fromRuntime({ type: 'lysark:shown', seq: 2 }))) return fail('the new text was not shown after loading afresh')
+    await source(added, 3)
+    if (!(await fromRuntime({ type: 'lysark:shown', seq: 3 }))) return fail('the new text was not shown after loading afresh')
     lines.push('new text accepted, and shown after the panel loaded afresh')
 
     // 4. a broken text is refused, and the shown text stays
     const deck = () => inPanel((w) => ({ slides: w.__lysark?.engine.slideCount ?? null, overlay: w.document.getElementById('overlay-layer')?.children.length ?? 0 }))
     const before = await deck()
-    await source('---\nscene: no-such-scene\n---\n# x\n', 3)
-    const refused = await fromRuntime({ type: 'lysark:error', seq: 3 })
+    await source('---\nscene: no-such-scene\n---\n# x\n', 4)
+    const refused = await fromRuntime({ type: 'lysark:error', seq: 4 })
     if (!refused) return fail('a text with an unknown scene was not refused')
     const after4 = await deck()
     if (after4.slides !== before.slides || after4.overlay === 0) {
@@ -261,11 +323,11 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
 
     // 5. script in lecture text never runs, and the panel survives the attempts
     allowCspReports = true
-    await source(SCRIPT_TEST, 4)
-    if (!(await fromRuntime({ type: 'lysark:accepted', seq: 4 }))) return fail('the script-test text was not accepted')
+    await source(SCRIPT_TEST, 5)
+    if (!(await fromRuntime({ type: 'lysark:accepted', seq: 5 }))) return fail('the script-test text was not accepted')
     if (!(await render(3))) return fail('the runtime did not say ready for the script test')
-    await source(SCRIPT_TEST, 4)
-    if (!(await fromRuntime({ type: 'lysark:shown', seq: 4 }))) return fail('the script-test text was not shown')
+    await source(SCRIPT_TEST, 5)
+    if (!(await fromRuntime({ type: 'lysark:shown', seq: 5 }))) return fail('the script-test text was not shown')
     // the ontoggle handler would run as soon as the slide shows; check before the clicks below
     await page.waitForTimeout(500)
     const onShow = await inPanel((w) => w.__ran ?? null)

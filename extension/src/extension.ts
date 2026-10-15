@@ -209,12 +209,11 @@ class Preview {
         this.saveReason = undefined
         if (reason === vscode.TextDocumentSaveReason.Manual) this.refresh()
       }),
-      // moving the cursor to another slide shows that slide (not when an edit,
-      // such as a saved view, moves it)
+      // moving the cursor to another slide shows that slide: by keyboard, mouse,
+      // or a command such as Go to Line or a search result. An edit, such as a
+      // saved view, also moves it, with no kind; that doesn't count.
       vscode.window.onDidChangeTextEditorSelection((e) => {
-        const byHand =
-          e.kind === vscode.TextEditorSelectionChangeKind.Keyboard || e.kind === vscode.TextEditorSelectionChangeKind.Mouse
-        if (byHand && e.textEditor.document === this.document) this.followCursor(e.selections[0].active.line)
+        if (e.kind !== undefined && e.textEditor.document === this.document) this.followCursor(e.selections[0].active.line)
       }),
       vscode.workspace.onDidCloseTextDocument((d) => {
         if (d === this.document) this.panel.dispose()
@@ -485,6 +484,11 @@ class Preview {
     )
     if (!(await vscode.workspace.applyEdit(edit))) {
       void showError('Lysark: the view was not saved: VS Code refused the edit.')
+      return
     }
+    // the panel takes the new view at once (only the camera changed, so without
+    // loading afresh); otherwise leaving the slide and coming back would fly to
+    // the old one until the next save
+    this.sendDocument()
   }
 }

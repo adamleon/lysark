@@ -1,5 +1,7 @@
 import { compileLecture } from '../compiler/compile-slides'
+import type { CameraTargetSpec } from '../engine/slide-types'
 import { SCENE_NAMES } from '../scenes/registry'
+import { compileForEditor, updateCameras } from './editor-compile'
 import { EDITOR_PROTOCOL } from './panel-page.js'
 
 /**
@@ -7,10 +9,11 @@ import { EDITOR_PROTOCOL } from './panel-page.js'
  * Lysark panel in VS Code (src/editor/panel-page.js), loaded from the course
  * site, and talks to the extension through VS Code's webview messages. The
  * extension sends the lecture text; this page checks that it compiles, then
- * starts the deck with it. New text that compiles is 'accepted', and the
- * extension then loads the panel afresh and sends that text again on 'ready'.
- * Text that doesn't compile leaves the last good version running and shows
- * the error.
+ * starts the deck with it. New text that only changes cameras (a saved view,
+ * say) is put into the running deck at once and 'shown'. Other new text that
+ * compiles is 'accepted', and the extension then loads the panel afresh and
+ * sends that text again on 'ready'. Text that doesn't compile leaves the last
+ * good version running and shows the error.
  *
  * Every text the extension sends carries a number (seq). The page names the
  * one it shows in 'shown', 'slide' and 'save-view', so the extension knows
@@ -61,6 +64,35 @@ const post = (message: Record<string, unknown>) => vscode?.postMessage({ ...mess
 let booted = false
 /** the number of the text this page shows */
 let shownSeq: number | null = null
+/** the last view saved from this page, as written into the text (two decimals) */
+let savedView: { slide: number; lookAt: [number, number, number] | string; offset: [number, number, number] } | null = null
+
+const round2 = (n: number) => Number(n.toFixed(2))
+
+/**
+ * Put new text into the running deck without loading the page afresh, if
+ * only cameras changed. The slide on screen may only change to the view just
+ * saved from it (the camera is already there); any other change to it needs
+ * the fresh page, where the camera flies to it.
+ */
+async function updateInPlace(text: string): Promise<boolean> {
+  const engine = lysark()?.engine
+  if (!engine) return false
+  // the same module instance the deck was built from (it stands in for virtual:lysark-deck)
+  const { default: deck } = await import('./deck-from-source')
+  const fresh = compileForEditor(text)
+  const i = engine.currentIndex
+  const next: CameraTargetSpec | undefined = fresh[i]?.effective.camera
+  const isSavedView =
+    savedView !== null &&
+    savedView.slide === i &&
+    next !== undefined &&
+    JSON.stringify(next.lookAt) === JSON.stringify(savedView.lookAt) &&
+    JSON.stringify(next.offset) === JSON.stringify(savedView.offset)
+  if (JSON.stringify(next) !== JSON.stringify(deck.slides[i]?.effective.camera) && !isSavedView) return false
+  return updateCameras(deck.slides, fresh) !== null
+}
+
 function goTo(slide: number): void {
   const engine = lysark()?.engine
   if (!engine) {
@@ -143,7 +175,15 @@ window.addEventListener('message', async (event) => {
       return
     }
     if (booted) {
-      // new text: the extension loads this page afresh and sends it again on 'ready'
+      if (await updateInPlace(message.text)) {
+        // only cameras changed: the running deck has them now
+        shownSeq = message.seq
+        savedView = null
+        showBanner(null)
+        post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
+        return
+      }
+      // other new text: the extension loads this page afresh and sends it again on 'ready'
       post({ type: 'lysark:accepted', seq: message.seq })
       return
     }
@@ -201,6 +241,12 @@ function saveView(): void {
     center = anchorAt
   }
   const offset = camera.clone().sub(center)
+  // as the extension writes it (camera-edit.ts, two decimals), to know it again when the text comes back
+  savedView = {
+    slide: L.engine.currentIndex,
+    lookAt: typeof lookAt === 'string' ? lookAt : [round2(lookAt[0]), round2(lookAt[1]), round2(lookAt[2])],
+    offset: [round2(offset.x), round2(offset.y), round2(offset.z)],
+  }
   post({
     type: 'lysark:save-view',
     slide: L.engine.currentIndex,
