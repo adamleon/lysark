@@ -201,6 +201,11 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
   the page console; the panel's frames don't. The panel goes black whenever the
   pane stops painting (same cause as the rAF pause below). Run test-web with `--coi`
   (the `test-web` script does), or isolation problems like the 0.1.0 one stay hidden.
+- **Firefox in engine CI** has no GPU: headless it finds no OpenGL, and its blocklist
+  refuses software WebGL 2. The editor check therefore runs Firefox headed under
+  `xvfb-run` (Mesa software OpenGL) with `webgl.force-enabled` (scripts/browser.mjs,
+  build.yml). CI logs need a GitHub sign-in to read; the editor check also writes its
+  failure as a public annotation (readable with the API, no token).
 
 - **Preview tab rAF pause**: the Claude preview tab is backgrounded → `rAF` paused,
   render loop looks frozen, `preview_screenshot` times out. NOT a bug. Verify via
