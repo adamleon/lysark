@@ -11,7 +11,7 @@ export async function launchBrowser(name) {
   const browserType = { chromium, firefox }[name]
   if (!browserType) throw new Error(`unknown browser '${name}' (chromium or firefox)`)
   try {
-    return await browserType.launch()
+    return await browserType.launch({ timeout: 60_000 })
   } catch (err) {
     // only the missing-browser case gets the friendly hint; any other launch
     // failure (missing system libraries, a crash) keeps its own message and logs

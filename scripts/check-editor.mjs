@@ -312,8 +312,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.error('Usage: node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png]')
     process.exit(1)
   }
+  const started = Date.now()
   const report = await checkEditor(dir, slides, { browser, screenshot })
-  console.log(`${report.ok ? '✓' : '✗'} editor runtime in ${dir} (${browser})`)
+  console.log(`${report.ok ? '✓' : '✗'} editor runtime in ${dir} (${browser}, ${Math.round((Date.now() - started) / 1000)} s)`)
   for (const line of report.lines) console.log(`   ${line}`)
+  if (!report.ok && process.env.GITHUB_ACTIONS) {
+    // the run's annotations show this without opening the log
+    const text = report.lines.join(' | ').replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
+    console.log(`::error title=Editor check (${browser})::${text}`)
+  }
   process.exit(report.ok ? 0 : 1)
 }
