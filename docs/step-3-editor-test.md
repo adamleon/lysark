@@ -155,12 +155,13 @@ Reintroducing the first version's `window.parent` check makes it fail, as it sho
 - test-web is pinned to 0.0.80, the last version that runs on Node 20.10; newer versions need
   Node 20.19 or later.
 
-## What the test still has to answer
+## What the test showed in the end
 
-1. **github.dev in Firefox:** the install offer from the course's `.vscode/extensions.json`, then:
-   does the panel show the lecture, do the cursor and save updates work, and does V write the
-   view? Also try the camera button.
-2. **Desktop VS Code:** install from the Marketplace and check the same things.
+- **github.dev and vscode.dev (2026-10-16), extension 0.2.1 with engine v2.3.1:** the panel shows
+  the lecture, and saving a camera view works. The author confirmed both. (Extension 0.2.0 wrote
+  the view into the text, but the panel only took it on Ctrl+S, and github.dev's auto-save
+  doesn't count as one; 0.2.1 sends it at once.)
+- **Still to check:** desktop VS Code, installed from the Marketplace.
 
 ## Limits of this version
 

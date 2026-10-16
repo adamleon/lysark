@@ -39,9 +39,10 @@ loads the files with CORS instead, and the author confirmed the preview shows in
 and vscode.dev (2026-10-16). A saved view only reached the panel on Ctrl+S, so leaving
 the slide and coming back flew to the old view; 0.2.1 with engine v2.3.1 sends it at once
 and the runtime puts camera-only changes into the running deck without reloading.
-Waiting on the author: the course on v2.3.1, the 0.2.1 `.vsix` uploaded, then V and the
-camera button checked in github.dev (Firefox) and desktop VS Code. After that: the scene file format, then the editor items
-of lysark-v2.md §5.
+The author confirmed both in github.dev and vscode.dev (2026-10-16): the test is done
+and the thin host stays. The course runs v2.3.1, the Marketplace has 0.2.1. Still open:
+the check in desktop VS Code. Next: the scene file format, then the editor items of
+lysark-v2.md §5.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The

@@ -235,10 +235,9 @@ Step 3's test checks whether the panel may load scripts from Pages. The first tr
 not frame a Pages page: github.dev makes its panels cross-origin isolated, and a framed page must
 then send headers Pages can't send. Files loaded with CORS are allowed, and Pages allows CORS for
 every file, so the second version's panel page loads the runtime's files from the site
-(step-3-editor-test.md). That works under the same isolation in CI and in VS Code for the web on
-this PC; the check in github.dev itself decides. If it fails, the fallback is to bundle the engine
-into the extension, show a banner when the course pins a different version, and upload a new
-extension version for each engine release.
+(step-3-editor-test.md). The author confirmed it in github.dev and vscode.dev on 2026-10-16, so
+the fallback (the engine bundled into the extension, a new extension version for each engine
+release) is not needed.
 
 ### Publishing the extension
 
@@ -440,7 +439,7 @@ file passed the offline check, and all three rendered.
 
 How the test version works: [step-3-editor-test.md](step-3-editor-test.md).
 
-**Status (2026-10-15): the test is under way.** The extension (publisher `simply-wyvern`) shows
+**Status (2026-10-16): the test is done; the thin host works.** The extension (publisher `simply-wyvern`) shows
 the live lecture in a panel whose code comes from the course's Pages site, follows the cursor,
 updates on save, and saves a camera view into the slide as a text edit. Course CI publishes the
 panel's code at `_lysark/editor/`. One change to the plan: the test goes straight to the
@@ -453,8 +452,11 @@ HTTPS server.
 - Second version (extension 0.2.0, engine v2.3.0): the panel's own page loads the runtime's files
   from the site with CORS, which isolation allows. Engine CI now checks this in Chromium and
   Firefox under the same isolation, and it was checked end to end in VS Code for the web with
-  isolation on (`@vscode/test-web --coi`). Waiting for the author's check in github.dev and
-  desktop VS Code.
+  isolation on (`@vscode/test-web --coi`).
+- Result (extension 0.2.1, engine v2.3.1): the author confirmed the preview and saving a camera
+  view in github.dev and vscode.dev on 2026-10-16. (0.2.0 only passed a saved view to the panel
+  on Ctrl+S, which github.dev's auto-save never triggers; 0.2.1 sends it at once.) Desktop VS
+  Code is still to be checked. Next in step 3: the scene file format (section 5).
 
 ## 7. Postponed
 
@@ -502,7 +504,8 @@ Proposed in this document and confirmed by the author on 2026-10-13, at the star
 
 - Lysark never handles GitHub logins or tokens; editing uses GitHub's own editors.
 - The extension is a thin host that loads the engine from the course's Pages site, if step 3's
-  test shows that works.
+  test shows that works. It did (2026-10-16), by loading the files with CORS rather than framing
+  a page.
 - Writing lectures needs no npm once the extension exists.
 - No full visual slide editor. Slide text stays text; only the 3D scene gets visual editing.
 - One engine repo, not one repo per engine module.
