@@ -41,9 +41,10 @@ the slide and coming back flew to the old view; 0.2.1 with engine v2.3.1 sends i
 and the runtime puts camera-only changes into the running deck without reloading.
 The author confirmed both in github.dev and vscode.dev (2026-10-16): the test is done
 and the thin host stays, and desktop VS Code works too. The course runs v2.3.1, the
-Marketplace has 0.2.1. Next: the scene file format. The proposal is
-[scene-files-proposal.md](scene-files-proposal.md) (eight decisions for the author, each with a
-recommendation); nothing is built until they are made. Then the editor items of lysark-v2.md §5.
+Marketplace has 0.2.1. The scene file format is decided
+([scene-files-proposal.md](scene-files-proposal.md), all eight decisions as recommended,
+2026-10-16). Now building its step 1: finish the thin host (extension 0.3.0 with a generic
+read/list/edit/ask host, then engine v2.4.0).
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The

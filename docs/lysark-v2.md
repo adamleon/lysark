@@ -425,8 +425,9 @@ file passed the offline check, and all three rendered.
   the test extension, and try it in github.dev on the classroom PC, including the install prompt
   from `.vscode/extensions.json`. The result decides between the thin host and the bundled
   fallback (section 5).
-- Design the scene file format (section 5). Proposal: [scene-files-proposal.md](scene-files-proposal.md),
-  waiting for the author's decisions.
+- Design the scene file format (section 5): [scene-files-proposal.md](scene-files-proposal.md),
+  decided 2026-10-16 (section 8). Built in the proposal's nine steps; the author-facing format
+  reference (`docs/scene-files.md`) is written with the step that adds named views.
 - Course CI publishes the panel's code (engine, compiler, editor) to Pages with the lectures,
   built from the pinned engine. This is only needed for the thin host.
 - Build the editor in the order of section 5.
@@ -511,6 +512,22 @@ Proposed in this document and confirmed by the author on 2026-10-13, at the star
 - No full visual slide editor. Slide text stays text; only the 3D scene gets visual editing.
 - One engine repo, not one repo per engine module.
 - Scene files are YAML, and scene state carries forward from slide to slide.
+
+Confirmed by the author on 2026-10-16, all as recommended in
+[scene-files-proposal.md](scene-files-proposal.md):
+
+- A slide writes a view or pose name where it writes values today (`camera: oversikt`,
+  `joints: q0`, `from: q0`), never both on one slide.
+- V on a slide that names a view updates that view in the scene file, with a banner listing every
+  slide that changed; Shift+V offers "only this slide".
+- The scene file's words: `base`, `views`, `poses`, `parent`, `at`, `rotate`, `material`.
+- A pose is a q list in joint order, or a mapping for some joints only.
+- No start state per scene run for now.
+- The editing code lives in the panel; the extension becomes a plain host (read, list, edit,
+  ask), so new editor features arrive with the engine.
+- Objects: height is the middle number (y up, as in `camera:`), `at` is the middle of the
+  underside, turns are in degrees, colours are named presets.
+- A misspelled top-level slide key becomes a build error, from the step that adds named views.
 
 ## 9. Open questions
 
