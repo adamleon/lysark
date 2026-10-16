@@ -40,8 +40,8 @@ and vscode.dev (2026-10-16). A saved view only reached the panel on Ctrl+S, so l
 the slide and coming back flew to the old view; 0.2.1 with engine v2.3.1 sends it at once
 and the runtime puts camera-only changes into the running deck without reloading.
 The author confirmed both in github.dev and vscode.dev (2026-10-16): the test is done
-and the thin host stays. The course runs v2.3.1, the Marketplace has 0.2.1. Still open:
-the check in desktop VS Code. Next: the scene file format, then the editor items of
+and the thin host stays, and desktop VS Code works too. The course runs v2.3.1, the
+Marketplace has 0.2.1. Next: the scene file format, then the editor items of
 lysark-v2.md §5.
 
 Proposals (not built):

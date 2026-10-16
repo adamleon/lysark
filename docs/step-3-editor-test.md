@@ -161,7 +161,8 @@ Reintroducing the first version's `window.parent` check makes it fail, as it sho
   the lecture, and saving a camera view works. The author confirmed both. (Extension 0.2.0 wrote
   the view into the text, but the panel only took it on Ctrl+S, and github.dev's auto-save
   doesn't count as one; 0.2.1 sends it at once.)
-- **Still to check:** desktop VS Code, installed from the Marketplace.
+- **Desktop VS Code (2026-10-16):** installed from the Marketplace; the camera button writes the
+  view into the slide's `offset`. Confirmed by the author.
 
 ## Limits of this version
 

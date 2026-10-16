@@ -455,8 +455,8 @@ HTTPS server.
   isolation on (`@vscode/test-web --coi`).
 - Result (extension 0.2.1, engine v2.3.1): the author confirmed the preview and saving a camera
   view in github.dev and vscode.dev on 2026-10-16. (0.2.0 only passed a saved view to the panel
-  on Ctrl+S, which github.dev's auto-save never triggers; 0.2.1 sends it at once.) Desktop VS
-  Code is still to be checked. Next in step 3: the scene file format (section 5).
+  on Ctrl+S, which github.dev's auto-save never triggers; 0.2.1 sends it at once.) The author
+  also confirmed desktop VS Code the same day. Next in step 3: the scene file format (section 5).
 
 ## 7. Postponed
 
