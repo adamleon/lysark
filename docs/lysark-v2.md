@@ -425,7 +425,8 @@ file passed the offline check, and all three rendered.
   the test extension, and try it in github.dev on the classroom PC, including the install prompt
   from `.vscode/extensions.json`. The result decides between the thin host and the bundled
   fallback (section 5).
-- Design the scene file format (section 5).
+- Design the scene file format (section 5). Proposal: [scene-files-proposal.md](scene-files-proposal.md),
+  waiting for the author's decisions.
 - Course CI publishes the panel's code (engine, compiler, editor) to Pages with the lectures,
   built from the pinned engine. This is only needed for the thin host.
 - Build the editor in the order of section 5.
