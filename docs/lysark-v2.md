@@ -459,6 +459,11 @@ HTTPS server.
   view in github.dev and vscode.dev on 2026-10-16. (0.2.0 only passed a saved view to the panel
   on Ctrl+S, which github.dev's auto-save never triggers; 0.2.1 sends it at once.) The author
   also confirmed desktop VS Code the same day. Next in step 3: the scene file format (section 5).
+- Scene files, step 1 (2026-10-19, built, not yet released): extension 0.3.0 is a plain host
+  (read, list, edit, ask; messages version 3) and the editing runs in the panel, which also
+  shows real images and saves views over unsaved typing; engine v2.4.0. Checked in engine CI and
+  with the real extension in VS Code for the web against v2.4.0 and v2.3.1. How it works:
+  [editor-host.md](editor-host.md). Release order: the extension first, then the engine tag.
 
 ## 7. Postponed
 

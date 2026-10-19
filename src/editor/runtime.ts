@@ -1,30 +1,37 @@
 import { compileLecture } from '../compiler/compile-slides'
 import type { CameraTargetSpec } from '../engine/slide-types'
 import { SCENE_NAMES } from '../scenes/registry'
+import type { CameraView } from './camera-edit'
 import { compileForEditor, updateCameras } from './editor-compile'
+import { createHost } from './host'
+import { loadImages } from './panel-images'
 import { EDITOR_PROTOCOL } from './panel-page.js'
+import { viewEdit } from './save-view'
 
 /**
  * The editor runtime (lysark-v2.md §5, step 3). It runs as the page of the
  * Lysark panel in VS Code (src/editor/panel-page.js), loaded from the course
  * site, and talks to the extension through VS Code's webview messages. The
- * extension sends the lecture text; this page checks that it compiles, then
- * starts the deck with it. New text that only changes cameras (a saved view,
- * say) is put into the running deck at once and 'shown'. Other new text that
- * compiles is 'accepted', and the extension then loads the panel afresh and
- * sends that text again on 'ready'. Text that doesn't compile leaves the last
- * good version running and shows the error.
+ * extension sends the lecture's files (slides.md, and the files matching the
+ * page's `include` patterns); this page checks that they compile, reads the
+ * lecture's images through the extension, then starts the deck. New text that
+ * only changes cameras (a saved view, say) is put into the running deck at
+ * once and 'shown'. Other new text that compiles is 'accepted', and the
+ * extension then loads the panel afresh and sends that text again on 'ready'.
+ * Text that doesn't compile leaves the last good version running and shows
+ * the error.
  *
- * Every text the extension sends carries a number (seq). The page names the
- * one it shows in 'shown', 'slide' and 'save-view', so the extension knows
- * which text a slide number counts in (docs/step-3-editor-test.md).
+ * Every set of files the extension sends carries a number (seq). The page
+ * names the one it shows in 'shown' and 'slide', so the extension knows which
+ * text a slide number counts in. Saving a view is computed here and written
+ * through the extension's edit request (host.ts, save-view.ts).
  *
- * Messages, all { type: 'lysark:…' }:
- *   page → extension  ready { protocol, render } · shown { seq, index } · accepted { seq }
- *                     slide { index, seq } · save-view { slide, seq, view }
- *                     error { message, seq? }
- *   extension → page  source { text, seq, slide, protocol } · goto { slide }
- *                     request-view
+ * Messages version 3, all { type: 'lysark:…' } (docs/editor-host.md):
+ *   page → extension  ready { protocol, render, include } · shown { seq, index } · accepted { seq }
+ *                     slide { index, seq } · error { message, seq?, fatal? }
+ *                     read · list · edit · ask, each { id, … } (host.ts)
+ *   extension → page  source { files, seq, slide, protocol } · goto { slide }
+ *                     request-view · request-actions · reply { id, … }
  */
 
 /** VS Code defines this in its panels; it may be called once per page */
@@ -58,12 +65,31 @@ interface LysarkHandle {
 /** a saved view keeps the slide's anchor only if the camera still looks at it (metres) */
 const ANCHOR_TOLERANCE = 0.005
 
+/**
+ * The files besides slides.md the extension sends with each text, and sends
+ * again when one is saved, created or deleted. Nothing reads them yet; scene
+ * files arrive with scene-files-proposal.md step 2.
+ */
+const INCLUDE = ['scenes/*.yaml', 'scenes/*.yml']
+
 const lysark = () => (window as unknown as { __lysark?: LysarkHandle }).__lysark
 const vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null
 const post = (message: Record<string, unknown>) => vscode?.postMessage({ ...message })
+/**
+ * the panel page's render number (src/editor/panel-page.js): the extension
+ * tells this page's 'ready' from a late one sent by the page it replaced, and
+ * the host's request ids start from it
+ */
+const render = Number(document.querySelector('meta[name="lysark-render"]')?.getAttribute('content') ?? NaN)
+const host = createHost(post, render)
 let booted = false
-/** the number of the text this page shows */
+/** the number of the text this page shows, and its slides.md */
 let shownSeq: number | null = null
+let shownText = ''
+/** the lecture's images, read when the page started; new text that needs others loads the page afresh */
+let images: Record<string, string> = {}
+/** a view is being written into the file */
+let saving = false
 /** the last view saved from this page, as written into the text (two decimals) */
 let savedView: { slide: number; lookAt: [number, number, number] | string; offset: [number, number, number] } | null = null
 
@@ -80,7 +106,7 @@ async function updateInPlace(text: string): Promise<boolean> {
   if (!engine) return false
   // the same module instance the deck was built from (it stands in for virtual:lysark-deck)
   const { default: deck } = await import('./deck-from-source')
-  const fresh = compileForEditor(text)
+  const fresh = compileForEditor(text, images)
   const i = engine.currentIndex
   const next: CameraTargetSpec | undefined = fresh[i]?.effective.camera
   const isSavedView =
@@ -157,17 +183,20 @@ window.addEventListener('message', async (event) => {
   // so it can't pose as the extension. (window.parent is no help: VS Code's
   // panel script sets it to the page itself.)
   if (!vscode || event.origin !== window.origin) return
-  const message = event.data as { type?: string; text?: string; slide?: number; seq?: number; protocol?: number }
-  if (message?.type === 'lysark:source' && typeof message.text === 'string' && typeof message.seq === 'number') {
+  const message = event.data as { type?: string; files?: unknown; slide?: number; seq?: number; protocol?: number }
+  if (host.onReply(message)) return
+  if (message?.type === 'lysark:source' && typeof message.seq === 'number') {
     // the same text again (a message that crossed a reload): already showing it
     if (booted && message.seq === shownSeq) return
-    if (message.protocol !== EDITOR_PROTOCOL) {
+    const files = message.files as Record<string, unknown> | undefined
+    const text = files?.['slides.md']
+    if (message.protocol !== EDITOR_PROTOCOL || typeof text !== 'string') {
       const problem = `This Lysark extension doesn't match the course's engine (messages version ${message.protocol ?? 'unknown'}, the engine has ${EDITOR_PROTOCOL}). Update the extension, or the course's engine.`
       showBanner(problem)
       post({ type: 'lysark:error', message: problem, seq: message.seq })
       return
     }
-    const problem = problemWith(message.text)
+    const problem = problemWith(text)
     if (problem) {
       if (!booted) clearLoading() // nothing to show yet but the error
       showBanner(`Not updated, the slides have an error:\n${problem}`)
@@ -175,9 +204,10 @@ window.addEventListener('message', async (event) => {
       return
     }
     if (booted) {
-      if (await updateInPlace(message.text)) {
+      if (await updateInPlace(text)) {
         // only cameras changed: the running deck has them now
         shownSeq = message.seq
+        shownText = text
         savedView = null
         showBanner(null)
         post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
@@ -188,14 +218,24 @@ window.addEventListener('message', async (event) => {
       return
     }
     showBanner(null)
-    window.__LYSARK_SOURCE__ = message.text
     shownSeq = message.seq
+    shownText = text
     if (typeof message.slide === 'number' && message.slide >= 0) location.hash = `#${message.slide + 1}`
     booted = true
+    // the images first: the deck is built with them (a slide asked for meanwhile
+    // goes into the address, where the deck starts)
+    // (a request at a time can be large and slow in github.dev: two minutes each)
+    const loaded = await loadImages(compileLecture(text).images, (paths) => host.read(paths, 'bytes', 120_000))
+    images = loaded.uris
+    window.__LYSARK_SOURCE__ = text
+    window.__LYSARK_IMAGES__ = images
     try {
       await import('../main')
       clearLoading()
       post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
+      if (loaded.problems.length > 0) {
+        showBanner(`Images not shown:\n${loaded.problems.join('\n')}`)
+      }
     } catch (err) {
       // the deck's files didn't load (a network failure, or the site was
       // republished meanwhile): only loading the panel afresh helps
@@ -205,17 +245,28 @@ window.addEventListener('message', async (event) => {
       post({ type: 'lysark:error', message: text, fatal: true })
     }
   } else if (message?.type === 'lysark:request-view') {
-    saveView()
+    void saveView()
+  } else if (message?.type === 'lysark:request-actions') {
+    void sceneActions()
   } else if (message?.type === 'lysark:goto' && typeof message.slide === 'number') {
     goTo(message.slide)
   }
 })
 
+/** the "Scene Actions…" button: what the panel can do, as a list in VS Code */
+async function sceneActions(): Promise<void> {
+  const choice = await host.ask({
+    title: 'Lysark: scene actions',
+    items: [{ label: 'Save camera view into this slide', description: 'V', value: 'save-view' }],
+  })
+  if (choice === 'save-view') await saveView()
+}
+
 // ---- save the camera view --------------------------------------------------
 
-function saveView(): void {
+async function saveView(): Promise<void> {
   const L = lysark()
-  if (!L) return
+  if (!L || saving) return
   const slide = L.engine.current
   if (!slide.scene) {
     showBanner('This slide has no 3D scene, so there is no camera view to save.')
@@ -241,25 +292,55 @@ function saveView(): void {
     center = anchorAt
   }
   const offset = camera.clone().sub(center)
-  // as the extension writes it (camera-edit.ts, two decimals), to know it again when the text comes back
-  savedView = {
-    slide: L.engine.currentIndex,
-    lookAt: typeof lookAt === 'string' ? lookAt : [round2(lookAt[0]), round2(lookAt[1]), round2(lookAt[2])],
-    offset: [round2(offset.x), round2(offset.y), round2(offset.z)],
+  const view: CameraView = { lookAt, offset: [offset.x, offset.y, offset.z] }
+  const index = L.engine.currentIndex
+  const shown = shownText
+  saving = true
+  try {
+    // the file as it is now in VS Code, unsaved typing included
+    const file = (await host.read(['slides.md'], 'text'))['slides.md']
+    if (typeof file.text !== 'string' || typeof file.version !== 'number') {
+      showBanner(`The view was not saved: slides.md could not be read (${file.error ?? 'no text'}).`)
+      return
+    }
+    const change = viewEdit(shown, file.text, index, view)
+    if (change && 'problem' in change) {
+      showBanner(`The view was not saved: ${change.problem}`)
+      return
+    }
+    if (!change) {
+      showBanner(`Slide ${index + 1} already has this camera view`, 'ok')
+      return
+    }
+    const next = file.text.slice(0, change.start) + change.text + file.text.slice(change.end)
+    const broken = problemWith(next)
+    if (broken && !problemWith(file.text)) {
+      showBanner(`The view was not saved: the slides would have an error:\n${broken}`)
+      return
+    }
+    // as the edit writes it (camera-edit.ts, two decimals), to know it again when the text comes back
+    savedView = {
+      slide: index,
+      lookAt: typeof lookAt === 'string' ? lookAt : [round2(lookAt[0]), round2(lookAt[1]), round2(lookAt[2])],
+      offset: [round2(offset.x), round2(offset.y), round2(offset.z)],
+    }
+    const result = await host.edit('Save camera view', [{ path: 'slides.md', version: file.version, ...change }])
+    if (!result.ok) {
+      savedView = null
+      showBanner(`The view was not saved: ${result.message ?? 'VS Code refused the edit'}`)
+      return
+    }
+    // the extension sends the edited text, which puts the view into the running deck
+    showBanner(`Camera view saved to slide ${index + 1}`, 'ok')
+  } finally {
+    saving = false
   }
-  post({
-    type: 'lysark:save-view',
-    slide: L.engine.currentIndex,
-    seq: shownSeq,
-    view: { lookAt, offset: [offset.x, offset.y, offset.z] },
-  })
-  showBanner(`Camera view saved to slide ${L.engine.currentIndex + 1}`, 'ok')
 }
 
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'v' || e.ctrlKey || e.metaKey || e.altKey) return
   if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return
-  saveView()
+  void saveView()
 })
 
 window.addEventListener('hashchange', () => {
@@ -285,17 +366,14 @@ document.addEventListener('click', (e) => {
 document.getElementById('_defaultStyles')?.remove()
 
 if (vscode) {
-  // the panel page's render number (src/editor/panel-page.js), so the extension
-  // can tell this page's 'ready' from a late one sent by the page it replaced
-  const render = Number(document.querySelector('meta[name="lysark-render"]')?.getAttribute('content') ?? NaN)
-  post({ type: 'lysark:ready', protocol: EDITOR_PROTOCOL, render })
+  post({ type: 'lysark:ready', protocol: EDITOR_PROTOCOL, render, include: INCLUDE })
 } else {
   // Framed, this page is in the panel of Lysark extension 0.1.0, which framed
   // the site's editor page (VS Code's own panel page has window.parent ===
   // window). Opened directly, it's someone looking at the course site.
   const note =
     window.parent !== window
-      ? "This Lysark extension is older than the course's engine: update the Lysark extension (0.2.0 or later)."
+      ? "This Lysark extension is older than the course's engine: update the Lysark extension (0.3.0 or later)."
       : 'This is the Lysark editor runtime. It runs inside the Lysark panel in VS Code: open a slides.md and click "Open Lysark Preview".'
   document.addEventListener('DOMContentLoaded', () => showBanner(note))
 }

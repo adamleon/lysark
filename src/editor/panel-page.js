@@ -13,11 +13,15 @@
  * sides check it, so a course on an older or newer engine than the extension
  * expects gets a clear message instead of a blank panel. The site's editor
  * page states it too (editor.html), so the extension can tell before loading.
- * Raise it whenever the messages change, and also when the way slides are
- * split or the camera frontmatter is written changes: the extension carries
- * its own copy of that code (slide-ranges.ts, camera-edit.ts).
+ * Raise it whenever the messages change.
+ *
+ * Version 3 (engine v2.4.0, extension 0.3.0) makes the extension a plain host
+ * (docs/editor-host.md): the editing code runs in the panel, so changing how
+ * slides are split or the camera is written no longer needs a new version.
+ * Version 2 (engine v2.3.x) had the extension write saved views itself; the
+ * extension still speaks it, for courses that haven't updated their engine.
  */
-export const EDITOR_PROTOCOL = 2
+export const EDITOR_PROTOCOL = 3
 
 /**
  * The message version the site's editor page states, or null if it states

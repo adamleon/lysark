@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { editorUrl, isCameraView, isCoursePackage, matchSlide, notificationText, singleEdit } from './logic'
+import {
+  bytesToBase64,
+  editorUrl,
+  fileProblem,
+  includePatterns,
+  isCameraView,
+  isCoursePackage,
+  isCreatablePath,
+  isWritablePath,
+  notificationText,
+  resolveInside,
+} from './logic'
 
 describe('notificationText', () => {
   // VS Code's link parser for extension messages (workbench notifications)
@@ -17,36 +28,6 @@ describe('notificationText', () => {
 
   it('keeps ordinary text, brackets included', () => {
     expect(notificationText('lookAt: [0, 1, 2] (a point)')).toBe('lookAt: [0, 1, 2] (a point)')
-  })
-})
-
-describe('matchSlide', () => {
-  const deck = (...bodies: string[]) => bodies.map((b, i) => `---\nscene: arm\ncamera:\n  offset: [${i}, 1, 1]\n---\n${b}\n`).join('')
-
-  it('keeps the number when the slides are the same, even if their frontmatter changed', () => {
-    const before = deck('# A', '# B', '# C')
-    expect(matchSlide(before, before, 1)).toBe(1)
-    expect(matchSlide(before, before.replace('offset: [1, 1, 1]', 'offset: [9, 9, 9]'), 1)).toBe(1)
-  })
-
-  it('follows a slide when others are added, removed, or reordered', () => {
-    const before = deck('# A', '# B', '# C')
-    expect(matchSlide(before, deck('# New', '# A', '# B', '# C'), 2)).toBe(3)
-    expect(matchSlide(before, deck('# B', '# C'), 2)).toBe(1)
-    expect(matchSlide(before, deck('# C', '# A', '# B'), 0)).toBe(1)
-  })
-
-  it('tells same-looking slides apart by their id', () => {
-    const before = '---\nid: one\n---\n# Same\n---\nid: two\n---\n# Same\n'
-    const after = '---\nid: two\n---\n# Same\n---\nid: one\n---\n# Same\n'
-    expect(matchSlide(before, after, 0)).toBe(1)
-  })
-
-  it('gives -1 when the slide itself changed or the text has no slides', () => {
-    const before = deck('# A', '# B')
-    expect(matchSlide(before, deck('# A', '# B, edited'), 1)).toBe(-1)
-    expect(matchSlide(before, 'not slides', 0)).toBe(-1)
-    expect(matchSlide(before, before + 'x', 5)).toBe(-1)
   })
 })
 
@@ -98,28 +79,70 @@ describe('isCameraView', () => {
   })
 })
 
-describe('singleEdit', () => {
-  const apply = (old: string, e: ReturnType<typeof singleEdit>) =>
-    e ? old.slice(0, e.start) + e.text + old.slice(e.end) : old
+describe('resolveInside', () => {
+  const lecture = '/course/lectures/intro'
+  const roots = [lecture, '/course/assets']
 
-  it('replaces only the changed part', () => {
-    const old = 'camera:\n  offset: [1, 2, 3]\n---\n'
-    const now = 'camera:\n  offset: [1.5, 2, 3]\n---\n'
-    const e = singleEdit(old, now)
-    expect(e).toEqual({ start: 20, end: 20, text: '.5' })
-    expect(apply(old, e)).toBe(now)
+  it('resolves paths inside the lecture folder and the course assets', () => {
+    expect(resolveInside(lecture, 'slides.md', roots)).toBe('/course/lectures/intro/slides.md')
+    expect(resolveInside(lecture, './img/a.png', roots)).toBe('/course/lectures/intro/img/a.png')
+    expect(resolveInside(lecture, '../../assets/kuka.png', roots)).toBe('/course/assets/kuka.png')
+    expect(resolveInside(lecture + '/', 'scenes/agilus.yaml', roots)).toBe('/course/lectures/intro/scenes/agilus.yaml')
+    expect(resolveInside(lecture, '.', roots)).toBe(lecture)
+    // an empty segment counts as none, as in the course build
+    expect(resolveInside(lecture, 'images//a.png', roots)).toBe('/course/lectures/intro/images/a.png')
   })
 
-  it('handles insertions, deletions, repeated characters, and no change', () => {
-    for (const [a, b] of [
-      ['aaa', 'aaaa'],
-      ['aaaa', 'aa'],
-      ['x\n\ny', 'x\n  z\n\ny'],
-      ['', 'abc'],
-      ['abc', ''],
-    ]) {
-      expect(apply(a, singleEdit(a, b))).toBe(b)
+  it('refuses anything that leaves them, or is not a plain relative path', () => {
+    for (const rel of ['../other/slides.md', '../../package.json', '../intro-x/a.png', '/etc/passwd', 'c:/x', 'a:b.png', '', 'img/../../..', '.git/config', 'images/.hidden.png', '../../.env', 'ENV~1', 'GIT~1/config', '../../assets/CACHE~1/x.png']) {
+      expect(resolveInside(lecture, rel, roots), rel).toBeNull()
     }
-    expect(singleEdit('same', 'same')).toBeNull()
+    expect(resolveInside(lecture, 'a' + String.fromCharCode(92) + 'b', roots)).toBeNull()
+    expect(resolveInside(lecture, '../../assets/x.png', [lecture])).toBeNull()
+  })
+})
+
+describe('isWritablePath and isCreatablePath', () => {
+  it('allow slides.md and scene files only', () => {
+    expect(isWritablePath('slides.md')).toBe(true)
+    expect(isWritablePath('scenes/agilus.yaml')).toBe(true)
+    expect(isWritablePath('scenes/agilus.yml')).toBe(true)
+    for (const rel of ['./slides.md', 'scenes/../slides.md', 'scenes/a/b.yaml', 'scenes/.x.yaml', 'img/a.png', 'package.json', 'scenes/Agilus.yaml']) {
+      expect(isWritablePath(rel), rel).toBe(false)
+    }
+    expect(isCreatablePath('scenes/agilus.yaml')).toBe(true)
+    expect(isCreatablePath('scenes/agilus.yml')).toBe(false)
+    expect(isCreatablePath('slides.md')).toBe(false)
+  })
+})
+
+describe('includePatterns', () => {
+  it('lists one folder and matches its files by extension', () => {
+    const inc = includePatterns(['scenes/*.yaml', 'scenes/*.yml', '**/*', 'a/b/*.x', 'media/*.mp4', 42])
+    expect(inc.dirs).toEqual(['scenes'])
+    expect(inc.matches('scenes/agilus.yaml')).toBe(true)
+    expect(inc.matches('scenes/agilus.yml')).toBe(true)
+    for (const rel of ['scenes/.yaml', 'scenes/a/b.yaml', 'slides.md', 'scenes/a.yamlx', 'other/a.yaml']) {
+      expect(inc.matches(rel), rel).toBe(false)
+    }
+    expect(includePatterns(undefined).dirs).toEqual([])
+  })
+})
+
+describe('fileProblem', () => {
+  it('gives a short reason by code, never the message with its path', () => {
+    const err = Object.assign(new Error("ENOENT: no such file or directory, scandir 'c:\\Users\\someone\\x'"), { code: 'FileNotFound' })
+    expect(fileProblem(err)).toBe('not found')
+    expect(fileProblem(Object.assign(new Error('/home/someone/x'), { code: 'NoPermissions' }))).toBe('no permission')
+    expect(fileProblem(new Error('/home/someone/x'))).toBe('could not be read')
+    expect(fileProblem(null)).toBe('could not be read')
+  })
+})
+
+describe('bytesToBase64', () => {
+  it('matches the standard encoding, past one chunk', () => {
+    const bytes = new Uint8Array(70000).map((_, i) => (i * 7) % 256)
+    expect(bytesToBase64(bytes)).toBe(Buffer.from(bytes).toString('base64'))
+    expect(bytesToBase64(new Uint8Array())).toBe('')
   })
 })

@@ -4,6 +4,10 @@ How the Lysark VS Code extension works. It is the test that starts step 3 of
 [lysark-v2.md](lysark-v2.md): a panel beside `slides.md` that shows the live lecture and saves a 3D
 camera view into the slide. Written for the author; no engine knowledge needed.
 
+From engine v2.4.0 and extension 0.3.0 the editing moves into the panel and the extension
+becomes a plain host (messages version 3): see [editor-host.md](editor-host.md). This note
+describes version 2, which extension 0.3.0 still speaks for courses on engine v2.3.x.
+
 ## Using it
 
 1. Open a lecture's `slides.md`: in github.dev (press `.` on the course's GitHub page), or in
@@ -142,8 +146,8 @@ Reintroducing the first version's `window.parent` check makes it fail, as it sho
 
 - `npm run test-web -- <course folder>` in `extension/` starts VS Code for the web at
   http://localhost:3000 with the extension loaded from the folder and the course folder opened,
-  cross-origin isolated like github.dev. Saves stay in that browser tab; the files on disk don't
-  change.
+  cross-origin isolated like github.dev. Saves stay in that browser tab (a reload reads the disk
+  again); the files on disk don't change.
 - To use a local editor runtime instead of the published one: run `node bin/lysark.mjs
   editor-build`, serve it the way Pages does with `node scripts/editor-server.mjs dist/editor 4173`
   (the `lysark-editor-runtime` entry in `.claude/launch.json`), and put
@@ -170,6 +174,7 @@ Reintroducing the first version's `window.parent` check makes it fail, as it sho
   the camera and reveal step survive. That needs the first piece of the player API (lysark-v2.md
   step 3) and is the next editor change.
 - **Images show as grey boxes** with their path; the extension doesn't send image files yet.
+  (Real images from engine v2.4.0: [editor-host.md](editor-host.md).)
 - **The 3D view takes the panel's shape.** A narrow panel shows less to the sides than the 16:9
   projector, and the text is cut off. The saved numbers are exact, but judge the framing with the
   panel about as wide as the projector. See the proposal below.

@@ -3,43 +3,7 @@
  * tests can run them.
  */
 
-import { slideRanges, splitLines } from '../../src/compiler/slide-ranges'
-
-/**
- * What identifies each slide across edits: its `id:` and its body text. Not the
- * rest of the frontmatter, which a saved view changes. null if the text doesn't
- * split into slides.
- */
-function slideSignatures(text: string): string[] | null {
-  try {
-    const lines = splitLines(text)
-    return slideRanges(text).map((r) => {
-      const id = lines.slice(r.yamlStart, r.yamlEnd).find((l) => /^id\s*:/.test(l)) ?? ''
-      return `${id.trim()}\n${lines.slice(r.bodyStart, r.bodyEnd).join('\n').trim()}`
-    })
-  } catch {
-    return null
-  }
-}
-
-/**
- * The slide in text `to` that is slide `index` of text `from` (both 0-based):
- * the same number if that slide is unchanged, otherwise the nearest slide
- * that matches it, so slides added or removed elsewhere don't matter. -1 if
- * no slide matches, for example when the slide itself was edited.
- */
-export function matchSlide(from: string, to: string, index: number): number {
-  if (from === to) return index
-  const a = slideSignatures(from)
-  const b = slideSignatures(to)
-  if (!a || !b || index < 0 || index >= a.length) return -1
-  const wanted = a[index]
-  for (let d = 0; d < Math.max(index + 1, b.length - index); d++) {
-    if (b[index - d] === wanted) return index - d
-    if (b[index + d] === wanted) return index + d
-  }
-  return -1
-}
+export { matchSlide, singleEdit } from '../../src/editor/slide-match'
 
 /**
  * Text for a VS Code notification. VS Code turns `[label](command:…)` (or
@@ -114,22 +78,98 @@ export function isCoursePackage(packageJson: unknown): boolean {
   return !!deps && typeof deps === 'object' && 'lysark' in deps
 }
 
+// ---- the host's rules for message version 3 (read, list, edit) -------------
+
 /**
- * The one replacement that turns oldText into newText: everything outside it is
- * unchanged. Applying this instead of replacing the whole file keeps the
- * cursor, folding, and undo history around the edit.
+ * Where a path the panel asked for points, as a folder path (`uri.path`
+ * style, forward slashes): `rel` is relative to the lecture folder, like an
+ * image path in slides.md. null unless it is one of `roots` or lands inside
+ * one (the lecture folder, and the course's assets/ folder when the course is
+ * known). Refuses absolute paths, backslashes, colons (drive letters, and
+ * Windows' alternate data streams) and hidden names (`.git`, `.env`, also by
+ * their Windows short names such as `GIT~1`); an empty
+ * segment counts as none, as in the course build. Only the text of the path:
+ * links are the caller's to check.
  */
-export function singleEdit(oldText: string, newText: string): { start: number; end: number; text: string } | null {
-  if (oldText === newText) return null
-  let start = 0
-  const max = Math.min(oldText.length, newText.length)
-  while (start < max && oldText[start] === newText[start]) start++
-  let tail = 0
-  while (
-    tail < max - start &&
-    oldText[oldText.length - 1 - tail] === newText[newText.length - 1 - tail]
-  ) {
-    tail++
+export function resolveInside(lectureDir: string, rel: string, roots: string[]): string | null {
+  if (!rel || rel.startsWith('/') || /[\\:\0]/.test(rel)) return null
+  const parts = lectureDir.replace(/\/+$/, '').split('/')
+  for (const segment of rel.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment.startsWith('.') && segment !== '..') return null
+    // a Windows short name (`ENV~1` for `.env`) reaches a hidden file by another name
+    if (/~\d/.test(segment)) return null
+    if (segment === '..') {
+      if (parts.length <= 1) return null
+      parts.pop()
+    } else parts.push(segment)
   }
-  return { start, end: oldText.length - tail, text: newText.slice(start, newText.length - tail) }
+  const path = parts.join('/')
+  return roots.some((root) => {
+    const dir = root.replace(/\/+$/, '')
+    return path === dir || path.startsWith(dir + '/')
+  })
+    ? path
+    : null
+}
+
+/** a file the panel may change: the lecture's slides.md, or one of its scene files */
+export function isWritablePath(rel: string): boolean {
+  return rel === 'slides.md' || /^scenes\/[a-z][a-z0-9-]*\.ya?ml$/.test(rel)
+}
+
+/** a file the panel may create: a new scene file */
+export function isCreatablePath(rel: string): boolean {
+  return /^scenes\/[a-z][a-z0-9-]*\.yaml$/.test(rel)
+}
+
+/**
+ * The panel's include patterns (`scenes/*.yaml`): one folder below the lecture
+ * folder and a `*` file name with a YAML extension, the only form supported
+ * (the files are sent as text with every update). Returns the folders to list,
+ * and a test for a path relative to the lecture folder.
+ */
+export function includePatterns(patterns: unknown): { dirs: string[]; matches: (rel: string) => boolean } {
+  const rules: Array<{ dir: string; ext: string }> = []
+  for (const p of Array.isArray(patterns) ? patterns.slice(0, 16) : []) {
+    const m = typeof p === 'string' ? p.match(/^([a-z][a-z0-9-]*)\/\*(\.ya?ml)$/) : null
+    if (m) rules.push({ dir: m[1], ext: m[2] })
+  }
+  const matches = (rel: string): boolean => {
+    const slash = rel.indexOf('/')
+    const dir = rel.slice(0, slash)
+    const name = rel.slice(slash + 1)
+    if (slash < 0 || name.includes('/') || name.startsWith('.')) return false
+    return rules.some((r) => r.dir === dir && name.length > r.ext.length && name.endsWith(r.ext))
+  }
+  return { dirs: [...new Set(rules.map((r) => r.dir))], matches }
+}
+
+/**
+ * What went wrong with a file, for the panel: a short reason from the error's
+ * code, never its message, which can hold the absolute path on this computer
+ * (and so the user name).
+ */
+export function fileProblem(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code
+  const reasons: Record<string, string> = {
+    FileNotFound: 'not found',
+    EntryNotFound: 'not found',
+    FileNotADirectory: 'not a folder',
+    EntryNotADirectory: 'not a folder',
+    FileIsADirectory: 'a folder, not a file',
+    EntryIsADirectory: 'a folder, not a file',
+    FileExists: 'already exists',
+    EntryExists: 'already exists',
+    NoPermissions: 'no permission',
+    Unavailable: 'unavailable',
+  }
+  return (typeof code === 'string' && reasons[code]) || 'could not be read'
+}
+
+/** bytes as base64, in both extension hosts (the web one has no Buffer) */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
 }

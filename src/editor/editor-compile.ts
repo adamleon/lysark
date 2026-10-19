@@ -3,16 +3,18 @@ import type { CompiledSlide } from '../engine/slide-types'
 
 /**
  * Compile lecture text for the editor runtime: the normal compiler, with each
- * image shown as a placeholder naming its file, since the extension doesn't
- * send image files yet (lysark-v2.md step 3). Pure: the deck
- * (deck-from-source.ts) and the runtime's camera update (runtime.ts) both use it.
+ * image filled from `images` (data URIs by src, read from the lecture folder
+ * through VS Code; panel-images.ts), or shown as a placeholder naming its file
+ * when the panel couldn't get it. Pure: the deck (deck-from-source.ts) and the
+ * runtime's camera update (runtime.ts) both use it, with the same images.
  */
-export function compileForEditor(text: string): CompiledSlide[] {
-  const { slides, images } = compileLecture(text)
+export function compileForEditor(text: string, images: Record<string, string> = {}): CompiledSlide[] {
+  const { slides, images: refs } = compileLecture(text)
   return JSON.parse(
-    JSON.stringify(slides).replace(new RegExp(`${IMAGE_TOKEN}(\\d+)`, 'g'), (_, n: string) =>
-      imagePlaceholder(images[Number(n)].src),
-    ),
+    JSON.stringify(slides).replace(new RegExp(`${IMAGE_TOKEN}(\\d+)`, 'g'), (_, n: string) => {
+      const src = refs[Number(n)].src
+      return images[src] ?? imagePlaceholder(src)
+    }),
   )
 }
 
@@ -22,7 +24,7 @@ function imagePlaceholder(src: string): string {
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120">` +
     `<rect width="320" height="120" rx="8" fill="#8a8f98" fill-opacity="0.25" stroke="#8a8f98"/>` +
-    `<text x="160" y="56" text-anchor="middle" font-family="system-ui" font-size="14" fill="#8a8f98">image</text>` +
+    `<text x="160" y="56" text-anchor="middle" font-family="system-ui" font-size="14" fill="#8a8f98">image not shown</text>` +
     `<text x="160" y="80" text-anchor="middle" font-family="system-ui" font-size="12" fill="#8a8f98">${label}</text></svg>`
   return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }

@@ -2,7 +2,8 @@
 
 Step 3 of [lysark-v2.md](lysark-v2.md) designs the scene file format before the editor writes
 named views and poses. **Decided 2026-10-16: all eight decisions as recommended** (recorded in lysark-v2.md section 8).
-Nothing here is built yet; it is built in the steps below.
+It is built in the steps below. Step 1 is built (2026-10-19, [editor-host.md](editor-host.md));
+the format itself comes with step 2.
 It came from four independent designs (smallest change, editor-first, lecturer-first,
 engine-first), scored by three reviewers and combined; the claims about today's code were
 checked against the code.

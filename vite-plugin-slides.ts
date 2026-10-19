@@ -2,6 +2,7 @@ import { normalizePath, type Plugin, type ViteDevServer } from 'vite'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { compileLecture, IMAGE_TOKEN, type ImageRef } from './src/compiler/compile-slides'
+import { IMAGE_TYPES } from './src/compiler/image-types'
 
 /**
  * Compiles a lecture's slides.md to slide objects at build time (spec §8),
@@ -10,16 +11,6 @@ import { compileLecture, IMAGE_TOKEN, type ImageRef } from './src/compiler/compi
  * data URI, so the student file needs nothing next to it. The browser imports
  * plain data; markdown-it/yaml/katex never ship.
  */
-
-const IMAGE_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-}
 
 /** true when file is somewhere under dir (Windows paths compare without case) */
 function isInside(dir: string, file: string): boolean {

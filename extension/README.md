@@ -14,11 +14,16 @@ be fixed from any browser.
 4. On a slide with a 3D scene, move the camera with the mouse, click in it, and press **V** (or
    click the camera button in the panel's title bar). The view is written into that slide's
    `camera:` frontmatter as a normal text change, ready to commit.
+5. **Scene Actions…** (the list button on the panel's title bar) shows what the preview can do
+   with the scene. Needs the course on engine v2.4.0 or later.
 
 ## How it finds the preview
 
 The preview itself is part of the course's published site, built from the engine version the
-course uses, at `<homepage>/_lysark/editor/` (engine v2.3.0 or later). The extension takes
+course uses, at `<homepage>/_lysark/editor/` (engine v2.3.0 or later). New editor features
+arrive with the engine, so the extension rarely needs updating. When the preview asks, it reads
+files from the lecture folder and the course's `assets/` folder, and edits only the lecture's
+`slides.md` and its scene files (`scenes/*.yaml` or `.yml`), as changes you can undo. The extension takes
 `homepage` from the course's `package.json`:
 
 ```json

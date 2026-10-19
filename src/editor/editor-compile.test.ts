@@ -6,6 +6,22 @@ const deck = (offset2: string, title1 = '# One') =>
   `---\nscene: arm\ncamera:\n  offset: ${offset2}\n---\n# Two\n` +
   `---\nscene: arm\n---\n# Three\n`
 
+describe('compileForEditor', () => {
+  const lecture = '---\n---\n![arm](images/arm.png)\n\n<img src="gone.png">\n'
+
+  it('fills each image from the map by its src, and shows a placeholder for the rest', () => {
+    const html = JSON.stringify(compileForEditor(lecture, { 'images/arm.png': 'data:image/png;base64,QUJD' }))
+    expect(html).toContain('data:image/png;base64,QUJD')
+    expect(html).toContain('image%20not%20shown')
+    expect(html).toContain('gone.png')
+    expect(html).not.toContain('lysark-image:')
+  })
+
+  it('shows placeholders without a map', () => {
+    expect(JSON.stringify(compileForEditor(lecture))).not.toContain('base64')
+  })
+})
+
 describe('updateCameras', () => {
   it('copies changed cameras into the running slides, carried forward as the compiler does', () => {
     const running = compileForEditor(deck('[2, 2, 2]'))

@@ -1,8 +1,8 @@
 {
   "name": "lysark",
   "displayName": "Lysark",
-  "description": "Preview Lysark lecture slides beside the text and save 3D camera views into them, also in github.dev",
-  "version": "0.2.1",
+  "description": "Preview Lysark lecture slides beside the text and edit their 3D scenes from the preview, also in github.dev",
+  "version": "0.3.0",
   "publisher": "simply-wyvern",
   "license": "MIT",
   "repository": {
@@ -46,6 +46,12 @@
         "title": "Save Camera View into the Slide (V)",
         "category": "Lysark",
         "icon": "$(device-camera)"
+      },
+      {
+        "command": "lysark.sceneActions",
+        "title": "Scene Actions…",
+        "category": "Lysark",
+        "icon": "$(list-selection)"
       }
     ],
     "menus": {
@@ -59,15 +65,24 @@
           "command": "lysark.saveView",
           "when": "activeWebviewPanelId == 'lysark.preview'",
           "group": "navigation"
+        },
+        {
+          "command": "lysark.sceneActions",
+          "when": "activeWebviewPanelId == 'lysark.preview'",
+          "group": "navigation"
         }
       ],
       "commandPalette": [
         {
           "command": "lysark.openPreview",
-          "when": "editorLangId == markdown"
+          "when": "resourceFilename == slides.md"
         },
         {
           "command": "lysark.saveView",
+          "when": "activeWebviewPanelId == 'lysark.preview'"
+        },
+        {
+          "command": "lysark.sceneActions",
           "when": "activeWebviewPanelId == 'lysark.preview'"
         }
       ]

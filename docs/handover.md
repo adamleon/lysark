@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-10-15)
+## Where the project is (2026-10-19)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -43,8 +43,12 @@ The author confirmed both in github.dev and vscode.dev (2026-10-16): the test is
 and the thin host stays, and desktop VS Code works too. The course runs v2.3.1, the
 Marketplace has 0.2.1. The scene file format is decided
 ([scene-files-proposal.md](scene-files-proposal.md), all eight decisions as recommended,
-2026-10-16). Now building its step 1: finish the thin host (extension 0.3.0 with a generic
-read/list/edit/ask host, then engine v2.4.0).
+2026-10-16). Its step 1, finishing the thin host, is built and checked (2026-10-19), not yet released
+([editor-host.md](editor-host.md)): extension 0.3.0 is a plain host (read, list, edit, ask;
+messages version 3, and still version 2 for courses on v2.3.x), the editing runs in the panel,
+images show in the panel, and V works over unsaved typing. Release: the author uploads 0.3.0
+to the Marketplace; once it has reached github.dev and desktop VS Code, tag engine v2.4.0 and
+run Update engine. Next: step 2, named views, with `docs/scene-files.md`.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -184,7 +188,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**159**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**182**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.
@@ -196,6 +200,12 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
   like Pages.
 - In `extension/`: `npm run build`, `npm run typecheck`, `npm run package` (→ `.vsix`),
   `npm run test-web -- <course folder>` (VS Code for the web on port 3000).
+- `node scripts/check-extension.mjs <editor dir> [<editor dir> …]` — the real extension in VS Code
+  for the web against each editor build (by its message version); run before an extension
+  release, with this engine's editor and the last release's (`git worktree add <dir> v2.3.1`,
+  link `node_modules` with `mklink /J`, `node bin/lysark.mjs editor-build --out-dir <out>` there).
+  Remove that link (`rmdir <dir>\node_modules`) before `git worktree remove`: on Windows the
+  removal follows it and empties the real `node_modules`.
 
 ## Gotchas worth remembering
 
@@ -206,6 +216,16 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
   the page console; the panel's frames don't. The panel goes black whenever the
   pane stops painting (same cause as the rAF pause below). Run test-web with `--coi`
   (the `test-web` script does), or isolation problems like the 0.1.0 one stay hidden.
+  Playwright's own Chromium does reach the panel (scripts/check-extension.mjs).
+- **Changing the panel's `INCLUDE` patterns** (src/editor/runtime.ts) in a later engine: the
+  extension re-gathers the latest set of files when a new page names other patterns, but if the
+  latest text was refused, the page first boots with the last accepted set, gathered under the
+  old patterns, until the next accepted text. Harmless while the patterns stay
+  `scenes/*.yaml|yml`; if they change, re-gather the accepted set in `onReady` too.
+- **test-web keeps saves in the browser tab** (its file system runs in the tab), not on
+  disk: read the document from the editor, not the file. A reload or a new tab reads the disk
+  again. Its Quick Open doesn't find files created after it started (open them from the
+  Explorer).
 - **Firefox in engine CI** has no GPU: headless it finds no OpenGL, and its blocklist
   refuses software WebGL 2. The editor check therefore runs Firefox headed under
   `xvfb-run` (Mesa software OpenGL) with `webgl.force-enabled` (scripts/browser.mjs,
