@@ -5,6 +5,9 @@ Lysark panel and the VS Code extension work together from engine v2.4.0 on, with
 version 3. Written for the author; [step-3-editor-test.md](step-3-editor-test.md) describes the
 extension as a whole and is still right about everything this note doesn't change.
 
+Released 2026-11-03: extension 0.3.0 on the Marketplace (the author confirmed it works), then
+engine v2.4.0.
+
 ## What changes for you
 
 - **Real images in the panel.** Images from the lecture folder or the course's `assets/` show

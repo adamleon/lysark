@@ -40,15 +40,14 @@ and vscode.dev (2026-10-16). A saved view only reached the panel on Ctrl+S, so l
 the slide and coming back flew to the old view; 0.2.1 with engine v2.3.1 sends it at once
 and the runtime puts camera-only changes into the running deck without reloading.
 The author confirmed both in github.dev and vscode.dev (2026-10-16): the test is done
-and the thin host stays, and desktop VS Code works too. The course runs v2.3.1, the
-Marketplace has 0.2.1. The scene file format is decided
+and the thin host stays, and desktop VS Code works too. The scene file format is decided
 ([scene-files-proposal.md](scene-files-proposal.md), all eight decisions as recommended,
-2026-10-16). Its step 1, finishing the thin host, is built and checked (2026-10-19), not yet released
-([editor-host.md](editor-host.md)): extension 0.3.0 is a plain host (read, list, edit, ask;
+2026-10-16). Its step 1, finishing the thin host, is released (2026-11-03,
+[editor-host.md](editor-host.md)): extension 0.3.0 is a plain host (read, list, edit, ask;
 messages version 3, and still version 2 for courses on v2.3.x), the editing runs in the panel,
-images show in the panel, and V works over unsaved typing. Release: the author uploads 0.3.0
-to the Marketplace; once it has reached github.dev and desktop VS Code, tag engine v2.4.0 and
-run Update engine. Next: step 2, named views, with `docs/scene-files.md`.
+images show in the panel, and V works over unsaved typing. The Marketplace has 0.3.0 (the
+author confirmed it works) and the engine is tagged v2.4.0; the course moves to it with the
+Update engine workflow. Next: step 2, named views, with `docs/scene-files.md`.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
