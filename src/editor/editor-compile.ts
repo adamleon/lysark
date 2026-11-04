@@ -5,11 +5,16 @@ import type { CompiledSlide } from '../engine/slide-types'
  * Compile lecture text for the editor runtime: the normal compiler, with each
  * image filled from `images` (data URIs by src, read from the lecture folder
  * through VS Code; panel-images.ts), or shown as a placeholder naming its file
- * when the panel couldn't get it. Pure: the deck (deck-from-source.ts) and the
+ * when the panel couldn't get it; the lecture's scene files as `sceneFiles`
+ * (by path, docs/scene-files.md). Pure: the deck (deck-from-source.ts) and the
  * runtime's camera update (runtime.ts) both use it, with the same images.
  */
-export function compileForEditor(text: string, images: Record<string, string> = {}): CompiledSlide[] {
-  const { slides, images: refs } = compileLecture(text)
+export function compileForEditor(
+  text: string,
+  images: Record<string, string> = {},
+  sceneFiles: Record<string, string> = {},
+): CompiledSlide[] {
+  const { slides, images: refs } = compileLecture(text, sceneFiles)
   return JSON.parse(
     JSON.stringify(slides).replace(new RegExp(`${IMAGE_TOKEN}(\\d+)`, 'g'), (_, n: string) => {
       const src = refs[Number(n)].src

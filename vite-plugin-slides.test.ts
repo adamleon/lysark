@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveImage, slidesPlugin } from './vite-plugin-slides'
+import { lectureSceneFiles, resolveImage, slidesPlugin } from './vite-plugin-slides'
 
 let course: string
 let lecture: string
@@ -95,5 +95,27 @@ describe('slidesPlugin transform', () => {
     const slides = new Function(code.replace('export default', 'return'))() as Array<{ fragments: string[] }>
     expect(slides.map((s) => s.fragments[0].includes(`data:image/png;base64,${base64}`))).toEqual([true, true, true])
     expect(existsSync(slidesPath)).toBe(true)
+  })
+})
+
+describe('scene files in the build (docs/scene-files.md)', () => {
+  it('reads the lecture scene files and resolves named views, watching each file', () => {
+    mkdirSync(join(lecture, 'scenes'), { recursive: true })
+    const scene = join(lecture, 'scenes', 'arm.yaml')
+    writeFileSync(scene, 'base: arm\nviews:\n  nært:\n    lookAt: [0, 0.5, 0]\n    offset: [1, 2, 3]\n')
+    writeFileSync(join(lecture, 'scenes', 'notes.txt'), 'not a scene file')
+    try {
+      expect(Object.keys(lectureSceneFiles(lecture))).toEqual(['scenes/arm.yaml'])
+      const plugin = slidesPlugin({ courseRoot: course })
+      const watched: string[] = []
+      const transform = plugin.transform as (this: unknown, code: string, id: string) => { code: string }
+      const { code } = transform.call({ addWatchFile: (f: string) => watched.push(f) }, '---\nscene: arm\ncamera: nært\n---\n# x\n', slidesPath)
+      const slides = new Function(code.replace('export default', 'return'))() as Array<{ effective: { camera: unknown } }>
+      expect(slides[0].effective.camera).toEqual({ lookAt: [0, 0.5, 0], offset: [1, 2, 3] })
+      expect(watched).toContain(scene)
+    } finally {
+      rmSync(join(lecture, 'scenes'), { recursive: true, force: true })
+    }
+    expect(lectureSceneFiles(lecture)).toEqual({})
   })
 })

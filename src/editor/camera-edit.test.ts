@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { setCameraView } from './camera-edit'
+import { setCameraView, setNamedView } from './camera-edit'
 import { compileSlides } from '../compiler/compile-slides'
 
 const view = { lookAt: [0.1234, 0.5, -0] as [number, number, number], offset: [1.5, 0.75, 2] as [number, number, number] }
@@ -61,10 +61,10 @@ describe('setCameraView', () => {
     expect(compileSlides(out)[0].effective.camera).toMatchObject({ lookAt: [0.12, 0.5, 0], offset: [1.5, 0.75, 2] })
   })
 
-  it('replaces a value written as a block list, keeping the next key on its own line', () => {
-    const src = '---\nscene: arm\ncamera:\n  lookAt:\n    - 1\n    - 2\n    - 3\n  offset: [0.7, 1.2, 3.6]\n---\nx'
+  it('keeps a value written as a block list one item per line, comments included', () => {
+    const src = '---\nscene: arm\ncamera:\n  lookAt:   # where it looks\n    - 1     # sideways\n    - 2\n    - 3\n  offset: [0.7, 1.2, 3.6]\n---\nx'
     const out = setCameraView(src, 0, view)
-    expect(out).toBe('---\nscene: arm\ncamera:\n  lookAt: [0.12, 0.5, 0]\n  offset: [1.5, 0.75, 2]\n---\nx')
+    expect(out).toBe('---\nscene: arm\ncamera:\n  lookAt:   # where it looks\n    - 0.12     # sideways\n    - 0.5\n    - 0\n  offset: [1.5, 0.75, 2]\n---\nx')
     expect(compileSlides(out)[0].effective.camera).toEqual({ lookAt: [0.12, 0.5, 0], offset: [1.5, 0.75, 2] })
   })
 
@@ -99,5 +99,47 @@ describe('setCameraView', () => {
     expect(() => setCameraView('---\ncamera: [1, 2]\n---\nx', 0, view)).toThrow(/not a mapping/)
     expect(() => setCameraView('---\ncamera: {\n---\nx', 0, view)).toThrow(/YAML error/)
     expect(() => setCameraView('---\nid: a\n---\nx', 3, view)).toThrow(/no slide 4/)
+  })
+})
+
+describe('setNamedView', () => {
+  const scene = [
+    '# the cell',
+    'base: agilus',
+    '',
+    'views:',
+    '  oversikt:                  # the whole cell',
+    '    lookAt: [-1.1, 0.55, 0]',
+    '    offset: [0.6, 1.5, 3.2]',
+    '  nært: { lookAt: tool0, offset: [1, 1, 1], spring: { omega: 5 } }   # close',
+    '',
+  ].join('\n')
+
+  it('changes only the values of that view, comments and other views kept', () => {
+    const out = setNamedView(scene, 'oversikt', { lookAt: [-1, 0.5, 0], offset: [0.7, 1.4, 3] })
+    expect(out).toBe(scene.replace('[-1.1, 0.55, 0]', '[-1, 0.5, 0]').replace('[0.6, 1.5, 3.2]', '[0.7, 1.4, 3]'))
+  })
+
+  it('keeps an anchor and a spring in a flow-style view', () => {
+    const out = setNamedView(scene, 'nært', { lookAt: 'tool0', offset: [0.4, 0.2, 0.55] })
+    expect(out).toBe(scene.replace('offset: [1, 1, 1]', 'offset: [0.4, 0.2, 0.55]'))
+  })
+
+  it('keeps Windows line endings and a byte-order mark', () => {
+    const windows = '﻿' + scene.replace(/\n/g, '\r\n')
+    const out = setNamedView(windows, 'oversikt', { lookAt: [-1.1, 0.55, 0], offset: [1, 2, 3] })
+    expect(out).toBe(windows.replace('[0.6, 1.5, 3.2]', '[1, 2, 3]'))
+  })
+
+  it('refuses a view the file does not have', () => {
+    expect(() => setNamedView(scene, 'borte', { lookAt: [0, 0, 0], offset: [1, 1, 1] })).toThrow(/no view 'borte'/)
+  })
+})
+
+describe('lists with tags', () => {
+  it('rewrites a list whose items carry a tag, so the new numbers stay numbers', () => {
+    const src = '---\nscene: arm\ncamera:\n  lookAt:\n    - !!int 1\n    - 2\n    - 3\n  offset: [0.7, 1.2, 3.6]\n---\nx'
+    const out = setCameraView(src, 0, { lookAt: [0.12, 0.5, 0], offset: [1.5, 0.75, 2] })
+    expect(compileSlides(out)[0].effective.camera).toEqual({ lookAt: [0.12, 0.5, 0], offset: [1.5, 0.75, 2] })
   })
 })

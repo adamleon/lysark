@@ -1,11 +1,13 @@
-import { isMap, isScalar, isSeq, parseDocument, type Pair } from 'yaml'
+import { isMap, isScalar, isSeq, parseDocument, type Pair, type YAMLMap } from 'yaml'
 import { slideRanges, splitLines } from '../compiler/slide-ranges'
 
 /**
  * Write a saved camera view into one slide's frontmatter (lysark-v2.md §5,
- * "save a camera view"). Only the camera values change: every other line,
+ * "save a camera view"), or into a named view in a scene file
+ * (docs/scene-files.md). Only the camera values change: every other line,
  * comment, and spacing in the file stays byte for byte, so git shows exactly
- * what changed. Pure function, shared by the VS Code extension and the tests.
+ * what changed. Pure functions, shared by the panel, the VS Code extension
+ * (for message version 2) and the tests.
  */
 
 export type Vec3 = [number, number, number]
@@ -36,10 +38,26 @@ function keyName(p: Pair): unknown {
 
 type Range = [number, number, number]
 
-/** the edit that sets an existing entry's value to `text`, written on the key's line */
-function setValue(yaml: string, pair: Pair, text: string): Edit {
+/**
+ * The edits that set an existing entry's value to `text` (`numbers`, as a
+ * list), written on the key's line. A list written one item per line keeps
+ * its form and its comments: each number is replaced where it stands.
+ */
+function setValue(yaml: string, pair: Pair, text: string, numbers?: number[]): Edit[] {
   const key = pair.key as { range: Range }
   const value = pair.value as { range?: Range; flow?: boolean } | null
+  if (isSeq(value) && !value.flow && numbers && value.items.length === numbers.length) {
+    const items = value.items as Array<{ range?: Range; value?: unknown }>
+    // a tag (`!!int`) or an anchor (`&a`) on an item would apply to the new number: rewrite the list then
+    const plain = (item: { tag?: string; anchor?: string }) => !item.tag && !item.anchor
+    if (items.every((item) => isScalar(item) && typeof item.value === 'number' && plain(item) && item.range)) {
+      return items.map((item, k) => ({ start: item.range![0], end: item.range![1], text: String(round(numbers[k])) }))
+    }
+  }
+  return [setWhole(yaml, key, value, text)]
+}
+
+function setWhole(yaml: string, key: { range: Range }, value: { range?: Range; flow?: boolean } | null, text: string): Edit {
   if ((isSeq(value) || isMap(value)) && !value.flow && value.range) {
     // `lookAt:` followed by `- 1` lines: replace from the key to the last item
     // (the value's range runs on past its trailing newline)
@@ -85,16 +103,30 @@ export function editCameraYaml(yaml: string, view: CameraView): string {
     return yaml.replace(/\n*$/, '') + '\n' + block + (yaml.endsWith('\n') ? '\n' : '')
   }
   if (!isMap(cam) || !cam.range) throw new Error("this slide's camera is not a mapping")
+  return editCameraMapping(yaml, cam, view)
+}
 
+/**
+ * The edit to one camera mapping (a slide's `camera:`, or a named view) in
+ * `yaml`: lookAt (unless it is an anchor kept as is) and offset set, a
+ * `distance` dropped, everything else as written.
+ */
+function editCameraMapping(yaml: string, cam: YAMLMap<unknown, unknown>, view: CameraView): string {
+  if (!cam.range) throw new Error('the camera has no position in the text')
+  const look = typeof view.lookAt === 'string' ? null : formatVec(view.lookAt)
+  const offset = formatVec(view.offset)
   const pairOf = (name: string) => cam.items.find((p) => keyName(p as Pair) === name) as Pair | undefined
-  const wanted: Array<[string, string]> = [...(look ? [['lookAt', look] as [string, string]] : []), ['offset', offset]]
+  const wanted: Array<[string, string, number[]]> = [
+    ...(look ? [['lookAt', look, view.lookAt as number[]] as [string, string, number[]]] : []),
+    ['offset', offset, view.offset],
+  ]
 
   if (cam.flow && wanted.every(([name]) => pairOf(name)) && !pairOf('distance')) {
     // flow style with every value already there: splice the values, so a
     // comment between the braces survives
     return applyEdits(
       yaml,
-      wanted.map(([name, text]) => setValue(yaml, pairOf(name)!, text)),
+      wanted.flatMap(([name, text, numbers]) => setValue(yaml, pairOf(name)!, text, numbers)),
     )
   }
   if (cam.flow) {
@@ -123,9 +155,9 @@ export function editCameraYaml(yaml: string, view: CameraView): string {
   const firstKey = cam.items[0]?.key as { range?: [number, number, number] } | undefined
   const indent = firstKey?.range ? ' '.repeat(firstKey.range[0] - lineStart(yaml, firstKey.range[0])) : '  '
   const missing: string[] = []
-  for (const [name, text] of wanted) {
+  for (const [name, text, numbers] of wanted) {
     const pair = pairOf(name)
-    if (pair) edits.push(setValue(yaml, pair, text))
+    if (pair) edits.push(...setValue(yaml, pair, text, numbers))
     else missing.push(`${indent}${name}: ${text}\n`)
   }
   const distance = pairOf('distance')
@@ -144,6 +176,24 @@ export function editCameraYaml(yaml: string, view: CameraView): string {
     edits.push({ start: at, end: at, text })
   }
   return applyEdits(yaml, edits)
+}
+
+/**
+ * The whole scene file with the view written into its named view `name`
+ * (`views: { name: { lookAt, offset, … } }`), which must exist. Line endings
+ * and a byte-order mark are kept.
+ */
+export function setNamedView(source: string, name: string, view: CameraView): string {
+  const bom = source.startsWith('\uFEFF') ? '\uFEFF' : ''
+  const crlf = source.includes('\r\n')
+  const yaml = (bom ? source.slice(1) : source).replace(/\r\n/g, '\n')
+  const doc = parseDocument(yaml)
+  if (doc.errors.length > 0) throw new Error(`the scene file has a YAML error, so the view can't be saved: ${doc.errors[0].message}`)
+  const views = doc.get('views', true)
+  const cam = isMap(views) ? views.get(name, true) : undefined
+  if (!isMap(cam)) throw new Error(`the scene file has no view '${name}' to save into`)
+  const edited = editCameraMapping(yaml, cam as YAMLMap<unknown, unknown>, view)
+  return bom + (crlf ? edited.replace(/\n/g, '\r\n') : edited)
 }
 
 /** the whole slides.md with the view written into slide `slideIndex` (0-based) */

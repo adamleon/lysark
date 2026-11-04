@@ -8,7 +8,9 @@
 //
 //   3  images shown from both folders; saving a scene file sends the files
 //      again; V and Scene Actions… write the view into slides.md; undoing that
-//      edit reaches the panel
+//      edit reaches the panel; and with an engine that has named views
+//      (v2.5.0), V on a slide that names one writes it into the scene file,
+//      and every slide that uses it takes it
 //   2  (engine v2.3.x) V writes the view; Scene Actions… says to update the engine
 //
 //   node scripts/check-extension.mjs <editor dir> [<editor dir> …]
@@ -18,11 +20,12 @@
 // Insiders builds. Run it before an extension release, with this engine's
 // editor (`node bin/lysark.mjs editor-build`) and the previous release's.
 import { execSync, spawn } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parse as parseYaml } from 'yaml'
 import { launchBrowser } from './browser.mjs'
 import { EDITOR_PREFIX, serveEditor, stopServer } from './editor-server.mjs'
 import { editorProtocol } from '../src/editor/panel-page.js'
@@ -31,15 +34,36 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const EXTENSION = join(ROOT, 'extension')
 const TEST_WEB = '@vscode/test-web@0.0.80'
 
+/**
+ * true if the editor build knows named views (engine v2.5.0): its compiler's
+ * message for a misspelled one is in its files
+ */
+function knowsNamedViews(editorDir) {
+  const assets = join(editorDir, 'assets')
+  return readdirSync(assets).some((f) => f.endsWith('.js') && readFileSync(join(assets, f), 'utf8').includes('names the camera view'))
+}
+
+/**
+ * The demo's slides.md with every `camera: <name>` written out as the view's
+ * values, for an editor that doesn't know named views.
+ */
+function inlineViews(slides, sceneText) {
+  const views = parseYaml(sceneText).views ?? {}
+  return slides.replace(/^camera: *(\S[^\r\n]*?) *(?=\r?$)/gm, (line, name) => (views[name] ? `camera: ${JSON.stringify(views[name])}` : line))
+}
+
 /** a course folder whose workspace settings point the extension at `editorUrl` */
-function makeCourse(editorUrl) {
+function makeCourse(editorUrl, namedViews) {
   const dir = mkdtempSync(join(tmpdir(), 'lysark-course-'))
   const lecture = join(dir, 'lectures', 'demo')
   mkdirSync(join(lecture, 'scenes'), { recursive: true })
   mkdirSync(join(dir, 'assets'))
   mkdirSync(join(dir, '.vscode'))
   cpSync(join(ROOT, 'lectures/demo/images'), join(lecture, 'images'), { recursive: true })
-  const slides = readFileSync(join(ROOT, 'lectures/demo/slides.md'), 'utf8')
+  const arm = readFileSync(join(ROOT, 'lectures/demo/scenes/arm.yaml'), 'utf8')
+  let slides = readFileSync(join(ROOT, 'lectures/demo/slides.md'), 'utf8')
+  if (namedViews) writeFileSync(join(lecture, 'scenes/arm.yaml'), arm)
+  else slides = inlineViews(slides, arm)
   writeFileSync(join(lecture, 'slides.md'), `${slides}\n---\nid: asset-image\n---\n## An image from the course assets\n\n![dot](../../assets/dot.svg)\n`)
   writeFileSync(join(lecture, 'scenes/agilus.yaml'), 'base: agilus\n')
   writeFileSync(
@@ -107,7 +131,7 @@ process.on('SIGINT', () => {
 })
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, lines) {
+async function drive(page, protocol, namedViews, lines) {
   let ok = true
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
@@ -224,6 +248,30 @@ async function drive(page, protocol, lines) {
     frame = (await panelFrame()) ?? frame
     const after = await camera(frame)
     check(before !== after, `undoing the saved view reached the panel: ${before} → ${after}`)
+
+    if (!namedViews) lines.push('(named views not checked: this editor has none)')
+    else {
+      // slides 2 and 3 of the demo name the view 'overview' (lectures/demo/scenes/arm.yaml)
+      await frame.evaluate(() => {
+        location.hash = '#2'
+      })
+      const settled = await frame
+        .waitForFunction(() => {
+          const L = window.__lysark
+          return L.engine.currentIndex === 1 && !L.sceneManager.busy && !L.cameraCtl.active
+        }, null, { timeout: 20_000 })
+        .then(() => true, () => false)
+      check(settled, 'the panel went to slide 2, which names a view')
+      const cameras = () => frame.evaluate(() => window.__lysark.engine.opts.slides.slice(1, 3).map((s) => JSON.stringify(s.effective.camera)))
+      const old = await cameras()
+      await saveView(frame, 'V')
+      frame = (await panelFrame()) ?? frame
+      const now = await cameras()
+      check(
+        now[0] !== old[0] && now[0] === now[1],
+        `V on a slide that names a view saved it in scenes/arm.yaml, and both slides that name it took it: ${now[0]}`,
+      )
+    }
   } else {
     await tab('Lysark').click()
     await page.waitForTimeout(500)
@@ -240,7 +288,8 @@ async function checkExtension(editorDir) {
   const protocol = editorProtocol(html)
   const lines = []
   const site = await serveEditor(editorDir)
-  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`)
+  const namedViews = knowsNamedViews(editorDir)
+  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews)
   let stopTestWeb
   let browser
   let ok = false
@@ -250,7 +299,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, lines)
+    ok = await drive(page, protocol, namedViews, lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

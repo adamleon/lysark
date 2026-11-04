@@ -127,8 +127,9 @@ engine v2.3.x it works as 0.2.1 did (V works, Scene Actions… says to update th
 - **The real extension in VS Code for the web** (2026-10-19), `node scripts/check-extension.mjs
   <editor dir> …`, with isolation on as in github.dev. With this engine: both images (lecture
   folder and `assets/`), the files sent again on saving a scene file, V and Scene Actions… writing
-  the view, and undo reaching the panel. With the v2.3.1 editor: V writing the view, and Scene
-  Actions… saying to update the engine. Not in CI: its first run downloads VS Code (about 55 MB),
+  the view, and undo reaching the panel. From engine v2.5.0 also V on a slide that names a view,
+  saved into the scene file and taken by both slides that name it (2026-11-04). With the v2.3.1
+  editor: V writing the view, and Scene Actions… saying to update the engine. Not in CI: its first run downloads VS Code (about 55 MB),
   and the workbench's markup changes between VS Code builds. Run it before an extension release.
 - Unit tests for the extension's path rules, image paths and loading, and the view change.
 
@@ -137,5 +138,6 @@ engine v2.3.x it works as 0.2.1 did (V works, Scene Actions… says to update th
 - **Letter case of image names.** github.dev, like the Linux build, needs the exact case. Desktop
   VS Code on Windows finds `Arm.png` for `arm.png`, so the panel shows an image the build will
   refuse; the course build then reports it.
-- **Scene files are sent but not used yet.** They come into use with step 2 (named views).
+- **Scene files** are used from engine v2.5.0: named camera views, which V saves into the scene
+  file through the same edit request ([scene-files.md](scene-files.md)).
 - **The panel still loads afresh** for any change but a camera change, as before.

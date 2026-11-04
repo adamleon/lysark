@@ -1,0 +1,12 @@
+# This lecture's version of the engine's arm scene: the same arm, plus named
+# camera views. A slide uses one with `camera: overview` (docs/scene-files.md).
+base: arm
+
+views:
+  overview:                  # the whole arm, from the front right
+    lookAt: [0.1, 0.5, 0]
+    offset: [1.4, 0.55, 1.2]
+  tool:                      # close on the end effector, following it as it moves
+    lookAt: end_effector
+    offset: [0.4, 0.22, 0.5]
+    spring: { omega: 5, zeta: 1.0 }

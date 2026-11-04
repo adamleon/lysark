@@ -464,6 +464,10 @@ HTTPS server.
   shows real images and saves views over unsaved typing; engine v2.4.0. Checked in engine CI and
   with the real extension in VS Code for the web against v2.4.0 and v2.3.1. How it works:
   [editor-host.md](editor-host.md). Release order: the extension first, then the engine tag.
+- Scene files, step 2 (2026-11-04, built, not yet released): named camera views in
+  `scenes/<name>.yaml`, used as `camera: <name>`; V on such a slide updates the view in the scene
+  file. Unknown slide keys are now build errors (decision 8). Engine v2.5.0, no extension change.
+  How to write them: [scene-files.md](scene-files.md).
 
 ## 7. Postponed
 

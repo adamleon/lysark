@@ -47,7 +47,11 @@ and the thin host stays, and desktop VS Code works too. The scene file format is
 messages version 3, and still version 2 for courses on v2.3.x), the editing runs in the panel,
 images show in the panel, and V works over unsaved typing. The Marketplace has 0.3.0 (the
 author confirmed it works) and the engine is tagged v2.4.0; the course moves to it with the
-Update engine workflow. Next: step 2, named views, with `docs/scene-files.md`.
+Update engine workflow (done 2026-11-03: the course runs v2.4.0). Step 2, named camera
+views, is built and checked (2026-11-04), not yet released: engine v2.5.0, no extension change;
+how to write them is in [scene-files.md](scene-files.md). The demo lecture has
+`scenes/arm.yaml` with two views. Release: tag v2.5.0, then Update engine; Baneplanlegging's
+camera blocks can then become names (the author's choice). Next: step 3, Save view as…
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -187,7 +191,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**182**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**210**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.

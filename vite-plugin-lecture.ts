@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { compileSlides } from './src/compiler/compile-slides'
 import { SCENE_NAMES } from './src/scenes/registry'
+import { lectureSceneFiles } from './vite-plugin-slides'
 
 /**
  * Turns a lecture folder into the deck the runtime imports (lysark-v2.md §3).
@@ -74,7 +75,8 @@ function escapeHtml(s: string): string {
 
 function deckModuleCode(engineRoot: string, lectureDir: string): string {
   const slidesPath = join(lectureDir, 'slides.md')
-  const slides = compileSlides(readFileSync(slidesPath, 'utf8'))
+  // a scene file names the engine scene it builds on: the slides then name that one
+  const slides = compileSlides(readFileSync(slidesPath, 'utf8'), lectureSceneFiles(lectureDir))
   const known = new Set<string>(SCENE_NAMES)
   const used: string[] = []
   for (const slide of slides) {
@@ -146,9 +148,11 @@ export function lecturePlugin(opts: LectureOptions): Plugin {
       if (!current) {
         throw new Error('No lecture selected. Run `lysark dev <lecture>` or pick one from the list.')
       }
-      // watch slides.md before compiling it: a lecture outside Vite's root is
-      // otherwise only watched once it has compiled successfully
+      // watch slides.md and the lecture folder (its scene files) before
+      // compiling: a lecture outside Vite's root is otherwise only watched once
+      // it has compiled successfully
       this.addWatchFile(normalizePath(join(current, 'slides.md')))
+      server?.watcher.add(current)
       return deckModuleCode(opts.engineRoot, current)
     },
 
@@ -159,17 +163,34 @@ export function lecturePlugin(opts: LectureOptions): Plugin {
       return html.replace(/<title>[^<]*<\/title>/, () => `<title>${escapeHtml(title)}</title>`)
     },
 
-    // the scene list in the generated deck module comes from slides.md, so an
-    // edit there must re-run load(). If the deck failed to load, it never
-    // imported slides.md and Vite has nothing to propagate: reload explicitly.
+    // the scene list in the generated deck module comes from slides.md and the
+    // scene files, so an edit there must re-run load(). If the deck failed to
+    // load, it never imported slides.md and Vite has nothing to propagate:
+    // reload explicitly.
     handleHotUpdate({ file, modules, server: devServer }) {
-      if (!current || normalizePath(file) !== normalizePath(join(current, 'slides.md'))) return
+      if (!current) return
+      const path = normalizePath(file)
+      const slides = path === normalizePath(join(current, 'slides.md'))
+      const scene = path.startsWith(normalizePath(join(current, 'scenes')) + '/')
+      if (!slides && !scene) return
       invalidateDeck()
-      if (modules.length === 0) devServer.ws.send({ type: 'full-reload' })
+      if (modules.length === 0 || scene) devServer.ws.send({ type: 'full-reload' })
     },
 
     configureServer(devServer) {
       server = devServer
+      // a scene file (or the scenes/ folder) added or removed: Vite runs
+      // handleHotUpdate only for changed files, and the deck may not have
+      // loaded at all (a scene file with an error)
+      const sceneFolderChanged = (file: string) => {
+        if (!current) return
+        const path = normalizePath(file)
+        const scenes = normalizePath(join(current, 'scenes'))
+        if (path !== scenes && !path.startsWith(scenes + '/')) return
+        invalidateDeck()
+        devServer.ws.send({ type: 'full-reload' })
+      }
+      for (const event of ['add', 'unlink', 'addDir', 'unlinkDir'] as const) devServer.watcher.on(event, sceneFolderChanged)
       devServer.middlewares.use((req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://localhost')
         if (url.pathname === LIST_PATH || (!current && (url.pathname === '/' || url.pathname === '/index.html'))) {

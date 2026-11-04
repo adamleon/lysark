@@ -12,21 +12,25 @@
 //   in on load or after 200 ms, and drops messages sent while it swaps;
 // - the check plays the extension (messages version 3, docs/editor-host.md):
 //   it sends texts, loads the page afresh when a text is accepted, answers the
-//   panel's reads and edits on a copy of slides.md with a version number, and
-//   asks for a saved view, by V and through Scene Actions.
+//   panel's reads and edits on copies of slides.md and the lecture's scene
+//   files with version numbers, and asks for saved views, by V and through
+//   Scene Actions, on a slide with its own camera and on one that names a view.
 //
 // It requires: the lecture shown in an isolated panel with its images, VS
 // Code's default styles gone, a view computed on an older version refused, a
 // saved view written as one edit to the first slide's frontmatter and put into
-// the running deck, a new text accepted and shown after a reload, a broken text
+// the running deck, a camera-only change put in place, a named view saved into
+// its scene file and taken by the other slide that names it, a new text
+// accepted and shown after a reload, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
 // course-style build in Chromium and Firefox.
 //
 //   node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png] [--headed]
 import { createServer } from 'node:http'
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve, sep } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve, sep } from 'node:path'
+import { parse as parseYaml } from 'yaml'
 import { fileURLToPath } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 import { EDITOR_PREFIX, serveEditor, stopServer } from './editor-server.mjs'
@@ -137,31 +141,35 @@ id: script-test
 `
 
 /**
- * The lecture with its second slide's camera offset moved, as a saved view
- * would: only that value changes. null if the second slide's frontmatter has
- * no `offset: [x, y, z]`.
+ * The lecture with the camera offset of its first slide after the first that
+ * has one of its own (a `camera:` block with `offset: [x, y, z]`) moved, as a
+ * saved view would: only that value changes. null if no such slide.
  * @param {string} text
- * @returns {{ text: string, offset: number[] } | null}
+ * @returns {{ text: string, offset: number[], slide: number } | null}
  */
-function moveSecondSlideCamera(text) {
+function moveSlideCamera(text) {
   const lines = text.replace(/\r\n/g, '\n').split('\n')
-  const fences = []
-  let inCode = false
-  for (let i = 0; i < lines.length && fences.length < 4; i++) {
-    if (/^(`{3,}|~{3,})/.test(lines[i].trimStart())) inCode = !inCode
-    else if (!inCode && lines[i].trimEnd() === '---') fences.push(i)
+  for (let n = 1; ; n++) {
+    const range = frontmatterLines(text, n)
+    if (!range) return null
+    let fm
+    try {
+      fm = parseYaml(lines.slice(range.from, range.to).join('\n'))
+    } catch {
+      continue
+    }
+    const old = fm?.camera?.offset
+    if (!Array.isArray(old) || old.length !== 3 || !old.every(Number.isFinite)) continue
+    // the `offset:` line inside the slide's `camera:` block (an anchored label has offsets too)
+    const start = lines.findIndex((l, i) => i >= range.from && i < range.to && /^camera\s*:\s*(#.*)?$/.test(l))
+    for (let i = start + 1; start >= 0 && i < range.to && /^\s/.test(lines[i]); i++) {
+      const m = lines[i].match(/^(\s+offset:\s*)\[([^\]]*)\](.*)$/)
+      if (!m) continue
+      const offset = old.map((x, k) => Number((x + [0.4, 0.3, 0.4][k]).toFixed(2)))
+      lines[i] = `${m[1]}[${offset.join(', ')}]${m[3]}`
+      return { text: lines.join('\n'), offset, slide: n }
+    }
   }
-  if (fences.length < 4) return null
-  for (let i = fences[2] + 1; i < fences[3]; i++) {
-    const m = lines[i].match(/^(\s*offset:\s*)\[([^\]]*)\](.*)$/)
-    if (!m) continue
-    const old = m[2].split(',').map(Number)
-    if (old.length !== 3 || old.some((n) => !Number.isFinite(n))) return null
-    const offset = old.map((n, k) => Number((n + [0.4, 0.3, 0.4][k]).toFixed(2)))
-    lines[i] = `${m[1]}[${offset.join(', ')}]${m[3]}`
-    return { text: lines.join('\n'), offset }
-  }
-  return null
 }
 
 /**
@@ -183,13 +191,55 @@ function frontmatterLines(text, n) {
 }
 
 /**
+ * The slides that name a camera view (`camera: <name>`), as { scene, view,
+ * slides } for each view, in the order they first appear.
+ * @param {string} text
+ */
+function namedViews(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const views = []
+  for (let n = 0; ; n++) {
+    const range = frontmatterLines(text, n)
+    if (!range) return views
+    let fm
+    try {
+      fm = parseYaml(lines.slice(range.from, range.to).join('\n'))
+    } catch {
+      continue
+    }
+    if (typeof fm?.camera !== 'string' || typeof fm.scene !== 'string') continue
+    let entry = views.find((v) => v.scene === fm.scene && v.view === fm.camera)
+    if (!entry) views.push((entry = { scene: fm.scene, view: fm.camera, slides: [] }))
+    entry.slides.push(n)
+  }
+}
+
+/**
  * The extension's side of messages version 3 (docs/editor-host.md), for the
- * check: slides.md is a document with a version, kept here; other files are
- * read from the lecture folder.
+ * check: slides.md and the lecture's scene files are documents with versions,
+ * kept here; other files are read from the lecture folder.
  */
 function createHost(lectureDir, lectureText) {
+  /** path → { text, version }, as VS Code keeps open documents */
+  const docs = new Map([['slides.md', { text: lectureText, version: 1 }]])
+  const scenesDir = join(lectureDir, 'scenes')
+  if (existsSync(scenesDir)) {
+    for (const name of readdirSync(scenesDir).sort()) {
+      if (/\.ya?ml$/.test(name)) docs.set(`scenes/${name}`, { text: readFileSync(join(scenesDir, name), 'utf8'), version: 1 })
+    }
+  }
   const host = {
-    doc: { text: lectureText, version: 1 },
+    docs,
+    get doc() {
+      return docs.get('slides.md')
+    },
+    set doc(value) {
+      docs.set('slides.md', value)
+    },
+    /** the files the extension sends: slides.md (or `slides`) and the scene files */
+    files(slides = docs.get('slides.md').text) {
+      return { ...Object.fromEntries([...docs].map(([path, d]) => [path, d.text])), 'slides.md': slides }
+    },
     /** every edit request, with the reply it got */
     edits: [],
     /** image files read and found */
@@ -213,7 +263,7 @@ function createHost(lectureDir, lectureText) {
       const files = {}
       for (const rel of message.paths) {
         const file = inside(rel)
-        if (rel === 'slides.md' && message.as === 'text') files[rel] = { text: host.doc.text, version: host.doc.version }
+        if (docs.has(rel) && message.as === 'text') files[rel] = { ...docs.get(rel) }
         else if (!file || !existsSync(file)) files[rel] = { error: 'not found' }
         else if (message.as === 'bytes') {
           files[rel] = { base64: readFileSync(file).toString('base64') }
@@ -229,11 +279,11 @@ function createHost(lectureDir, lectureText) {
       }
       let result = { ok: true }
       const change = message.changes?.[0]
-      if (message.changes?.length !== 1 || change.path !== 'slides.md') result = { ok: false, message: 'only slides.md here' }
-      else if (change.version !== host.doc.version) result = { ok: false, message: 'slides.md changed meanwhile; try again' }
+      const doc = docs.get(change?.path)
+      if (message.changes?.length !== 1 || !doc) result = { ok: false, message: 'only slides.md and scene files here' }
+      else if (change.version !== doc.version) result = { ok: false, message: `${change.path} changed meanwhile; try again` }
       else {
-        const { text } = host.doc
-        host.doc = { text: text.slice(0, change.start) + change.text + text.slice(change.end), version: host.doc.version + 1 }
+        docs.set(change.path, { text: doc.text.slice(0, change.start) + change.text + doc.text.slice(change.end), version: doc.version + 1 })
       }
       host.edits.push({ message, result })
       return reply(result)
@@ -320,10 +370,10 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         .then((handle) => handle.jsonValue(), () => null)
     const toRuntime = (message) => page.evaluate((m) => window.postToWebview(m), message)
     let seq = 0
-    /** send slides.md as the extension does; returns its number */
+    /** send slides.md (and the scene files) as the extension does; returns its number */
     const source = async (text) => {
       seq += 1
-      await toRuntime({ type: 'lysark:source', files: { 'slides.md': text }, seq, slide: 0, protocol: EDITOR_PROTOCOL })
+      await toRuntime({ type: 'lysark:source', files: host.files(text), seq, slide: 0, protocol: EDITOR_PROTOCOL })
       return seq
     }
     const render = async (n) => {
@@ -331,8 +381,11 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       return fromRuntime({ type: 'lysark:ready', render: n, protocol: EDITOR_PROTOCOL })
     }
     // run a function on the panel's window (the frame VS Code would show)
-    const inPanel = (fn) =>
-      page.evaluate((source) => new Function('w', `return (${source})(w)`)(document.getElementById('active-frame').contentWindow), fn.toString())
+    const inPanel = (fn, arg) =>
+      page.evaluate(
+        ([source, a]) => new Function('w', 'a', `return (${source})(w, a)`)(document.getElementById('active-frame').contentWindow, a),
+        [fn.toString(), arg ?? null],
+      )
     const fail = (what) => ({ ok: false, lines: [...lines, what, ...errors] })
     /** the panel's camera, relative to the point it looks at */
     const cameraOffset = () =>
@@ -430,14 +483,14 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
 
     // 2b. text that only changes another slide's camera goes into the running
     //     deck without loading afresh, and flying to that slide lands on it
-    const moved = moveSecondSlideCamera(host.doc.text)
+    const moved = moveSlideCamera(host.doc.text)
     if (moved) {
       const cameraOnly = await source(moved.text)
       if (!(await fromRuntime({ type: 'lysark:shown', seq: cameraOnly }, 10000))) return fail('a camera-only change was not shown')
       const reloaded = await page.evaluate(() => window.__toExtension.some((m) => m.type === 'lysark:accepted'))
       if (reloaded) return fail('a camera-only change made the panel load afresh instead of updating in place')
       host.doc = { text: moved.text, version: host.doc.version + 1 }
-      await toRuntime({ type: 'lysark:goto', slide: 1 })
+      await toRuntime({ type: 'lysark:goto', slide: moved.slide })
       // read the camera until the flight there has settled
       let last = null
       const settled = await waitFor(async () => {
@@ -446,13 +499,60 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         last = now
         return still ? now : null
       }, 30)
-      if (!settled) return fail('the camera never settled on the second slide')
+      if (!settled) return fail(`the camera never settled on slide ${moved.slide + 1}`)
       if (!settled.every((n, k) => Math.abs(n - moved.offset[k]) < 0.02)) {
-        return fail(`the second slide flew to the old view: offset ${JSON.stringify(settled)}, expected ${JSON.stringify(moved.offset)}`)
+        return fail(`slide ${moved.slide + 1} flew to the old view: offset ${JSON.stringify(settled)}, expected ${JSON.stringify(moved.offset)}`)
       }
-      lines.push(`camera-only change put in place, no reload; slide 2 now flies to offset ${JSON.stringify(moved.offset)}`)
+      lines.push(`camera-only change put in place, no reload; slide ${moved.slide + 1} now flies to offset ${JSON.stringify(moved.offset)}`)
     } else {
-      lines.push('(the lecture has no camera offset on its second slide, so the in-place camera update was not checked)')
+      lines.push('(no slide after the first has its own camera offset, so the in-place camera update was not checked)')
+    }
+
+    // 2c. V on a slide that names a view (`camera: overview`) writes into that
+    //     view in the scene file; the other slides that name it fly to it too
+    const named = namedViews(host.doc.text).find((v) => v.slides.length > 1)
+    if (named) {
+      const path = [`scenes/${named.scene}.yaml`, `scenes/${named.scene}.yml`].find((p) => host.docs.has(p))
+      if (!path) return fail(`slides name the view '${named.view}', but the check found no scenes/${named.scene}.yaml`)
+      const [first, second] = named.slides
+      await toRuntime({ type: 'lysark:goto', slide: first })
+      const ready = await waitFor(() =>
+        inPanel((w, slide) => {
+          const L = w.__lysark
+          return L?.engine.currentIndex === slide && !L.sceneManager.busy && !L.cameraCtl.active
+        }, first),
+      )
+      if (!ready) return fail(`the panel never settled on slide ${first + 1}, which names the view '${named.view}'`)
+      await inPanel((w) => {
+        w.__lysark.sceneLayer.camera.position.x += 0.3
+      })
+      const editsBefore = host.edits.length
+      await toRuntime({ type: 'lysark:request-view' })
+      const edit = await waitFor(async () => host.edits[editsBefore], 20, 300)
+      if (!edit?.result.ok || edit.message.changes[0].path !== path) {
+        return fail(`V on slide ${first + 1} did not write the view '${named.view}' into ${path}: ${JSON.stringify(edit ?? null)}`)
+      }
+      const saved = parseYaml(host.docs.get(path).text).views[named.view]
+      // the extension then sends the scene file with slides.md as last sent: only cameras changed
+      const inPlace = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: inPlace }, 10000))) return fail('the saved named view was not put into the running deck')
+      if (await page.evaluate((n) => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === n), inPlace)) {
+        return fail('saving a named view made the panel load afresh instead of updating in place')
+      }
+      await toRuntime({ type: 'lysark:goto', slide: second })
+      let last = null
+      const settled = await waitFor(async () => {
+        const now = await inPanel((w, slide) => (w.__lysark.engine.currentIndex === slide ? null : 'elsewhere'), second).then((x) => (x ? null : cameraOffset()))
+        const still = now && last && now.every((n, k) => Math.abs(n - last[k]) < 0.002)
+        last = now
+        return still ? now : null
+      }, 30)
+      if (!settled || !settled.every((n, k) => Math.abs(n - saved.offset[k]) < 0.02)) {
+        return fail(`slide ${second + 1}, which also names '${named.view}', did not fly to the saved view: ${JSON.stringify(settled)}, expected ${JSON.stringify(saved.offset)}`)
+      }
+      lines.push(`V on slide ${first + 1} saved the view '${named.view}' in ${path}; slide ${second + 1}, which names it too, flies to ${JSON.stringify(saved.offset)}`)
+    } else {
+      lines.push('(the lecture has no view named by two slides, so saving a named view was not checked)')
     }
 
     // 3. other new text is accepted; the extension loads the page afresh and sends it on 'ready'
@@ -462,7 +562,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     await page.evaluate((html) => window.setHtml(html), pageFor(2))
     await toRuntime({ type: 'lysark:goto', slide: 1 }) // sent during the swap: may be dropped, must do no harm
     if (!(await fromRuntime({ type: 'lysark:ready', render: 2 }))) return fail('the runtime did not say ready after loading afresh')
-    await toRuntime({ type: 'lysark:source', files: { 'slides.md': added }, seq: structural, slide: 0, protocol: EDITOR_PROTOCOL })
+    await toRuntime({ type: 'lysark:source', files: host.files(added), seq: structural, slide: 0, protocol: EDITOR_PROTOCOL })
     if (!(await fromRuntime({ type: 'lysark:shown', seq: structural }))) return fail('the new text was not shown after loading afresh')
     lines.push('new text accepted, and shown after the panel loaded afresh')
 

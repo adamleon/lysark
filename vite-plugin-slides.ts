@@ -108,13 +108,43 @@ export function resolveImage(
   return file
 }
 
+/**
+ * The text of a lecture's scene files (`scenes/*.yaml` and `.yml`), by path
+ * relative to the lecture folder, for the compiler, which never reads files
+ * (docs/scene-files.md).
+ */
+export function lectureSceneFiles(lectureDir: string): Record<string, string> {
+  // by its exact name, as on the Linux build: Windows would find `Scenes` too
+  const names = existsSync(lectureDir) ? readdirSync(lectureDir) : []
+  if (!names.includes('scenes')) {
+    const wrong = names.find((n) => n.toLowerCase() === 'scenes')
+    if (wrong) {
+      throw new Error(
+        `${basename(lectureDir)}: the scene folder is named '${wrong}'; it must be 'scenes', because the course is built ` +
+          `on Linux. Rename it with git mv (renaming only the case in Explorer is invisible to git).`,
+      )
+    }
+    return {}
+  }
+  const dir = join(lectureDir, 'scenes')
+  if (!statSync(dir).isDirectory()) return {}
+  const out: Record<string, string> = {}
+  for (const name of readdirSync(dir).sort()) {
+    const file = join(dir, name)
+    // any letter case: the compiler reports a name it can't take
+    if (/\.ya?ml$/i.test(name) && !name.startsWith('.') && statSync(file).isFile()) out[`scenes/${name}`] = readFileSync(file, 'utf8')
+  }
+  return out
+}
+
 function dataUri(file: string): string {
   return `data:${IMAGE_TYPES[extname(file).toLowerCase()]};base64,${readFileSync(file).toString('base64')}`
 }
 
 export function slidesPlugin({ courseRoot }: { courseRoot: string }): Plugin {
-  // image path → the slides.md files that use it (or looked for it), so the
-  // preview reloads when it is added, changed or removed
+  // image path (or a lecture's scenes/ folder, or scene file) → the slides.md
+  // files that use it (or looked for it), so the preview reloads when it is
+  // added, changed or removed
   const imageUsers = new Map<string, Set<string>>()
   let server: ViteDevServer | undefined
 
@@ -142,14 +172,27 @@ export function slidesPlugin({ courseRoot }: { courseRoot: string }): Plugin {
 
     configureServer(devServer) {
       server = devServer
-      // Vite runs handleHotUpdate only for changed files, never for added or removed ones
-      devServer.watcher.on('add', reloadUsers)
-      devServer.watcher.on('unlink', reloadUsers)
+      // Vite runs handleHotUpdate only for changed files, never for added or
+      // removed ones; a scene file added or removed counts for its folder
+      const added = (file: string) => {
+        if (!reloadUsers(file)) reloadUsers(dirname(file))
+      }
+      devServer.watcher.on('add', added)
+      devServer.watcher.on('unlink', added)
     },
 
     transform(code, id) {
       if (!id.endsWith('.md')) return null
-      const { slides, images } = compileLecture(code)
+      // the lecture's scene files: a change to one, or one added, rebuilds the slides
+      const lectureDir = dirname(id)
+      const sceneFiles = lectureSceneFiles(lectureDir)
+      for (const path of Object.keys(sceneFiles)) {
+        this.addWatchFile(join(lectureDir, path))
+        track(join(lectureDir, path), id)
+      }
+      track(join(lectureDir, 'scenes'), id)
+      if (server) server.watcher.add(existsSync(join(lectureDir, 'scenes')) ? join(lectureDir, 'scenes') : lectureDir)
+      const { slides, images } = compileLecture(code, sceneFiles)
       const files: string[] = [] // one entry per distinct image file
       const fileOf = images.map((image) => {
         const file = resolveImage(image, id, courseRoot, (paths) => {

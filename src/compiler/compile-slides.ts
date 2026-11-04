@@ -1,7 +1,9 @@
 import MarkdownIt from 'markdown-it'
 import katex from 'katex'
-import { parse as parseYaml } from 'yaml'
+import { isMap, isScalar, LineCounter, parseDocument, parse as parseYaml, type Pair } from 'yaml'
 import { mergeCameraSpec } from '../engine/camera-merge'
+import { SCENE_NAMES } from '../scenes/registry'
+import { readSceneFiles, type SceneFile } from './scene-files'
 import { slideRanges, splitLines } from './slide-ranges'
 import { PROFILES, type ProfileName } from '../engine/time-scaling'
 import type {
@@ -43,6 +45,8 @@ const PAUSE_LINE = /^<!--\s*pause\s*-->\s*$/
 interface RawSlide {
   frontmatter: Record<string, unknown>
   body: string
+  /** the line in slides.md (1-based) where a top-level frontmatter key is written */
+  lineOf: (key: string) => number
 }
 
 function splitSlides(source: string): RawSlide[] {
@@ -50,12 +54,50 @@ function splitSlides(source: string): RawSlide[] {
   // and are ignored inside code fences; slide-ranges.ts holds the rules
   const lines = splitLines(source)
   return slideRanges(source).map((r, k) => {
-    const frontmatter = parseYaml(lines.slice(r.yamlStart, r.yamlEnd).join('\n')) ?? {}
+    const yaml = lines.slice(r.yamlStart, r.yamlEnd)
+    const frontmatter = parseYaml(yaml.join('\n')) ?? {}
     if (typeof frontmatter !== 'object' || Array.isArray(frontmatter)) {
       throw new Error(`slides: frontmatter of slide ${k + 1} must be a YAML mapping`)
     }
-    return { frontmatter: frontmatter as Record<string, unknown>, body: lines.slice(r.bodyStart, r.bodyEnd).join('\n') }
+    // where each top-level key is written, found by the YAML parser (quoted or indented keys too)
+    const counter = new LineCounter()
+    const doc = parseDocument(yaml.join('\n'), { lineCounter: counter })
+    const keyLines = new Map<string, number>()
+    if (isMap(doc.contents)) {
+      for (const item of doc.contents.items as Pair[]) {
+        const key = item.key as { value?: unknown; range?: [number, number, number] } | null
+        if (isScalar(key) && key.range) keyLines.set(String(key.value), counter.linePos(key.range[0]).line)
+      }
+    }
+    const lineOf = (key: string) => r.yamlStart + (keyLines.get(key) ?? 1)
+    return { frontmatter: frontmatter as Record<string, unknown>, body: lines.slice(r.bodyStart, r.bodyEnd).join('\n'), lineOf }
   })
+}
+
+/** the keys a slide's frontmatter may have; any other is a typo the build reports (decision 8) */
+export const SLIDE_KEYS = ['id', 'scene', 'layout', 'joints', 'camera', 'widgets', 'anchored', 'idle', 'trajectory']
+
+/** the known word closest to `word`, if it is close enough to be a typo of it */
+function closest(word: string, known: readonly string[]): string | undefined {
+  // edits to turn a into b, two letters swapped counting as one (optimal string alignment)
+  const distance = (a: string, b: string) => {
+    const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)))
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+      }
+    }
+    return d[a.length][b.length]
+  }
+  let best: string | undefined
+  let bestDistance = Infinity
+  for (const k of known) {
+    const d = distance(word.toLowerCase(), k.toLowerCase())
+    if (d < bestDistance) [best, bestDistance] = [k, d]
+  }
+  // close enough to be a typo, and not a guess at a word of one letter
+  return bestDistance <= Math.max(1, Math.floor(word.length / 3)) && bestDistance < word.length ? best : undefined
 }
 
 /**
@@ -189,6 +231,49 @@ function validateCamera(raw: unknown, slideNo: number): CameraTargetSpec | undef
     }
   }
   return cam as CameraTargetSpec
+}
+
+/** the camera of view `name`, for a slide in scene `sceneName`, or an error saying what to do */
+function namedView(
+  name: string,
+  sceneName: string,
+  file: SceneFile | undefined,
+  scenes: Map<string, SceneFile>,
+  slideNo: number,
+  line: number,
+): CameraTargetSpec {
+  const where = `slides.md, line ${line}: slide ${slideNo}`
+  if (!file && !(SCENE_NAMES as readonly string[]).includes(sceneName)) {
+    // not a scene at all: most likely a typo in `scene:`
+    const names = [...new Set<string>([...scenes.keys(), ...SCENE_NAMES])]
+    const guess = closest(sceneName, names)
+    throw new Error(
+      `${where} names the camera view '${name}' in scene '${sceneName}', which is neither one of the lecture's scene files ` +
+        `nor an engine scene. ` +
+        (guess ? `Did you mean '${guess}'? ` : '') +
+        `Scenes: ${names.join(', ')}.`,
+    )
+  }
+  if (!file) {
+    const others = [...scenes.values()].map((f) => `${f.path} (scene: ${f.name})`)
+    throw new Error(
+      `${where} names the camera view '${name}', but the lecture has no scenes/${sceneName}.yaml to find it in. ` +
+        `Create scenes/${sceneName}.yaml in the lecture folder with:\n` +
+        `base: ${sceneName}\nviews:\n  ${name}:\n    lookAt: [0, 0.5, 0]\n    offset: [1.5, 1, 1.5]` +
+        (others.length > 0 ? `\n(The lecture's scene files: ${others.join(', ')}.)` : ''),
+    )
+  }
+  const view = file.views.get(name)
+  if (!view) {
+    const names = [...file.views.keys()]
+    const guess = closest(name, names)
+    throw new Error(
+      `${where} names the camera view '${name}', which ${file.path} doesn't have. ` +
+        (guess ? `Did you mean '${guess}'? ` : '') +
+        (names.length > 0 ? `Its views: ${names.join(', ')}.` : `It has no views yet; add them under 'views:'.`),
+    )
+  }
+  return view.camera
 }
 
 const PLOT_FIELDS = ['measured', 'setpoint', 'error']
@@ -666,11 +751,17 @@ function collectImages(slide: CompiledSlide, slideNo: number, images: ImageRef[]
 }
 
 /** the slides alone; image placeholders stay in place (tests, scene lookup) */
-export function compileSlides(source: string): CompiledSlide[] {
-  return compileLecture(source).slides
+export function compileSlides(source: string, sceneFiles: Record<string, string> = {}): CompiledSlide[] {
+  return compileLecture(source, sceneFiles).slides
 }
 
-export function compileLecture(source: string): CompiledLecture {
+/**
+ * Compile a lecture. `sceneFiles`: the text of the lecture's scene files, by
+ * path (`scenes/agilus.yaml`; other paths are ignored). The compiler never
+ * reads files: the caller passes them in (docs/scene-files.md).
+ */
+export function compileLecture(source: string, sceneFiles: Record<string, string> = {}): CompiledLecture {
+  const scenes = readSceneFiles(sceneFiles)
   const raw = splitSlides(source)
   const out: CompiledSlide[] = []
   const images: ImageRef[] = []
@@ -682,27 +773,45 @@ export function compileLecture(source: string): CompiledLecture {
   // and may not reappear (§3), since that would demand two scenes' state be juggled
   // across the gap rather than one scene's suspend/restore.
   const sealedScenes = new Set<string>()
+  /** the last slide of each real scene, for the error */
+  const lastSlideOf = new Map<string, number>()
   let lastRealScene: string | undefined
   let currentScene: string | undefined
   let inDeck = false
   let joints: Record<string, number> = {}
   let camera: CameraTargetSpec | undefined
 
-  raw.forEach(({ frontmatter, body }, index) => {
+  raw.forEach(({ frontmatter, body, lineOf }, index) => {
     const slideNo = index + 1
+    for (const key of Object.keys(frontmatter)) {
+      if (SLIDE_KEYS.includes(key)) continue
+      const guess = closest(key, SLIDE_KEYS)
+      throw new Error(
+        `slides.md, line ${lineOf(key)}: slide ${slideNo} has the key '${key}', which a slide doesn't have. ` +
+          (guess ? `Did you mean '${guess}'? ` : '') +
+          `A slide's keys are: ${SLIDE_KEYS.join(', ')}.`,
+      )
+    }
     if (frontmatter.scene !== undefined && typeof frontmatter.scene !== 'string') {
       throw new Error(`slides: slide ${slideNo} 'scene' must be a string`)
     }
     if (frontmatter.id !== undefined && typeof frontmatter.id !== 'string') {
       throw new Error(`slides: slide ${slideNo} 'id' must be a string`)
     }
-    const scene = frontmatter.scene as string | undefined
+    // `scene: X` is the lecture's scenes/X.yaml if it has one, otherwise the engine scene X
+    const sceneFile = typeof frontmatter.scene === 'string' ? scenes.get(frontmatter.scene) : undefined
+    const scene = sceneFile ? sceneFile.base : (frontmatter.scene as string | undefined)
 
     if (!inDeck || scene !== currentScene) {
       // scene-run boundary (§3): targets never leak across it (§4.3, §4.1)
       if (scene !== undefined) {
         if (sealedScenes.has(scene)) {
-          throw new Error(`slides: scene '${scene}' reused non-contiguously at slide ${slideNo} — another scene ran since its last slide; a scene's runs may only be separated by scene-less slides (spec §3, §4.1)`)
+          // name what the slide wrote: with a scene file, that isn't the engine scene that runs
+          const named = sceneFile ? `scene '${sceneFile.name}' (${sceneFile.path}, built on '${scene}')` : `scene '${scene}'`
+          throw new Error(
+            `slides: ${named} reused non-contiguously at slide ${slideNo}: '${scene}' last ran at slide ${lastSlideOf.get(scene)}, ` +
+              `and another scene ran since; a scene's runs may only be separated by scene-less slides (spec §3, §4.1)`,
+          )
         }
         // a different real scene starting here seals whichever real scene ran last
         if (lastRealScene !== undefined && lastRealScene !== scene) {
@@ -715,6 +824,7 @@ export function compileLecture(source: string): CompiledLecture {
       currentScene = scene
       inDeck = true
     }
+    if (scene !== undefined) lastSlideOf.set(scene, slideNo)
 
     const widgets = validateWidgets(frontmatter.widgets, slideNo)
 
@@ -736,7 +846,12 @@ export function compileLecture(source: string): CompiledLecture {
       }
     } else {
       Object.assign(joints, validateJoints(frontmatter.joints, slideNo))
-      camera = mergeCameraSpec(camera, validateCamera(frontmatter.camera, slideNo))
+      if (typeof frontmatter.camera === 'string') {
+        // a named view is the whole camera: it replaces what the slide carried (docs/scene-files.md)
+        camera = structuredClone(namedView(frontmatter.camera, frontmatter.scene as string, sceneFile, scenes, slideNo, lineOf('camera')))
+      } else {
+        camera = mergeCameraSpec(camera, validateCamera(frontmatter.camera, slideNo))
+      }
       effective = { joints: { ...joints } }
       if (camera) effective.camera = structuredClone(camera)
       anchored = validateAnchored(frontmatter.anchored, slideNo)

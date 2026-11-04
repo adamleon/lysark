@@ -23,9 +23,7 @@ joints:
   joint1: 0.9
   joint2: 1.1
   joint3: -1.5
-camera:
-  lookAt: [0.1, 0.5, 0]
-  offset: [1.3, 0.55, 1.1]
+camera: overview
 ---
 ## Joint control is a PID loop
 
@@ -41,9 +39,7 @@ $$\tau = K_p e + K_i \int e\,dt + K_d \dot e$$
 ---
 id: control-loop
 scene: arm
-camera:
-  lookAt: [0.1, 0.5, 0]
-  offset: [1.5, 0.5, 1.3]
+camera: overview
 ---
 ## The loop, drawn
 
@@ -108,10 +104,7 @@ joints:
   joint1: 0.2
   joint2: 0.9
   joint3: -0.7
-camera:
-  lookAt: end_effector
-  offset: [0.4, 0.22, 0.5]
-  spring: { omega: 5, zeta: 1.0 }
+camera: tool
 anchored:
   - anchor: end_effector
     offset: [30, -16]

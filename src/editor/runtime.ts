@@ -6,7 +6,7 @@ import { compileForEditor, updateCameras } from './editor-compile'
 import { createHost } from './host'
 import { loadImages } from './panel-images'
 import { EDITOR_PROTOCOL } from './panel-page.js'
-import { viewEdit } from './save-view'
+import { namedTarget, namedViewEdit, viewEdit, viewUsers, type NamedTarget } from './save-view'
 
 /**
  * The editor runtime (lysark-v2.md §5, step 3). It runs as the page of the
@@ -67,8 +67,8 @@ const ANCHOR_TOLERANCE = 0.005
 
 /**
  * The files besides slides.md the extension sends with each text, and sends
- * again when one is saved, created or deleted. Nothing reads them yet; scene
- * files arrive with scene-files-proposal.md step 2.
+ * again when one is saved, created or deleted: the lecture's scene files, with
+ * its named camera views (docs/scene-files.md).
  */
 const INCLUDE = ['scenes/*.yaml', 'scenes/*.yml']
 
@@ -83,9 +83,9 @@ const post = (message: Record<string, unknown>) => vscode?.postMessage({ ...mess
 const render = Number(document.querySelector('meta[name="lysark-render"]')?.getAttribute('content') ?? NaN)
 const host = createHost(post, render)
 let booted = false
-/** the number of the text this page shows, and its slides.md */
+/** the number of the files this page shows, and the files: slides.md and the scene files */
 let shownSeq: number | null = null
-let shownText = ''
+let shownFiles: Record<string, string> = {}
 /** the lecture's images, read when the page started; new text that needs others loads the page afresh */
 let images: Record<string, string> = {}
 /** a view is being written into the file */
@@ -101,12 +101,12 @@ const round2 = (n: number) => Number(n.toFixed(2))
  * saved from it (the camera is already there); any other change to it needs
  * the fresh page, where the camera flies to it.
  */
-async function updateInPlace(text: string): Promise<boolean> {
+async function updateInPlace(files: Record<string, string>): Promise<boolean> {
   const engine = lysark()?.engine
   if (!engine) return false
   // the same module instance the deck was built from (it stands in for virtual:lysark-deck)
   const { default: deck } = await import('./deck-from-source')
-  const fresh = compileForEditor(text, images)
+  const fresh = compileForEditor(files['slides.md'], images, files)
   const i = engine.currentIndex
   const next: CameraTargetSpec | undefined = fresh[i]?.effective.camera
   const isSavedView =
@@ -148,9 +148,58 @@ hint.style.cssText =
   'color:var(--text-dim);background:rgba(var(--surface-rgb),0.8);pointer-events:none'
 document.addEventListener('DOMContentLoaded', () => document.body.append(banner, ...(vscode ? [hint] : [])))
 
+/**
+ * The slides that fly to each named view in the files shown, worked out once
+ * per view (a compile of the lecture), compared with the running deck.
+ */
+let usersOf: { seq: number | null; lists: Map<string, number[]> } = { seq: null, lists: new Map() }
+async function flyingTo(target: NamedTarget): Promise<number[]> {
+  if (usersOf.seq !== shownSeq) usersOf = { seq: shownSeq, lists: new Map() }
+  const key = `${target.path}\n${target.view}`
+  if (!usersOf.lists.has(key)) {
+    const { default: deck } = await import('./deck-from-source')
+    usersOf.lists.set(key, viewUsers(shownFiles, target, deck.slides.map((s) => s.effective.camera)))
+  }
+  return usersOf.lists.get(key)!
+}
+
+/**
+ * The hint says where V writes on the slide shown: into the slide, or into a
+ * named view, and the slides that fly to that view. The list takes a compile,
+ * so it follows a moment later, once the camera is on its way.
+ */
+let hintTimer: number | undefined
+function updateHint(): void {
+  const engine = lysark()?.engine
+  const index = engine?.currentIndex
+  const target = engine ? namedTarget(shownFiles, engine.currentIndex) : null
+  const text = (users: number[]) =>
+    target
+      ? `V or the camera button above: change the view '${target.view}' in ${target.path}` +
+        (users.length > 1 ? ` (slides ${listSlides(users)} fly to it)` : '')
+      : 'V or the camera button above: save this camera view into the slide'
+  hint.textContent = text([])
+  window.clearTimeout(hintTimer)
+  if (!target) return
+  const seq = shownSeq
+  hintTimer = window.setTimeout(async () => {
+    const users = await flyingTo(target)
+    if (shownSeq === seq && lysark()?.engine.currentIndex === index) hint.textContent = text(users)
+  }, 400)
+}
+
+/** slide numbers for people: 2, 5 and 9 */
+function listSlides(indices: number[]): string {
+  const numbers = indices.map((i) => String(i + 1))
+  return numbers.length > 1 ? `${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}` : (numbers[0] ?? '')
+}
+
 let bannerTimer: number | undefined
+/** the banner says a view was just saved (showSaved) */
+let savedShowing = false
 function showBanner(text: string | null, kind: 'error' | 'ok' = 'error'): void {
   window.clearTimeout(bannerTimer)
+  savedShowing = false
   if (!text) {
     banner.style.display = 'none'
     return
@@ -162,10 +211,10 @@ function showBanner(text: string | null, kind: 'error' | 'ok' = 'error'): void {
   if (kind === 'ok') bannerTimer = window.setTimeout(() => showBanner(null), 2500)
 }
 
-/** null if the text compiles and names only known scenes; otherwise the problem */
-function problemWith(text: string): string | null {
+/** null if the files compile and name only known scenes; otherwise the problem */
+function problemWith(files: Record<string, string>): string | null {
   try {
-    const { slides } = compileLecture(text)
+    const { slides } = compileLecture(files['slides.md'], files)
     const known = new Set<string>(SCENE_NAMES)
     const bad = slides.find((s) => s.scene && !known.has(s.scene))
     if (bad) return `slide '${bad.id}' uses unknown scene '${bad.scene}'. Available: ${SCENE_NAMES.join(', ')}`
@@ -188,50 +237,58 @@ window.addEventListener('message', async (event) => {
   if (message?.type === 'lysark:source' && typeof message.seq === 'number') {
     // the same text again (a message that crossed a reload): already showing it
     if (booted && message.seq === shownSeq) return
-    const files = message.files as Record<string, unknown> | undefined
-    const text = files?.['slides.md']
+    // slides.md and the scene files, as text
+    const files = Object.fromEntries(
+      Object.entries((message.files ?? {}) as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === 'string'),
+    )
+    const text = files['slides.md']
     if (message.protocol !== EDITOR_PROTOCOL || typeof text !== 'string') {
       const problem = `This Lysark extension doesn't match the course's engine (messages version ${message.protocol ?? 'unknown'}, the engine has ${EDITOR_PROTOCOL}). Update the extension, or the course's engine.`
       showBanner(problem)
       post({ type: 'lysark:error', message: problem, seq: message.seq })
       return
     }
-    const problem = problemWith(text)
+    const problem = problemWith(files)
     if (problem) {
+      savedView = null // a view saved from this page is known again only in the text that comes right back
       if (!booted) clearLoading() // nothing to show yet but the error
       showBanner(`Not updated, the slides have an error:\n${problem}`)
       post({ type: 'lysark:error', message: problem, seq: message.seq })
       return
     }
     if (booted) {
-      if (await updateInPlace(text)) {
+      if (await updateInPlace(files)) {
         // only cameras changed: the running deck has them now
         shownSeq = message.seq
-        shownText = text
+        shownFiles = files
         savedView = null
-        showBanner(null)
+        // (a view just saved keeps its message: this is its text coming back)
+        if (!savedShowing) showBanner(null)
+        updateHint()
         post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
         return
       }
       // other new text: the extension loads this page afresh and sends it again on 'ready'
+      savedView = null
       post({ type: 'lysark:accepted', seq: message.seq })
       return
     }
     showBanner(null)
     shownSeq = message.seq
-    shownText = text
+    shownFiles = files
     if (typeof message.slide === 'number' && message.slide >= 0) location.hash = `#${message.slide + 1}`
     booted = true
     // the images first: the deck is built with them (a slide asked for meanwhile
     // goes into the address, where the deck starts)
     // (a request at a time can be large and slow in github.dev: two minutes each)
-    const loaded = await loadImages(compileLecture(text).images, (paths) => host.read(paths, 'bytes', 120_000))
+    const loaded = await loadImages(compileLecture(text, files).images, (paths) => host.read(paths, 'bytes', 120_000))
     images = loaded.uris
-    window.__LYSARK_SOURCE__ = text
+    window.__LYSARK_FILES__ = files
     window.__LYSARK_IMAGES__ = images
     try {
       await import('../main')
       clearLoading()
+      updateHint()
       post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
       if (loaded.problems.length > 0) {
         showBanner(`Images not shown:\n${loaded.problems.join('\n')}`)
@@ -255,9 +312,18 @@ window.addEventListener('message', async (event) => {
 
 /** the "Scene Actions…" button: what the panel can do, as a list in VS Code */
 async function sceneActions(): Promise<void> {
+  const engine = lysark()?.engine
+  const target = engine ? namedTarget(shownFiles, engine.currentIndex) : null
+  const users = target ? await flyingTo(target) : []
   const choice = await host.ask({
     title: 'Lysark: scene actions',
-    items: [{ label: 'Save camera view into this slide', description: 'V', value: 'save-view' }],
+    items: [
+      {
+        label: target ? `Change the view '${target.view}' to this camera view` : 'Save camera view into this slide',
+        description: target ? `V, in ${target.path}` + (users.length > 1 ? `; slides ${listSlides(users)} use it` : '') : 'V',
+        value: 'save-view',
+      },
+    ],
   })
   if (choice === 'save-view') await saveView()
 }
@@ -294,47 +360,114 @@ async function saveView(): Promise<void> {
   const offset = camera.clone().sub(center)
   const view: CameraView = { lookAt, offset: [offset.x, offset.y, offset.z] }
   const index = L.engine.currentIndex
-  const shown = shownText
+  // as the edit writes it (camera-edit.ts, two decimals), to know it again when the text comes back
+  const rounded = {
+    slide: index,
+    lookAt: typeof lookAt === 'string' ? lookAt : ([round2(lookAt[0]), round2(lookAt[1]), round2(lookAt[2])] as [number, number, number]),
+    offset: [round2(offset.x), round2(offset.y), round2(offset.z)] as [number, number, number],
+  }
+  // a slide that names a view (`camera: overview`) saves into that view; any other into the slide
+  const target = namedTarget(shownFiles, index)
   saving = true
   try {
-    // the file as it is now in VS Code, unsaved typing included
-    const file = (await host.read(['slides.md'], 'text'))['slides.md']
-    if (typeof file.text !== 'string' || typeof file.version !== 'number') {
-      showBanner(`The view was not saved: slides.md could not be read (${file.error ?? 'no text'}).`)
-      return
-    }
-    const change = viewEdit(shown, file.text, index, view)
-    if (change && 'problem' in change) {
-      showBanner(`The view was not saved: ${change.problem}`)
-      return
-    }
-    if (!change) {
-      showBanner(`Slide ${index + 1} already has this camera view`, 'ok')
-      return
-    }
-    const next = file.text.slice(0, change.start) + change.text + file.text.slice(change.end)
-    const broken = problemWith(next)
-    if (broken && !problemWith(file.text)) {
-      showBanner(`The view was not saved: the slides would have an error:\n${broken}`)
-      return
-    }
-    // as the edit writes it (camera-edit.ts, two decimals), to know it again when the text comes back
-    savedView = {
-      slide: index,
-      lookAt: typeof lookAt === 'string' ? lookAt : [round2(lookAt[0]), round2(lookAt[1]), round2(lookAt[2])],
-      offset: [round2(offset.x), round2(offset.y), round2(offset.z)],
-    }
-    const result = await host.edit('Save camera view', [{ path: 'slides.md', version: file.version, ...change }])
-    if (!result.ok) {
-      savedView = null
-      showBanner(`The view was not saved: ${result.message ?? 'VS Code refused the edit'}`)
-      return
-    }
-    // the extension sends the edited text, which puts the view into the running deck
-    showBanner(`Camera view saved to slide ${index + 1}`, 'ok')
+    if (target) await saveNamedView(target, view, rounded)
+    else await saveSlideView(index, view, rounded)
   } finally {
     saving = false
   }
+}
+
+/** the view into the slide's own frontmatter in slides.md */
+async function saveSlideView(index: number, view: CameraView, rounded: NonNullable<typeof savedView>): Promise<void> {
+  const shown = shownFiles['slides.md']
+  // the file as it is now in VS Code, unsaved typing included
+  const file = (await host.read(['slides.md'], 'text'))['slides.md']
+  if (typeof file.text !== 'string' || typeof file.version !== 'number') {
+    showBanner(`The view was not saved: slides.md could not be read (${file.error ?? 'no text'}).`)
+    return
+  }
+  const change = viewEdit(shown, file.text, index, view)
+  if (change && 'problem' in change) {
+    showBanner(`The view was not saved: ${change.problem}`)
+    return
+  }
+  if (!change) {
+    showBanner(`Slide ${index + 1} already has this camera view`, 'ok')
+    return
+  }
+  const next = file.text.slice(0, change.start) + change.text + file.text.slice(change.end)
+  const broken = problemWith({ ...shownFiles, 'slides.md': next })
+  if (broken && !problemWith({ ...shownFiles, 'slides.md': file.text })) {
+    showBanner(`The view was not saved: the slides would have an error:\n${broken}`)
+    return
+  }
+  savedView = rounded
+  const result = await host.edit('Save camera view', [{ path: 'slides.md', version: file.version, ...change }])
+  if (!result.ok) {
+    savedView = null
+    showBanner(`The view was not saved: ${result.message ?? 'VS Code refused the edit'}`)
+    return
+  }
+  // the extension sends the edited text, which puts the view into the running deck
+  showSaved(`Camera view saved to slide ${index + 1}`)
+}
+
+/** the view into the named view the slide uses, in the lecture's scene file (docs/scene-files.md) */
+async function saveNamedView(target: NamedTarget, view: CameraView, rounded: NonNullable<typeof savedView>): Promise<void> {
+  // the scene file as it is now in VS Code, unsaved typing included
+  const file = (await host.read([target.path], 'text'))[target.path]
+  if (typeof file.text !== 'string' || typeof file.version !== 'number') {
+    showBanner(`The view was not saved: ${target.path} could not be read (${file.error ?? 'no text'}).`)
+    return
+  }
+  const change = namedViewEdit(file.text, target.view, view)
+  if (change && 'problem' in change) {
+    showBanner(`The view was not saved: ${change.problem}`)
+    return
+  }
+  if (!change) {
+    showBanner(`The view '${target.view}' already is this camera view`, 'ok')
+    return
+  }
+  const next = file.text.slice(0, change.start) + change.text + file.text.slice(change.end)
+  const before = { ...shownFiles, [target.path]: file.text }
+  const after = { ...shownFiles, [target.path]: next }
+  const broken = problemWith(after)
+  if (broken && !problemWith(before)) {
+    showBanner(`The view was not saved: the slides would have an error:\n${broken}`)
+    return
+  }
+  // every slide whose camera changes with it: the slides that name it, and those that carry it on
+  let changed: number[] = []
+  try {
+    const was = compileLecture(before['slides.md'], before).slides
+    const now = compileLecture(after['slides.md'], after).slides
+    changed = now.flatMap((s, i) => (JSON.stringify(s.effective.camera) !== JSON.stringify(was[i]?.effective.camera) ? [i] : []))
+  } catch {
+    // the shown slides with the scene file as it is now don't compile: name none
+  }
+  savedView = rounded
+  const result = await host.edit(`Save camera view '${target.view}'`, [{ path: target.path, version: file.version, ...change }])
+  if (!result.ok) {
+    savedView = null
+    showBanner(`The view was not saved: ${result.message ?? 'VS Code refused the edit'}`)
+    return
+  }
+  // the extension sends the edited scene file, which puts the view into the running deck.
+  // The scene file is changed in VS Code, usually with no editor open on it: say it isn't saved
+  showSaved(
+    `View '${target.view}' changed in ${target.path}, not saved yet (File > Save All)` +
+      (changed.length > 0 ? `: slide${changed.length > 1 ? 's' : ''} ${listSlides(changed)} now fl${changed.length > 1 ? 'y' : 'ies'} to it` : ''),
+  )
+}
+
+/**
+ * Say the view was saved. The edited text comes back from the extension a
+ * moment later and is put into the deck; that update keeps this message.
+ */
+function showSaved(text: string): void {
+  showBanner(text, 'ok')
+  savedShowing = true
 }
 
 window.addEventListener('keydown', (e) => {
@@ -344,8 +477,12 @@ window.addEventListener('keydown', (e) => {
 })
 
 window.addEventListener('hashchange', () => {
-  const engine = lysark()?.engine
-  if (engine) post({ type: 'lysark:slide', index: engine.currentIndex, seq: shownSeq })
+  // after the deck has moved: its own listener (src/main.ts) runs after this one
+  window.setTimeout(() => {
+    const engine = lysark()?.engine
+    if (engine) post({ type: 'lysark:slide', index: engine.currentIndex, seq: shownSeq })
+    updateHint()
+  }, 0)
 })
 
 window.addEventListener('error', (e) => post({ type: 'lysark:error', message: String(e.message) }))

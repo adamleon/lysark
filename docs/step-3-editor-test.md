@@ -179,8 +179,8 @@ Reintroducing the first version's `window.parent` check makes it fail, as it sho
   projector, and the text is cut off. The saved numbers are exact, but judge the framing with the
   panel about as wide as the projector. See the proposal below.
 - **One preview at a time**, like the deck's one live scene.
-- **Views go into the slide's frontmatter.** Named views in scene files come with the scene file
-  format, the next design task in step 3.
+- **Views go into the slide's frontmatter.** Named views in scene files came with engine v2.5.0
+  ([scene-files.md](scene-files.md)).
 - **Frames in slides don't show in the panel** (a YouTube embed, say): the isolation blocks them,
   and the panel's policy does too.
 - **Images for the panel must come as `data:` or `blob:` addresses** when the extension starts

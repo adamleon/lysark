@@ -4,8 +4,8 @@ import { compileForEditor } from './editor-compile'
 
 /**
  * The editor runtime's deck: compiled in the browser from the lecture text the
- * VS Code extension sent, with the images the panel read (src/editor/runtime.ts
- * sets both before the deck loads).
+ * VS Code extension sent, with its scene files and the images the panel read
+ * (src/editor/runtime.ts sets them before the deck loads).
  * In the editor build this module stands in for `virtual:lysark-deck`. Its
  * slide objects are the ones the engine reads, so the runtime can update their
  * cameras in place (editor-compile.ts, updateCameras).
@@ -13,7 +13,8 @@ import { compileForEditor } from './editor-compile'
 
 declare global {
   interface Window {
-    __LYSARK_SOURCE__?: string
+    /** slides.md and the lecture's scene files, by path (runtime.ts) */
+    __LYSARK_FILES__?: Record<string, string>
     /** the lecture's images as data URIs, by src (panel-images.ts) */
     __LYSARK_IMAGES__?: Record<string, string>
   }
@@ -21,4 +22,6 @@ declare global {
 
 const WAITING = '---\nlayout: center\n---\n## Waiting for the lecture text from VS Code\n'
 
-export default defineDeck({ scenes: ALL_SCENES, slides: compileForEditor(window.__LYSARK_SOURCE__ ?? WAITING, window.__LYSARK_IMAGES__) })
+const files = window.__LYSARK_FILES__ ?? { 'slides.md': WAITING }
+
+export default defineDeck({ scenes: ALL_SCENES, slides: compileForEditor(files['slides.md'] ?? WAITING, window.__LYSARK_IMAGES__, files) })

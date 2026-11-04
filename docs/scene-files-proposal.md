@@ -3,7 +3,8 @@
 Step 3 of [lysark-v2.md](lysark-v2.md) designs the scene file format before the editor writes
 named views and poses. **Decided 2026-10-16: all eight decisions as recommended** (recorded in lysark-v2.md section 8).
 It is built in the steps below. Step 1 is released (2026-11-03: extension 0.3.0, engine v2.4.0;
-[editor-host.md](editor-host.md)); the format itself comes with step 2.
+[editor-host.md](editor-host.md)). Step 2, named views, is built (2026-11-04, engine v2.5.0); the
+format reference is [scene-files.md](scene-files.md).
 It came from four independent designs (smallest change, editor-first, lecturer-first,
 engine-first), scored by three reviewers and combined; the claims about today's code were
 checked against the code.
