@@ -68,7 +68,13 @@ describe('compileSlides', () => {
   })
 
   it('rejects duplicate ids and unknown widget types', () => {
-    expect(() => compileSlides('---\nid: a\n---\nx\n---\nid: a\n---\ny')).toThrow(/duplicate/)
+    expect(() => compileSlides('---\nid: a\n---\nx\n---\nid: a\n---\ny')).toThrow(
+      /slides\.md, line 6: slides 1 and 2 both have id: a\. Every slide needs its own id: give this one another, for example id: a-2\./,
+    )
+    // an id the same as the one a slide without an id gets
+    expect(() => compileSlides('---\nid: slide-2\n---\nx\n---\nscene: arm\n---\ny')).toThrow(
+      /line 2: slides 1 and 2 both have the id 'slide-2' \(a slide without an id: of its own is called slide-<its number>\)/,
+    )
     expect(() =>
       compileSlides('---\nscene: arm\nwidgets:\n  - type: dial\n    bind: j1\n---\nx'),
     ).toThrow(/unknown widget type/)
@@ -117,7 +123,9 @@ describe('compileSlides — scene runs (spec §3/§4.3)', () => {
 
   it('errors when a different scene interleaves two runs of a scene id', () => {
     const src = '---\nscene: arm\n---\na\n---\nscene: gripper\n---\nb\n---\nscene: arm\n---\nc'
-    expect(() => compileSlides(src)).toThrow(/non-contiguously/)
+    expect(() => compileSlides(src)).toThrow(
+      /slides\.md, line 10: slide 3 uses the scene 'arm', which last ran at slide 1, but slide 2 moved on to the scene 'gripper' since\. A scene can come back after slides without a scene, but not after another scene\. Move this slide up among the other 'arm' slides \(before slide 2\), or give it another scene\./,
+    )
   })
 
   it('allows a scene to resume after a scene-less gap (suspend/restore, §4.1)', () => {
@@ -132,7 +140,7 @@ describe('compileSlides — scene runs (spec §3/§4.3)', () => {
     // arm → gripper → scene-less → arm: arm was sealed by gripper, so it can't return
     const src =
       '---\nscene: arm\n---\na\n---\nscene: gripper\n---\nb\n---\nlayout: center\n---\nt\n---\nscene: arm\n---\nd'
-    expect(() => compileSlides(src)).toThrow(/non-contiguously/)
+    expect(() => compileSlides(src)).toThrow(/slide 4 uses the scene 'arm', which last ran at slide 1, but slide 2 moved on/)
   })
 
   it('scene-less slides may not declare joints, camera, or widgets', () => {

@@ -426,6 +426,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     if (styles.defaultStyles || styles.loading) {
       return fail(`VS Code's default styles or the loading text are still there: ${JSON.stringify(styles)}`)
     }
+    // the hint says that saving updates the panel (github.dev's auto-save doesn't)
+    const hintText = await inPanel((w) => [...w.document.querySelectorAll('div')].find((d) => d.style.top === '10px')?.textContent ?? '')
+    if (!/Ctrl\+S/.test(hintText)) return fail(`the panel's hint doesn't say that Ctrl+S updates the preview: ${JSON.stringify(hintText)}`)
     // the images the panel read, and the slides the deck runs: each image in them, no placeholder
     const images = await inPanel((w) => {
       const uris = Object.values(w.__LYSARK_IMAGES__ ?? {})

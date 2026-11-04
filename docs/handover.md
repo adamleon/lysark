@@ -54,11 +54,11 @@ and the author confirmed it works in github.dev the same day. How to write them 
 Baneplanlegging's camera blocks can now become names (the author's choice). Next: step 3,
 Save view as…
 
-What tripped the author up while trying it (worth a small engine fix, v2.5.1, if confirmed):
-the panel updates only on Ctrl+S (github.dev's auto-save doesn't count), and the two errors
-hit (a copied slide's duplicate `id:`, and a scene returning after another scene ran) show in
-the panel's red box in terms that don't say what to do. Proposal: say "Ctrl+S updates the
-preview" in the panel's hint, and word those errors with the slides, the line and the fix.
+What tripped the author up while trying it: the panel updates only on Ctrl+S (github.dev's
+auto-save doesn't count), and the two errors hit (a copied slide's duplicate `id:`, and a scene
+returning after another scene ran) didn't say what to do. Engine v2.5.1 (2026-11-04): the
+panel's hint starts "Ctrl+S in the text updates the preview", and those two errors name the
+slides, the line in slides.md and the fix.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The

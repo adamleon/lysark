@@ -142,7 +142,7 @@ banner.style.cssText =
   'position:fixed;left:12px;right:12px;bottom:12px;z-index:1000;padding:10px 14px;border-radius:8px;' +
   'font:14px/1.4 system-ui,sans-serif;white-space:pre-wrap;display:none;pointer-events:none'
 const hint = document.createElement('div')
-hint.textContent = 'V or the camera button above: save this camera view into the slide'
+hint.textContent = 'Ctrl+S in the text updates the preview · V or the camera button above: save this camera view into the slide'
 hint.style.cssText =
   'position:fixed;left:12px;top:10px;z-index:1000;padding:3px 8px;border-radius:6px;font:12px system-ui,sans-serif;' +
   'color:var(--text-dim);background:rgba(var(--surface-rgb),0.8);pointer-events:none'
@@ -173,11 +173,13 @@ function updateHint(): void {
   const engine = lysark()?.engine
   const index = engine?.currentIndex
   const target = engine ? namedTarget(shownFiles, engine.currentIndex) : null
+  // saving is what updates the panel (github.dev's auto-save doesn't), so the hint says so
   const text = (users: number[]) =>
-    target
+    'Ctrl+S in the text updates the preview · ' +
+    (target
       ? `V or the camera button above: change the view '${target.view}' in ${target.path}` +
         (users.length > 1 ? ` (slides ${listSlides(users)} fly to it)` : '')
-      : 'V or the camera button above: save this camera view into the slide'
+      : 'V or the camera button above: save this camera view into the slide')
   hint.textContent = text([])
   window.clearTimeout(hintTimer)
   if (!target) return

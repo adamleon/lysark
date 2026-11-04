@@ -147,7 +147,9 @@ describe('scene file rules from review', () => {
   it('names the scene file in the error for a scene run again after another', () => {
     const files = { 'scenes/celle-a.yaml': 'base: agilus\n', 'scenes/celle-b.yaml': 'base: agilus\n' }
     const slides = '---\nscene: celle-a\n---\n# 1\n---\nscene: arm\n---\n# 2\n---\nscene: celle-b\n---\n# 3\n'
-    expect(problem(files, slides)).toMatch(/scene 'celle-b' \(scenes\/celle-b\.yaml, built on 'agilus'\) reused non-contiguously at slide 3: 'agilus' last ran at slide 1/)
+    expect(problem(files, slides)).toMatch(
+      /slide 3 uses the scene 'celle-b' \(scenes\/celle-b\.yaml, built on 'agilus'\), which last ran at slide 1, but slide 2 moved on to the scene 'arm' since/,
+    )
   })
 })
 

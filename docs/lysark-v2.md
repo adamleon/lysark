@@ -468,6 +468,9 @@ HTTPS server.
   `scenes/<name>.yaml`, used as `camera: <name>`; V on such a slide updates the view in the scene
   file. Unknown slide keys are now build errors (decision 8). Engine v2.5.0, no extension change.
   How to write them: [scene-files.md](scene-files.md).
+- Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
+  for a duplicate slide id and for a scene returning after another scene name the slides, the
+  line and what to change (what tripped the author up trying step 2).
 
 ## 7. Postponed
 

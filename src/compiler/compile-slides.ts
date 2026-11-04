@@ -773,8 +773,11 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
   // and may not reappear (§3), since that would demand two scenes' state be juggled
   // across the gap rather than one scene's suspend/restore.
   const sealedScenes = new Set<string>()
-  /** the last slide of each real scene, for the error */
+  /** for the error: the last slide of each real scene, and the slide (and scene, as written) that moved on from it */
   const lastSlideOf = new Map<string, number>()
+  const movedOnAt = new Map<string, { slide: number; scene: string }>()
+  /** each id, and the slide that has it */
+  const idSlides = new Map<string, { slide: number; written: boolean; line: number }>()
   let lastRealScene: string | undefined
   let currentScene: string | undefined
   let inDeck = false
@@ -807,15 +810,21 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
       if (scene !== undefined) {
         if (sealedScenes.has(scene)) {
           // name what the slide wrote: with a scene file, that isn't the engine scene that runs
-          const named = sceneFile ? `scene '${sceneFile.name}' (${sceneFile.path}, built on '${scene}')` : `scene '${scene}'`
+          const written = frontmatter.scene as string
+          const named = sceneFile ? `'${written}' (${sceneFile.path}, built on '${scene}')` : `'${scene}'`
+          const last = lastSlideOf.get(scene)
+          const next = movedOnAt.get(scene)!
           throw new Error(
-            `slides: ${named} reused non-contiguously at slide ${slideNo}: '${scene}' last ran at slide ${lastSlideOf.get(scene)}, ` +
-              `and another scene ran since; a scene's runs may only be separated by scene-less slides (spec §3, §4.1)`,
+            `slides.md, line ${lineOf('scene')}: slide ${slideNo} uses the scene ${named}, which last ran at slide ${last}, ` +
+              `but slide ${next.slide} moved on to the scene '${next.scene}' since. A scene can come back after slides ` +
+              `without a scene, but not after another scene. Move this slide up among the other ` +
+              `'${written}' slides (before slide ${next.slide}), or give it another scene.`,
           )
         }
         // a different real scene starting here seals whichever real scene ran last
         if (lastRealScene !== undefined && lastRealScene !== scene) {
           sealedScenes.add(lastRealScene)
+          movedOnAt.set(lastRealScene, { slide: slideNo, scene: frontmatter.scene as string })
         }
         lastRealScene = scene
       }
@@ -864,6 +873,20 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
       .filter((html) => html.length > 0)
 
     const id = (frontmatter.id as string | undefined) ?? `slide-${slideNo}`
+    // every slide's id differs: the editor and the slide links find slides by it
+    const twin = idSlides.get(id)
+    if (twin) {
+      const written = frontmatter.id !== undefined
+      const free = (k: number): string => (idSlides.has(`${id}-${k}`) ? free(k + 1) : `${id}-${k}`)
+      throw new Error(
+        written && twin.written
+          ? `slides.md, line ${lineOf('id')}: slides ${twin.slide} and ${slideNo} both have id: ${id}. ` +
+              `Every slide needs its own id: give this one another, for example id: ${free(2)}.`
+          : `slides.md, line ${written ? lineOf('id') : twin.line}: slides ${twin.slide} and ${slideNo} both have the id '${id}' ` +
+              `(a slide without an id: of its own is called slide-<its number>). Give the slide with id: ${id} another id.`,
+      )
+    }
+    idSlides.set(id, { slide: slideNo, written: frontmatter.id !== undefined, line: lineOf('id') })
     const slide: CompiledSlide = {
       id,
       title: extractTitle(body, id),
@@ -883,10 +906,5 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
     out.push(slide)
   })
 
-  const ids = new Set<string>()
-  for (const slide of out) {
-    if (ids.has(slide.id)) throw new Error(`slides: duplicate slide id '${slide.id}'`)
-    ids.add(slide.id)
-  }
   return { slides: out, images }
 }
