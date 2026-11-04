@@ -48,10 +48,17 @@ messages version 3, and still version 2 for courses on v2.3.x), the editing runs
 images show in the panel, and V works over unsaved typing. The Marketplace has 0.3.0 (the
 author confirmed it works) and the engine is tagged v2.4.0; the course moves to it with the
 Update engine workflow (done 2026-11-03: the course runs v2.4.0). Step 2, named camera
-views, is released (2026-11-04): engine tagged v2.5.0, no extension change; the course moves
-to it with Update engine. How to write them is in [scene-files.md](scene-files.md). The demo
-lecture has `scenes/arm.yaml` with two views. Baneplanlegging's camera blocks can now become
-names (the author's choice). Next: step 3, Save view as…
+views, is released (2026-11-04): engine v2.5.0, no extension change. The course runs v2.5.0,
+and the author confirmed it works in github.dev the same day. How to write them is in
+[scene-files.md](scene-files.md). The demo lecture has `scenes/arm.yaml` with two views.
+Baneplanlegging's camera blocks can now become names (the author's choice). Next: step 3,
+Save view as…
+
+What tripped the author up while trying it (worth a small engine fix, v2.5.1, if confirmed):
+the panel updates only on Ctrl+S (github.dev's auto-save doesn't count), and the two errors
+hit (a copied slide's duplicate `id:`, and a scene returning after another scene ran) show in
+the panel's red box in terms that don't say what to do. Proposal: say "Ctrl+S updates the
+preview" in the panel's hint, and word those errors with the slides, the line and the fix.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
