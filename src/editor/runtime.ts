@@ -1,12 +1,22 @@
 import { compileLecture } from '../compiler/compile-slides'
 import type { CameraTargetSpec } from '../engine/slide-types'
 import { SCENE_NAMES } from '../scenes/registry'
-import type { CameraView } from './camera-edit'
+import { viewNameProblem, type CameraView } from './camera-edit'
 import { compileForEditor, updateCameras } from './editor-compile'
-import { createHost } from './host'
+import { createHost, type HostChange } from './host'
 import { loadImages } from './panel-images'
 import { EDITOR_PROTOCOL } from './panel-page.js'
-import { namedTarget, namedViewEdit, viewEdit, viewUsers, type NamedTarget } from './save-view'
+import {
+  namedTarget,
+  namedViewEdit,
+  saveAsChanges,
+  saveAsChoices,
+  viewEdit,
+  viewUsers,
+  type NamedTarget,
+  type SaveAs,
+  type SaveAsChoices,
+} from './save-view'
 
 /**
  * The editor runtime (lysark-v2.md §5, step 3). It runs as the page of the
@@ -52,7 +62,7 @@ interface LysarkHandle {
   engine: {
     currentIndex: number
     slideCount: number
-    current: { scene?: string; effective: { camera?: { lookAt?: unknown } } }
+    current: { scene?: string; effective: { camera?: { lookAt?: unknown; spring?: { omega?: number; zeta?: number } } } }
     goTo(index: number, direction?: 'forward' | 'backward'): void
   }
   sceneManager: {
@@ -90,8 +100,20 @@ let shownFiles: Record<string, string> = {}
 let images: Record<string, string> = {}
 /** a view is being written into the file */
 let saving = false
-/** the last view saved from this page, as written into the text (two decimals) */
-let savedView: { slide: number; lookAt: [number, number, number] | string; offset: [number, number, number] } | null = null
+/** an error waiting to be reported, in case newer files follow at once */
+let pendingError: number | undefined
+const ERROR_DELAY_MS = 750
+/**
+ * the last view saved from this page, as written into the text (two
+ * decimals), and the file text its edit makes: the update with that text is
+ * the one that brings the view, and uses it up
+ */
+let savedView: {
+  slide: number
+  lookAt: [number, number, number] | string
+  offset: [number, number, number]
+  expect?: { path: string; text: string }
+} | null = null
 
 const round2 = (n: number) => Number(n.toFixed(2))
 
@@ -115,8 +137,15 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
     next !== undefined &&
     JSON.stringify(next.lookAt) === JSON.stringify(savedView.lookAt) &&
     JSON.stringify(next.offset) === JSON.stringify(savedView.offset)
-  if (JSON.stringify(next) !== JSON.stringify(deck.slides[i]?.effective.camera) && !isSavedView) return false
-  return updateCameras(deck.slides, fresh) !== null
+  const changesSlideShown = JSON.stringify(next) !== JSON.stringify(deck.slides[i]?.effective.camera)
+  if (changesSlideShown && !isSavedView) return false
+  if (updateCameras(deck.slides, fresh) === null) return false
+  // the saved view is used up once its edit's text has come (or it was put on
+  // the slide shown). Until then it waits: files in between (VS Code reports a
+  // file the edit creates before the edit's own text comes) mustn't use it up
+  const expect = savedView?.expect
+  if ((expect && files[expect.path] === expect.text) || (changesSlideShown && isSavedView)) savedView = null
+  return true
 }
 
 function goTo(slide: number): void {
@@ -142,7 +171,7 @@ banner.style.cssText =
   'position:fixed;left:12px;right:12px;bottom:12px;z-index:1000;padding:10px 14px;border-radius:8px;' +
   'font:14px/1.4 system-ui,sans-serif;white-space:pre-wrap;display:none;pointer-events:none'
 const hint = document.createElement('div')
-hint.textContent = 'Ctrl+S in the text updates the preview · V or the camera button above: save this camera view into the slide'
+hint.textContent = 'Ctrl+S in the text updates the preview · V or the camera button above: save this camera view into the slide · Shift+V: save as…'
 hint.style.cssText =
   'position:fixed;left:12px;top:10px;z-index:1000;padding:3px 8px;border-radius:6px;font:12px system-ui,sans-serif;' +
   'color:var(--text-dim);background:rgba(var(--surface-rgb),0.8);pointer-events:none'
@@ -153,14 +182,16 @@ document.addEventListener('DOMContentLoaded', () => document.body.append(banner,
  * per view (a compile of the lecture), compared with the running deck.
  */
 let usersOf: { seq: number | null; lists: Map<string, number[]> } = { seq: null, lists: new Map() }
-async function flyingTo(target: NamedTarget): Promise<number[]> {
-  if (usersOf.seq !== shownSeq) usersOf = { seq: shownSeq, lists: new Map() }
-  const key = `${target.path}\n${target.view}`
-  if (!usersOf.lists.has(key)) {
-    const { default: deck } = await import('./deck-from-source')
-    usersOf.lists.set(key, viewUsers(shownFiles, target, deck.slides.map((s) => s.effective.camera)))
+function usersWith(cameras: unknown[]): (target: NamedTarget) => number[] {
+  return (target) => {
+    if (usersOf.seq !== shownSeq) usersOf = { seq: shownSeq, lists: new Map() }
+    const key = `${target.path}\n${target.view}`
+    if (!usersOf.lists.has(key)) usersOf.lists.set(key, viewUsers(shownFiles, target, cameras))
+    return usersOf.lists.get(key)!
   }
-  return usersOf.lists.get(key)!
+}
+async function flyingTo(target: NamedTarget): Promise<number[]> {
+  return usersWith(await shownCameras())(target)
 }
 
 /**
@@ -179,7 +210,8 @@ function updateHint(): void {
     (target
       ? `V or the camera button above: change the view '${target.view}' in ${target.path}` +
         (users.length > 1 ? ` (slides ${listSlides(users)} fly to it)` : '')
-      : 'V or the camera button above: save this camera view into the slide')
+      : 'V or the camera button above: save this camera view into the slide') +
+    ' · Shift+V: save as…'
   hint.textContent = text([])
   window.clearTimeout(hintTimer)
   if (!target) return
@@ -251,11 +283,21 @@ window.addEventListener('message', async (event) => {
       return
     }
     const problem = problemWith(files)
+    window.clearTimeout(pendingError)
     if (problem) {
-      savedView = null // a view saved from this page is known again only in the text that comes right back
-      if (!booted) clearLoading() // nothing to show yet but the error
-      showBanner(`Not updated, the slides have an error:\n${problem}`)
-      post({ type: 'lysark:error', message: problem, seq: message.seq })
+      const seq = message.seq
+      const report = () => {
+        savedView = null // a view saved from this page is known again only in the text that comes right back
+        if (!booted) clearLoading() // nothing to show yet but the error
+        showBanner(`Not updated, the slides have an error:\n${problem}`)
+        post({ type: 'lysark:error', message: problem, seq })
+      }
+      // Undoing a Save view as… that made a scene file passes through files
+      // that don't compile (VS Code deletes the file a moment before it puts
+      // slides.md back): a running deck waits a little for the next files
+      // before it reports an error
+      if (booted) pendingError = window.setTimeout(report, ERROR_DELAY_MS)
+      else report()
       return
     }
     if (booted) {
@@ -263,7 +305,6 @@ window.addEventListener('message', async (event) => {
         // only cameras changed: the running deck has them now
         shownSeq = message.seq
         shownFiles = files
-        savedView = null
         // (a view just saved keeps its message: this is its text coming back)
         if (!savedShowing) showBanner(null)
         updateHint()
@@ -312,38 +353,75 @@ window.addEventListener('message', async (event) => {
   }
 })
 
-/** the "Scene Actions…" button: what the panel can do, as a list in VS Code */
+/**
+ * The "Scene Actions…" button: what the panel can do, as a list in VS Code:
+ * save the view as V does, or as Save view as… does (only this slide, an
+ * existing view, a new view, whose name VS Code then asks for).
+ */
 async function sceneActions(): Promise<void> {
   const engine = lysark()?.engine
   const target = engine ? namedTarget(shownFiles, engine.currentIndex) : null
   const users = target ? await flyingTo(target) : []
-  const choice = await host.ask({
-    title: 'Lysark: scene actions',
-    items: [
-      {
-        label: target ? `Change the view '${target.view}' to this camera view` : 'Save camera view into this slide',
-        description: target ? `V, in ${target.path}` + (users.length > 1 ? `; slides ${listSlides(users)} use it` : '') : 'V',
-        value: 'save-view',
-      },
-    ],
-  })
-  if (choice === 'save-view') await saveView()
+  const choices = await choicesHere()
+  const items = [
+    {
+      label: target ? `Change the view '${target.view}' to this camera view` : 'Save camera view into this slide',
+      description: target ? `V, in ${target.path}` + (users.length > 1 ? `; slides ${listSlides(users)} use it` : '') : 'V',
+      value: 'save-view',
+    },
+  ]
+  if (choices) {
+    if (choices.current) {
+      items.push({ label: 'Save as: only this slide', description: `its own camera, instead of the view '${choices.current}'`, value: 'slide' })
+    }
+    for (const v of choices.views) {
+      if (v.name === choices.current) continue
+      items.push({
+        label: `Save as: the view '${v.name}'`,
+        description: 'this slide uses it from now on' + (v.users.length > 0 ? `; now on slides ${listSlides(v.users)}` : ''),
+        value: `view:${v.name}`,
+      })
+    }
+    items.push({ label: 'Save as: a new view…', description: choices.exists ? `in ${choices.path}` : `creates ${choices.path}`, value: 'new' })
+  }
+  const choice = await host.ask({ title: 'Lysark: scene actions', items })
+  if (choice === 'save-view') return saveView()
+  if (!choice || !choices) return
+  if (choice === 'slide') await saveAs({ kind: 'slide' }, choices)
+  else if (choice.startsWith('view:')) await saveAs({ kind: 'view', name: choice.slice(5) }, choices)
+  else if (choice === 'new') {
+    // VS Code asks for the name; a name that won't do is asked for again, saying why
+    let prompt = "The new view's name: one word, such as 'oversikt'"
+    for (;;) {
+      const answer = await host.ask({ title: 'Lysark: new view', input: { prompt, placeholder: 'oversikt' } })
+      if (answer === null) return
+      const name = answer.trim()
+      const problem = viewNameProblem(name, choices.views.map((v) => v.name))
+      if (!problem) return void (await saveAs({ kind: 'new', name }, choices))
+      prompt = `${problem[0].toUpperCase()}${problem.slice(1)}. Try another name.`
+    }
+  }
 }
 
 // ---- save the camera view --------------------------------------------------
 
-async function saveView(): Promise<void> {
+/**
+ * The camera as it is now, as a view to save: its value, as the edit writes it
+ * (two decimals, to know it again when the text comes back), and the slide.
+ * null, saying why, if there is none to save.
+ */
+function currentView(): { view: CameraView; rounded: NonNullable<typeof savedView>; index: number } | null {
   const L = lysark()
-  if (!L || saving) return
+  if (!L) return null
   const slide = L.engine.current
   if (!slide.scene) {
     showBanner('This slide has no 3D scene, so there is no camera view to save.')
-    return
+    return null
   }
   if (L.sceneManager.busy || L.sceneManager.activeSceneId !== slide.scene) {
     // the slide has changed but its scene is still being swapped in
-    showBanner('The scene is still loading; press V again in a moment.')
-    return
+    showBanner('The scene is still loading; try again in a moment.')
+    return null
   }
   const camera = L.sceneLayer.camera.position
   // mid-flight, the orbit target still holds the previous slide's point; the
@@ -360,20 +438,28 @@ async function saveView(): Promise<void> {
     center = anchorAt
   }
   const offset = camera.clone().sub(center)
-  const view: CameraView = { lookAt, offset: [offset.x, offset.y, offset.z] }
   const index = L.engine.currentIndex
-  // as the edit writes it (camera-edit.ts, two decimals), to know it again when the text comes back
-  const rounded = {
-    slide: index,
-    lookAt: typeof lookAt === 'string' ? lookAt : ([round2(lookAt[0]), round2(lookAt[1]), round2(lookAt[2])] as [number, number, number]),
-    offset: [round2(offset.x), round2(offset.y), round2(offset.z)] as [number, number, number],
+  return {
+    view: { lookAt, offset: [offset.x, offset.y, offset.z], ...(slide.effective.camera?.spring ? { spring: slide.effective.camera.spring } : {}) },
+    rounded: {
+      slide: index,
+      lookAt: typeof lookAt === 'string' ? lookAt : [round2(lookAt[0]), round2(lookAt[1]), round2(lookAt[2])],
+      offset: [round2(offset.x), round2(offset.y), round2(offset.z)],
+    },
+    index,
   }
+}
+
+async function saveView(): Promise<void> {
+  if (saving) return
+  const now = currentView()
+  if (!now) return
   // a slide that names a view (`camera: overview`) saves into that view; any other into the slide
-  const target = namedTarget(shownFiles, index)
+  const target = namedTarget(shownFiles, now.index)
   saving = true
   try {
-    if (target) await saveNamedView(target, view, rounded)
-    else await saveSlideView(index, view, rounded)
+    if (target) await saveNamedView(target, now.view, now.rounded)
+    else await saveSlideView(now.index, now.view, now.rounded)
   } finally {
     saving = false
   }
@@ -403,7 +489,7 @@ async function saveSlideView(index: number, view: CameraView, rounded: NonNullab
     showBanner(`The view was not saved: the slides would have an error:\n${broken}`)
     return
   }
-  savedView = rounded
+  savedView = { ...rounded, expect: { path: 'slides.md', text: next } }
   const result = await host.edit('Save camera view', [{ path: 'slides.md', version: file.version, ...change }])
   if (!result.ok) {
     savedView = null
@@ -448,7 +534,7 @@ async function saveNamedView(target: NamedTarget, view: CameraView, rounded: Non
   } catch {
     // the shown slides with the scene file as it is now don't compile: name none
   }
-  savedView = rounded
+  savedView = { ...rounded, expect: { path: target.path, text: next } }
   const result = await host.edit(`Save camera view '${target.view}'`, [{ path: target.path, version: file.version, ...change }])
   if (!result.ok) {
     savedView = null
@@ -472,10 +558,266 @@ function showSaved(text: string): void {
   savedShowing = true
 }
 
+// ---- Save view as… (Shift+V, Scene Actions…; docs/scene-files.md) ----------------
+
+/** the slides' cameras as the panel shows them (the running deck) */
+async function shownCameras(): Promise<unknown[]> {
+  const { default: deck } = await import('./deck-from-source')
+  return deck.slides.map((s) => s.effective.camera)
+}
+
+/** the Save view as… choices for the slide shown; null without a scene */
+async function choicesHere(): Promise<SaveAsChoices | null> {
+  const engine = lysark()?.engine
+  return engine ? saveAsChoices(shownFiles, engine.currentIndex, usersWith(await shownCameras())) : null
+}
+
+/**
+ * Save the camera view by a Save view as… choice: into the slide alone, into
+ * an existing view the slide then uses, or into a new view (and a new scene
+ * file, if the lecture has none for the slide's scene). One edit, in up to two
+ * files, applied only if neither changed since it was read.
+ */
+async function saveAs(choice: SaveAs, choices: SaveAsChoices): Promise<void> {
+  if (saving) return
+  const now = currentView()
+  if (!now) return
+  saving = true
+  try {
+    const read = await host.read(choices.exists ? ['slides.md', choices.path] : ['slides.md'], 'text')
+    const slides = read['slides.md']
+    const scene = choices.exists ? read[choices.path] : null
+    for (const [path, file] of [['slides.md', slides], [choices.path, scene]] as const) {
+      if (file && (typeof file.text !== 'string' || typeof file.version !== 'number')) {
+        showBanner(`The view was not saved: ${path} could not be read (${file.error ?? 'no text'}).`)
+        return
+      }
+    }
+    const plan = saveAsChanges(
+      shownFiles['slides.md'],
+      { slides: slides.text!, scene: scene?.text ?? null },
+      now.index,
+      choices,
+      choice,
+      now.view,
+    )
+    if ('problem' in plan) {
+      showBanner(`The view was not saved: ${plan.problem}`)
+      return
+    }
+    if (!plan.slides && !plan.scene && !plan.create) {
+      showBanner('Nothing to change: it is saved like that already', 'ok')
+      return
+    }
+    const apply = (text: string, change: { start: number; end: number; text: string } | null) =>
+      change ? text.slice(0, change.start) + change.text + text.slice(change.end) : text
+    const before: Record<string, string> = { ...shownFiles, 'slides.md': slides.text! }
+    if (scene) before[choices.path] = scene.text!
+    const after: Record<string, string> = { ...before, 'slides.md': apply(slides.text!, plan.slides) }
+    if (scene) after[choices.path] = apply(scene.text!, plan.scene)
+    if (plan.create) after[choices.path] = plan.create
+    const broken = problemWith(after)
+    if (broken && !problemWith(before)) {
+      showBanner(`The view was not saved: the slides would have an error:\n${broken}`)
+      return
+    }
+    const changes: HostChange[] = []
+    if (plan.slides) changes.push({ path: 'slides.md', version: slides.version!, ...plan.slides })
+    if (plan.scene) changes.push({ path: choices.path, version: scene!.version!, ...plan.scene })
+    if (plan.create) changes.push({ path: choices.path, create: plan.create })
+    // slides.md comes last when the edit also makes a file (VS Code reports the file first)
+    savedView = { ...now.rounded, expect: plan.slides ? { path: 'slides.md', text: after['slides.md'] } : { path: choices.path, text: after[choices.path] } }
+    const result = await host.edit('Save camera view as', changes)
+    if (!result.ok) {
+      savedView = null
+      showBanner(`The view was not saved: ${result.message ?? 'VS Code refused the edit'}`)
+      return
+    }
+    const n = now.index + 1
+    showSaved(
+      choice.kind === 'slide'
+        ? `Slide ${n} has its own camera view now`
+        : choice.kind === 'view'
+          ? `Slide ${n} uses the view '${choice.name}' now, changed to this camera in ${choices.path} (not saved yet)`
+          : plan.create
+            ? `New view '${choice.name}' in a new file, ${choices.path}; slide ${n} uses it`
+            : `New view '${choice.name}' in ${choices.path} (not saved yet); slide ${n} uses it`,
+    )
+  } finally {
+    saving = false
+  }
+}
+
+/** the Save view as… dialog, if open */
+let dialog: { close(): void } | null = null
+
+/**
+ * Shift+V: the panel's own dialog for Save view as… (VS Code's lists can't
+ * open from a key pressed in the panel; docs/editor-host.md). Arrow keys
+ * choose, Enter saves, Escape closes; the deck's keys wait meanwhile.
+ */
+async function openSaveAs(): Promise<void> {
+  if (dialog || saving || !currentView()) return
+  const choices = await choicesHere()
+  if (!choices || dialog) return
+  type Row = { label: string; detail: string; choice: SaveAs | 'new' }
+  const rows: Row[] = [
+    {
+      label: 'Only this slide',
+      detail: choices.current ? `its own camera, instead of the view '${choices.current}'` : 'its own camera, as V saves it',
+      choice: { kind: 'slide' },
+    },
+    ...choices.views.map((v) => ({
+      label: `The view '${v.name}'`,
+      detail:
+        (v.name === choices.current ? "this slide's view, as V saves it" : 'this slide uses it from now on') +
+        (v.users.length > 0 ? ` · slides ${listSlides(v.users)}` : ''),
+      choice: { kind: 'view', name: v.name } as SaveAs,
+    })),
+    { label: 'A new view', detail: choices.exists ? `in ${choices.path}` : `in a new file, ${choices.path}`, choice: 'new' },
+  ]
+  // what V doesn't do: the slide alone for a slide that names a view, otherwise a new view
+  let selected = choices.current ? 0 : rows.length - 1
+
+  const box = document.createElement('div')
+  box.setAttribute('role', 'dialog')
+  box.setAttribute('aria-label', 'Save this camera view')
+  box.style.cssText =
+    'position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:1002;width:min(520px,calc(100vw - 24px));' +
+    'max-height:calc(100vh - 56px);overflow:auto;box-sizing:border-box;' +
+    'background:rgba(var(--surface-rgb),0.97);color:var(--text);border:1px solid var(--border-soft);border-radius:10px;' +
+    'box-shadow:var(--shadow-text);font:14px/1.35 system-ui,sans-serif;padding:10px 10px 8px;outline:none'
+  const title = document.createElement('div')
+  title.textContent = 'Save this camera view'
+  title.style.cssText = 'font-weight:600;margin:0 4px 2px'
+  const keys = document.createElement('div')
+  keys.textContent = '↑ ↓ choose · Enter save · Esc cancel'
+  keys.style.cssText = 'color:var(--text-dim);font-size:12px;margin:0 4px 8px'
+  const list = document.createElement('div')
+  list.setAttribute('role', 'listbox')
+  list.setAttribute('aria-label', 'Where to save the camera view')
+  list.tabIndex = -1
+  list.style.outline = 'none'
+  const input = document.createElement('input')
+  input.placeholder = 'name, such as oversikt'
+  input.setAttribute('aria-label', 'Name of the new view')
+  input.spellcheck = false
+  // typing a name is choosing a new view
+  input.addEventListener('focus', () => {
+    if (rows[selected].choice !== 'new') select(rows.length - 1)
+  })
+  input.style.cssText =
+    'display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:3px 6px;border-radius:4px;font:inherit;' +
+    'background:var(--bg);color:var(--text);border:1px solid var(--border-soft)'
+  const problem = document.createElement('div')
+  problem.style.cssText = 'color:var(--bad);font-size:12px;margin:6px 4px 0;min-height:1em'
+  const rowEls = rows.map((row, i) => {
+    const el = document.createElement('div')
+    el.id = `lysark-save-as-${i}`
+    el.setAttribute('role', 'option')
+    el.style.cssText = 'padding:6px 8px;border-radius:6px;cursor:pointer'
+    const label = document.createElement('div')
+    label.textContent = row.label
+    const detail = document.createElement('div')
+    detail.textContent = row.detail
+    detail.style.cssText = 'color:var(--text-dim);font-size:12px'
+    el.append(label, detail)
+    // a left click chooses (on release, so pressing and moving away doesn't)
+    el.addEventListener('mousedown', (e) => {
+      if (e.target === input || e.button !== 0) return
+      e.preventDefault()
+      select(i)
+    })
+    el.addEventListener('click', (e) => {
+      if (e.target === input || e.button !== 0) return
+      if (row.choice !== 'new') void apply()
+    })
+    list.append(el)
+    return el
+  })
+  // the name field is under the list (an option's contents aren't fields to a screen reader)
+  input.setAttribute('aria-describedby', rowEls[rowEls.length - 1].id)
+  box.append(title, keys, list, input, problem)
+  // a tap here isn't a tap on the slide (src/main.ts goes to the next slide on one)
+  for (const type of ['pointerdown', 'pointerup'] as const) box.addEventListener(type, (e) => e.stopPropagation())
+  document.body.append(box)
+
+  function select(i: number): void {
+    selected = (i + rows.length) % rows.length
+    rowEls.forEach((el, k) => {
+      el.style.background = k === selected ? 'var(--surface-hi2)' : 'transparent'
+      el.style.boxShadow = k === selected ? 'inset 0 0 0 1px var(--accent)' : 'none'
+      el.setAttribute('aria-selected', String(k === selected))
+    })
+    list.setAttribute('aria-activedescendant', rowEls[selected].id)
+    rowEls[selected].scrollIntoView({ block: 'nearest' })
+    problem.textContent = ''
+    if (rows[selected].choice === 'new') {
+      input.focus()
+      input.scrollIntoView({ block: 'nearest' })
+    } else list.focus()
+  }
+  async function apply(): Promise<void> {
+    const row = rows[selected]
+    // the files may have changed while the dialog was open: choose against them as they are now
+    const now = await choicesHere()
+    if (!now) return close()
+    const say = (text: string) => {
+      problem.textContent = text[0].toUpperCase() + text.slice(1)
+    }
+    if (row.choice === 'new') {
+      const name = input.value.trim()
+      const wrong = viewNameProblem(name, now.views.map((v) => v.name))
+      if (wrong) {
+        say(wrong)
+        input.focus()
+        return
+      }
+      close()
+      return saveAs({ kind: 'new', name }, now)
+    }
+    const choice = row.choice
+    if (choice.kind === 'view' && !now.views.some((v) => v.name === choice.name)) {
+      say(`the view '${choice.name}' is no longer in ${now.path}; press Esc and Shift+V again`)
+      return
+    }
+    close()
+    return saveAs(choice, now)
+  }
+  // the dialog has the keys while open: arrows would change slides, and V
+  // save. Not VS Code's shortcuts (Ctrl+S, F1, …), which go on to VS Code
+  const onKey = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || /^F\d+$/.test(e.key)) return
+    e.stopImmediatePropagation()
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      close()
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      select(selected + (e.key === 'ArrowDown' ? 1 : -1))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      void apply()
+    }
+  }
+  const onSlide = () => close()
+  function close(): void {
+    window.removeEventListener('keydown', onKey, true)
+    window.removeEventListener('hashchange', onSlide)
+    box.remove()
+    dialog = null
+  }
+  window.addEventListener('keydown', onKey, true)
+  window.addEventListener('hashchange', onSlide)
+  dialog = { close }
+  select(selected)
+}
+
 window.addEventListener('keydown', (e) => {
-  if (e.key !== 'v' || e.ctrlKey || e.metaKey || e.altKey) return
+  if ((e.key !== 'v' && e.key !== 'V') || e.ctrlKey || e.metaKey || e.altKey) return
   if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return
-  void saveView()
+  if (e.shiftKey) void openSaveAs()
+  else void saveView()
 })
 
 window.addEventListener('hashchange', () => {

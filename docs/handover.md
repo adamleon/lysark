@@ -60,6 +60,13 @@ returning after another scene ran) didn't say what to do. Engine v2.5.1 (2026-11
 panel's hint starts "Ctrl+S in the text updates the preview", and those two errors name the
 slides, the line in slides.md and the fix.
 
+Step 3, Save view as… (Shift+V), is built and checked (2026-11-05), not yet released: engine
+v2.6.0, no extension change. The panel opens its own dialog (VS Code's lists may only open right
+after a click on the panel's buttons); Scene Actions… offers the same in VS Code's list. The
+proposal asks for it to be tried in github.dev before release (a two-file edit and its undo);
+the real-extension check already does that in VS Code for the web. Then tag v2.6.0 and Update
+engine. Next: step 4, named poses.
+
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
   HTML job could skip the install, and the offline check, when `lysark site` has
@@ -198,7 +205,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**210**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**228**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.

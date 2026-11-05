@@ -20,7 +20,8 @@
 // Code's default styles gone, a view computed on an older version refused, a
 // saved view written as one edit to the first slide's frontmatter and put into
 // the running deck, a camera-only change put in place, a named view saved into
-// its scene file and taken by the other slide that names it, a new text
+// its scene file and taken by the other slide that names it, Shift+V's
+// dialog saving a new view in a new scene file, a new text
 // accepted and shown after a reload, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
@@ -277,13 +278,25 @@ function createHost(lectureDir, lectureText) {
         host.typeBeforeNextEdit = false
         host.doc.version += 1
       }
+      // as the extension does: every change checked first, then all applied
       let result = { ok: true }
-      const change = message.changes?.[0]
-      const doc = docs.get(change?.path)
-      if (message.changes?.length !== 1 || !doc) result = { ok: false, message: 'only slides.md and scene files here' }
-      else if (change.version !== doc.version) result = { ok: false, message: `${change.path} changed meanwhile; try again` }
-      else {
-        docs.set(change.path, { text: doc.text.slice(0, change.start) + change.text + doc.text.slice(change.end), version: doc.version + 1 })
+      const changes = message.changes ?? []
+      for (const change of changes) {
+        const doc = docs.get(change.path)
+        if (typeof change.create === 'string') {
+          if (doc || !/^scenes\/[a-z][a-z0-9-]*\.yaml$/.test(change.path)) result = { ok: false, message: `can't create ${change.path}` }
+        } else if (!doc) result = { ok: false, message: 'only slides.md and scene files here' }
+        else if (change.version !== doc.version) result = { ok: false, message: `${change.path} changed meanwhile; try again` }
+      }
+      if (changes.length === 0) result = { ok: false, message: 'no changes' }
+      if (result.ok) {
+        for (const change of changes) {
+          if (typeof change.create === 'string') docs.set(change.path, { text: change.create, version: 1 })
+          else {
+            const doc = docs.get(change.path)
+            docs.set(change.path, { text: doc.text.slice(0, change.start) + change.text + doc.text.slice(change.end), version: doc.version + 1 })
+          }
+        }
       }
       host.edits.push({ message, result })
       return reply(result)
@@ -556,6 +569,87 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       lines.push(`V on slide ${first + 1} saved the view '${named.view}' in ${path}; slide ${second + 1}, which names it too, flies to ${JSON.stringify(saved.offset)}`)
     } else {
       lines.push('(the lecture has no view named by two slides, so saving a named view was not checked)')
+    }
+
+    // 2d. Shift+V, Save view as…, on a slide whose scene has no scene file: the
+    //     panel's own dialog (the deck's keys wait), a new view, saved as one
+    //     edit that names it on the slide and creates the scene file
+    const bare = (() => {
+      const lines2 = host.doc.text.replace(/\r\n/g, '\n').split('\n')
+      for (let n = 0; ; n++) {
+        const range = frontmatterLines(host.doc.text, n)
+        if (!range) return null
+        let fm
+        try {
+          fm = parseYaml(lines2.slice(range.from, range.to).join('\n'))
+        } catch {
+          continue
+        }
+        const scene = fm?.scene
+        if (typeof scene === 'string' && !host.docs.has(`scenes/${scene}.yaml`) && !host.docs.has(`scenes/${scene}.yml`)) return { slide: n, scene }
+      }
+    })()
+    if (bare) {
+      await toRuntime({ type: 'lysark:goto', slide: bare.slide })
+      const there = await waitFor(() =>
+        inPanel((w, slide) => {
+          const L = w.__lysark
+          return L?.engine.currentIndex === slide && !L.sceneManager.busy && !L.cameraCtl.active && L.sceneManager.activeSceneId === L.engine.current.scene
+        }, bare.slide),
+      )
+      if (!there) return fail(`the panel never settled on slide ${bare.slide + 1} (scene '${bare.scene}')`)
+      await inPanel((w) => {
+        w.__lysark.sceneLayer.camera.position.x += 0.25
+        w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'V', shiftKey: true }))
+      })
+      const opened = await waitFor(() => inPanel((w) => !!w.document.querySelector('[role="dialog"] input')), 20, 200)
+      if (!opened) return fail('Shift+V did not open the Save view as… dialog')
+      // while it is open, an arrow key doesn't move the deck (to the next slide,
+      // or the next step of this one), and V doesn't save
+      const editsBefore = host.edits.length
+      const stayed = await inPanel((w) => {
+        const E = w.__lysark.engine
+        const at = () => JSON.stringify([E.currentIndex, E.visibleChunks, w.location.hash])
+        const before = at()
+        // as a key press does: to the focused element, the dialog
+        const box = w.document.querySelector('[role="dialog"]')
+        box.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+        box.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'v', bubbles: true }))
+        return at() === before
+      })
+      await page.waitForTimeout(800)
+      if (!stayed) return fail('an arrow key moved the deck while the Save view as… dialog was open')
+      if (host.edits.length !== editsBefore) return fail('V saved a view while the Save view as… dialog was open')
+      const slidesBefore = host.doc.text
+      await inPanel((w) => {
+        const input = w.document.querySelector('[role="dialog"] input')
+        input.value = 'checked'
+        input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      })
+      const edit = await waitFor(async () => host.edits[editsBefore], 20, 300)
+      const path = `scenes/${bare.scene}.yaml`
+      const kinds = edit?.message.changes.map((c) => (typeof c.create === 'string' ? `create ${c.path}` : c.path)) ?? []
+      if (!edit?.result.ok || JSON.stringify(kinds) !== JSON.stringify(['slides.md', `create ${path}`])) {
+        return fail(`Save view as… a new view did not name it on the slide and create ${path}: ${JSON.stringify(edit ?? null)}`)
+      }
+      const created = parseYaml(host.docs.get(path).text)
+      if (created?.base !== bare.scene || !created?.views?.checked) return fail(`the new scene file is not right: ${host.docs.get(path).text}`)
+      const range = frontmatterLines(host.doc.text, bare.slide)
+      const fm = parseYaml(host.doc.text.replace(/\r\n/g, '\n').split('\n').slice(range.from, range.to).join('\n'))
+      if (fm.camera !== 'checked') return fail(`slide ${bare.slide + 1} doesn't name the new view: camera is ${JSON.stringify(fm.camera)}`)
+      // the extension sends the edited files, the way VS Code reports them: first
+      // the created file (with slides.md as last sent), then the edit's own text.
+      // The slide's camera is now the view, so only cameras changed
+      const between = await source(slidesBefore)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: between }, 10000))) return fail('the new scene file alone was not shown')
+      const named2 = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: named2 }, 10000))) return fail('the new view was not put into the running deck')
+      if (await page.evaluate((n) => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === n), named2)) {
+        return fail('saving a new view made the panel load afresh instead of updating in place')
+      }
+      lines.push(`Shift+V on slide ${bare.slide + 1}: the dialog held the keys, and a new view 'checked' was saved as one edit to slides.md and a new ${path}`)
+    } else {
+      lines.push('(every scene in the lecture has a scene file, so creating one was not checked)')
     }
 
     // 3. other new text is accepted; the extension loads the page afresh and sends it on 'ready'

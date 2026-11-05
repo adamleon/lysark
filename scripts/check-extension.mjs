@@ -43,6 +43,12 @@ function knowsNamedViews(editorDir) {
   return readdirSync(assets).some((f) => f.endsWith('.js') && readFileSync(join(assets, f), 'utf8').includes('names the camera view'))
 }
 
+/** true if the editor build has Save view as… (engine v2.6.0): its dialog's title is in its files */
+function knowsSaveAs(editorDir) {
+  const assets = join(editorDir, 'assets')
+  return readdirSync(assets).some((f) => f.endsWith('.js') && readFileSync(join(assets, f), 'utf8').includes('Save this camera view'))
+}
+
 /**
  * The demo's slides.md with every `camera: <name>` written out as the view's
  * values, for an editor that doesn't know named views.
@@ -131,7 +137,7 @@ process.on('SIGINT', () => {
 })
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, lines) {
+async function drive(page, protocol, namedViews, saveAs, lines) {
   let ok = true
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
@@ -271,6 +277,69 @@ async function drive(page, protocol, namedViews, lines) {
         now[0] !== old[0] && now[0] === now[1],
         `V on a slide that names a view saved it in scenes/arm.yaml, and both slides that name it took it: ${now[0]}`,
       )
+
+      // Shift+V, Save view as… a new view on the demo's first pendulum slide (7),
+      // whose scene has no scene file: one edit to slides.md that also creates
+      // scenes/pendulum.yaml; undoing it takes both back
+      if (!saveAs) {
+        lines.push('(Save view as… not checked: this editor has none)')
+        return ok
+      }
+      await frame.evaluate(() => {
+        window.__received = []
+        window.addEventListener('message', (e) => window.__received.push(e.data))
+        location.hash = '#7'
+      })
+      const onPendulum = await frame
+        .waitForFunction(() => {
+          const L = window.__lysark
+          return L.engine.currentIndex === 6 && !L.sceneManager.busy && !L.cameraCtl.active && L.sceneManager.activeSceneId === 'pendulum'
+        }, null, { timeout: 20_000 })
+        .then(() => true, () => false)
+      check(onPendulum, 'the panel went to slide 7, whose scene has no scene file')
+      await frame.evaluate(() => {
+        window.__lysark.sceneLayer.camera.position.x += 0.3
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'V', shiftKey: true }))
+      })
+      const dialogInput = await frame
+        .waitForSelector('[role="dialog"] input', { timeout: 10_000 })
+        .then(() => true, () => false)
+      check(dialogInput, 'Shift+V opened the Save view as… dialog')
+      await frame.evaluate(() => {
+        const input = document.querySelector('[role="dialog"] input')
+        input.value = 'checked'
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      })
+      await page.waitForTimeout(3500)
+      frame = (await panelFrame()) ?? frame
+      const saved = await frame.evaluate(() => ({
+        camera: JSON.stringify(window.__lysark.engine.opts.slides[6].effective.camera),
+        files: (window.__received ?? []).filter((m) => m?.type === 'lysark:source').map((m) => Object.keys(m.files)),
+      }))
+      // the new file in the Explorer (its scenes/ folder is open from the step above)
+      const pendulumFile = () => page.locator('.explorer-folders-view .monaco-list-row', { hasText: 'pendulum.yaml' }).count()
+      check(
+        saved.files.some((keys) => keys.includes('scenes/pendulum.yaml')) && saved.camera !== undefined && (await pendulumFile()) > 0,
+        `a new view saved by Shift+V created scenes/pendulum.yaml with slides.md, updating the panel in place; slide 7 flies to it: ${saved.camera}`,
+      )
+
+      // undo it in slides.md: VS Code may ask whether to undo in both files
+      await tab('slides.md').click()
+      await page.waitForTimeout(400)
+      await page.keyboard.press('Control+Z')
+      const dialog = page.locator('.monaco-dialog-box')
+      const asked = await dialog.isVisible({ timeout: 4000 }).catch(() => false)
+      const question = asked ? ((await dialog.textContent()) ?? '').replace(/\s+/g, ' ').trim() : ''
+      if (asked) await page.locator('.monaco-dialog-box .monaco-button').first().click()
+      await page.waitForTimeout(4000)
+      frame = (await panelFrame()) ?? frame
+      const undoneCamera = await frame.evaluate(() => JSON.stringify(window.__lysark.engine.opts.slides[6].effective.camera))
+      const fileLeft = await pendulumFile()
+      check(
+        undoneCamera !== saved.camera && fileLeft === 0,
+        `undoing it in slides.md took both back: slide 7's camera ${undoneCamera}, scenes/pendulum.yaml ${fileLeft === 0 ? 'gone' : 'still there'}` +
+          (asked ? `; VS Code asked "${question.slice(0, 160)}" (first button taken)` : '; VS Code asked nothing'),
+      )
     }
   } else {
     await tab('Lysark').click()
@@ -299,7 +368,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, lines)
+    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

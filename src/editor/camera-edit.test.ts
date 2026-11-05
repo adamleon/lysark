@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { setCameraView, setNamedView } from './camera-edit'
+import { addNamedView, newSceneFile, setCameraName, setCameraView, setNamedView, viewNameProblem } from './camera-edit'
+import { readSceneFiles } from '../compiler/scene-files'
 import { compileSlides } from '../compiler/compile-slides'
 
 const view = { lookAt: [0.1234, 0.5, -0] as [number, number, number], offset: [1.5, 0.75, 2] as [number, number, number] }
@@ -141,5 +142,129 @@ describe('lists with tags', () => {
     const src = '---\nscene: arm\ncamera:\n  lookAt:\n    - !!int 1\n    - 2\n    - 3\n  offset: [0.7, 1.2, 3.6]\n---\nx'
     const out = setCameraView(src, 0, { lookAt: [0.12, 0.5, 0], offset: [1.5, 0.75, 2] })
     expect(compileSlides(out)[0].effective.camera).toEqual({ lookAt: [0.12, 0.5, 0], offset: [1.5, 0.75, 2] })
+  })
+})
+
+describe('save view as (docs/scene-files.md)', () => {
+  const v = { lookAt: [0.1, 0.5, 0] as [number, number, number], offset: [1.234, 0.5, 2] as [number, number, number] }
+  const slides = (camera: string) => `---\nid: a\nscene: arm\n${camera}# note\n---\n# A\n---\nscene: arm\n---\n# B\n`
+
+  it('gives a slide that names a view a block of its own ("only this slide")', () => {
+    const out = setCameraView(slides('camera: overview   # the usual\n'), 0, v)
+    expect(out).toBe(slides('camera:\n  lookAt: [0.1, 0.5, 0]\n  offset: [1.23, 0.5, 2]\n'))
+  })
+
+  it('makes a slide use a view by name, replacing a block or another name, or adding the line', () => {
+    expect(setCameraName(slides('camera:\n  lookAt: [0, 0, 0]\n  offset: [1, 1, 1]\n'), 0, 'nært')).toBe(slides('camera: nært\n'))
+    expect(setCameraName(slides('camera: { offset: [1, 1, 1] }   # flow\n'), 0, 'nært')).toBe(slides('camera: nært   # flow\n'))
+    expect(setCameraName(slides('camera: overview\n'), 0, 'nært')).toBe(slides('camera: nært\n'))
+    expect(setCameraName(slides(''), 1, 'nært')).toBe(slides('').replace('---\nscene: arm\n---\n# B', '---\nscene: arm\ncamera: nært\n---\n# B'))
+    const windows = slides('camera:\n  offset: [1, 1, 1]\n').replace(/\n/g, '\r\n')
+    expect(setCameraName(windows, 0, 'nært')).toBe(slides('camera: nært\n').replace(/\n/g, '\r\n'))
+  })
+
+  it('adds a view to a scene file, written like its other views', () => {
+    const scene = 'base: arm   # the arm\n\nviews:\n    overview:      # wide\n        lookAt: [0, 0, 0]\n        offset: [1, 1, 1]\n# end\n'
+    const out = addNamedView(scene, 'nært', v)
+    expect(out).toBe(
+      'base: arm   # the arm\n\nviews:\n    overview:      # wide\n        lookAt: [0, 0, 0]\n        offset: [1, 1, 1]\n' +
+        '    nært:\n        lookAt: [0.1, 0.5, 0]\n        offset: [1.23, 0.5, 2]\n# end\n',
+    )
+    expect(readSceneFiles({ 'scenes/arm.yaml': out }).get('arm')!.views.get('nært')!.camera).toEqual({ lookAt: [0.1, 0.5, 0], offset: [1.23, 0.5, 2] })
+  })
+
+  it('adds views: when the file has none, or fills an empty one, keeping Windows line endings', () => {
+    expect(addNamedView('base: arm\n', 'a', v)).toBe('base: arm\n\nviews:\n  a:\n    lookAt: [0.1, 0.5, 0]\n    offset: [1.23, 0.5, 2]\n')
+    expect(addNamedView('base: arm\r\nviews:\r\n# later\r\n', 'a', { lookAt: 'tool0', offset: [1, 1, 1] })).toBe(
+      'base: arm\r\nviews:\r\n  a:\r\n    lookAt: tool0\r\n    offset: [1, 1, 1]\r\n# later\r\n',
+    )
+    expect(addNamedView('base: arm\nviews: { o: { lookAt: [0, 0, 0], offset: [1, 1, 1] } }\n', 'a', v)).toBe(
+      'base: arm\nviews: { o: { lookAt: [0, 0, 0], offset: [1, 1, 1] }, a: { lookAt: [0.1, 0.5, 0], offset: [1.23, 0.5, 2] } }\n',
+    )
+    expect(() => addNamedView('base: arm\nviews:\n  a:\n    lookAt: [0, 0, 0]\n    offset: [1, 1, 1]\n', 'a', v)).toThrow(/already has a view 'a'/)
+  })
+
+  it('writes a new scene file the compiler reads', () => {
+    const text = newSceneFile('pendulum', 'nært', { lookAt: 'bob', offset: [0.9, 0.1, 1.3] })
+    const file = readSceneFiles({ 'scenes/pendulum.yaml': text }).get('pendulum')!
+    expect(file.base).toBe('pendulum')
+    expect(file.views.get('nært')!.camera).toEqual({ lookAt: 'bob', offset: [0.9, 0.1, 1.3] })
+  })
+
+  it('takes one-word view names that YAML reads as themselves', () => {
+    expect(viewNameProblem('nært-2', ['a'])).toBeNull()
+    expect(viewNameProblem('', [])).toMatch(/write a name/)
+    expect(viewNameProblem('two words', [])).toMatch(/one word/)
+    expect(viewNameProblem('2nd', [])).toMatch(/starting with a letter/)
+    expect(viewNameProblem('Yes', [])).toMatch(/reads as a value/)
+    expect(viewNameProblem('a', ['a'])).toMatch(/already a view called 'a'/)
+  })
+})
+
+describe('save view as, review cases', () => {
+  const files = (_slides: string) => ({ 'scenes/agilus.yaml': 'base: agilus\nviews:\n  top:\n    lookAt: tcp\n    offset: [1, 1, 1]\n' })
+  it('keeps an anchor when a slide that names a view gets its own camera', () => {
+    const slides =
+      '---\nscene: agilus\ncamera:\n  lookAt: [0, 0, 0]\n  offset: [5, 5, 5]\n---\n# A\n' +
+      '---\nscene: agilus\ncamera: top\n---\n# B\n' +
+      '---\nscene: agilus\n---\n# C\n'
+    const out = setCameraView(slides, 1, { lookAt: 'tcp', offset: [0.4, 0.2, 0.5] })
+    const compiled = compileSlides(out, files(out))
+    expect(compiled[1].effective.camera).toEqual({ lookAt: 'tcp', offset: [0.4, 0.2, 0.5] })
+    expect(compiled[2].effective.camera).toEqual({ lookAt: 'tcp', offset: [0.4, 0.2, 0.5] })
+  })
+
+  it('replaces a name written on the next line, or as a block scalar', () => {
+    for (const camera of ['camera:\n  top\n', 'camera: >-\n  top\n']) {
+      const out = setCameraView(`---\nscene: agilus\n${camera}joints: {}\n---\n# B\n`, 0, { lookAt: [0, 0, 0], offset: [1, 2, 3] })
+      expect(out).toBe('---\nscene: agilus\ncamera:\n  lookAt: [0, 0, 0]\n  offset: [1, 2, 3]\njoints: {}\n---\n# B\n')
+    }
+  })
+
+  it('writes a view name that YAML would misread in quotes', () => {
+    const out = setCameraName('---\nscene: agilus\n---\n# B\n', 0, '45')
+    expect(out).toBe('---\nscene: agilus\ncamera: "45"\n---\n# B\n')
+    expect(setCameraName('---\nscene: agilus\n---\n# B\n', 0, 'x #1')).toContain('camera: "x #1"')
+  })
+
+  it('fills views: ~ or views: null, keeping a comment', () => {
+    const v = { lookAt: [0, 0, 0] as [number, number, number], offset: [1, 1, 1] as [number, number, number] }
+    for (const text of ['base: agilus\nviews: ~\n', 'base: agilus\nviews: null   # none yet\n']) {
+      const out = addNamedView(text, 'ny', v)
+      expect(readSceneFiles({ 'scenes/agilus.yaml': out }).get('agilus')!.views.get('ny')!.camera).toEqual({ lookAt: [0, 0, 0], offset: [1, 1, 1] })
+    }
+    expect(addNamedView('base: agilus\nviews: null   # none yet\n', 'ny', v)).toContain('views:   # none yet\n  ny:\n')
+  })
+
+  it('leaves comment lines under the last view with it', () => {
+    const scene = 'views:\n  a:\n    lookAt: tcp\n    offset: [1, 1, 1]\n    # spring: { omega: 3 }\n\nbase: agilus\n'
+    const out = addNamedView(scene, 'ny', { lookAt: [0, 0, 0], offset: [2, 2, 2] })
+    expect(out).toBe(
+      'views:\n  a:\n    lookAt: tcp\n    offset: [1, 1, 1]\n    # spring: { omega: 3 }\n  ny:\n    lookAt: [0, 0, 0]\n    offset: [2, 2, 2]\n\nbase: agilus\n',
+    )
+  })
+})
+
+describe('save view as, second review', () => {
+  const scene = 'base: arm\nviews:\n  oversikt:\n    lookAt: [0, 0.5, 0]\n    offset: [2, 2, 2]\n  verktøy:\n    lookAt: gripper\n    offset: [1, 1, 1]\n'
+
+  it("writes an anchor into another view, replacing that view's lookAt", () => {
+    const out = setNamedView(scene, 'oversikt', { lookAt: 'gripper', offset: [0.5, 0.5, 0.5] })
+    expect(readSceneFiles({ 'scenes/arm.yaml': out }).get('arm')!.views.get('oversikt')!.camera).toEqual({ lookAt: 'gripper', offset: [0.5, 0.5, 0.5] })
+    // the view that already looks at it keeps its lookAt as written
+    expect(setNamedView(scene, 'verktøy', { lookAt: 'gripper', offset: [2, 1, 1] })).toBe(scene.replace('offset: [1, 1, 1]', 'offset: [2, 1, 1]'))
+  })
+
+  it("gives a new view the slide's spring, so the slide flies as before", () => {
+    const v = { lookAt: [0, 0.45, 0] as [number, number, number], offset: [2.2, 1.3, 2.2] as [number, number, number], spring: { omega: 4, zeta: 0.5 } }
+    const added = addNamedView(scene, 'demping', v)
+    expect(readSceneFiles({ 'scenes/arm.yaml': added }).get('arm')!.views.get('demping')!.camera).toEqual({
+      lookAt: [0, 0.45, 0],
+      offset: [2.2, 1.3, 2.2],
+      spring: { omega: 4, zeta: 0.5 },
+    })
+    expect(newSceneFile('arm', 'demping', v)).toContain('    spring: { omega: 4, zeta: 0.5 }\n')
+    // V and setNamedView never write a spring
+    expect(setNamedView(scene, 'oversikt', v)).not.toContain('spring')
   })
 })

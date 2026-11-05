@@ -90,11 +90,29 @@ across, as within one scene.
   hint at the top of the panel says where V will write, and which slides fly to that view, before
   you press it.
 - **V on a slide with its own `camera:` block, or none,** writes into the slide, as before.
-- To give one slide its own view instead, replace its `camera: <name>` with a `camera:` block. (In a
-  later step, Shift+V offers "only this slide", and saving a new named view.)
-- The change is an ordinary unsaved change in the scene file, usually with no editor open on it:
-  the panel says "not saved yet". Save it (File > Save All; github.dev saves by itself after a
-  moment), and it shows in Source Control. Ctrl+Z in the file undoes it.
+- **Shift+V, "Save view as…"** (from engine v2.6.0) opens a small list in the panel. ↑ and ↓ choose,
+  Enter saves, Esc closes:
+  - **Only this slide:** the slide gets a `camera:` block of its own (`lookAt` and `offset`) in
+    place of the name it had. Slides after it without a `camera:` of their own carry the block on,
+    so they move with it. The view's spring isn't copied: the block flies with the spring carried
+    from earlier slides, or the default.
+  - **The view 'X'**, for each view in the scene file, with the slides that fly to it: the camera
+    goes into that view, and the slide says `camera: X` from now on. Every slide that uses X
+    changes with it. The slide then flies as the view does (its spring, or the default); a spring
+    the slide had of its own goes with its old `camera:` block.
+  - **A new view:** type its name: one word of letters (æ, ø and å too), digits, - and _, starting
+    with a letter, and not a word YAML reads as a value (true, false, null, yes, no, on, off, y, n).
+    It goes into the scene file, with the slide's spring if it had one (so it flies as before),
+    and the slide says `camera: <name>`. If the lecture has no scene file for the slide's scene
+    yet, it makes one, `scenes/<scene>.yaml`, with `base:` set.
+
+  Scene Actions… (the list button on the panel's title bar) offers the same, in VS Code's list.
+- The change is an ordinary unsaved change, usually in a scene file with no editor open on it: the
+  panel says "not saved yet". Save it (File > Save All; github.dev saves by itself after a moment),
+  and it shows in Source Control. A new scene file is written at once; the slide's `camera:` line
+  in slides.md is then the unsaved part.
+- **Ctrl+Z** in the file undoes it. A Save view as… that changed slides.md and a scene file, or made
+  a new one, is undone in both with one Ctrl+Z in slides.md, the new file included.
 - Saving a scene file with Ctrl+S, or creating or deleting one in VS Code, updates the panel.
 
 ## When something is wrong
@@ -136,5 +154,3 @@ sends, reads and edits scene files.
 
 - Named poses (`joints: q0`, `from: q0`), step 4; posing the robot in the panel, step 5.
 - Objects (tables, workpieces, frames), steps 6 and 7; models from `assets/`, steps 8 and 9.
-- Shift+V, "Save view as…" (only this slide, an existing view, a new view, creating the scene
-  file), step 3.

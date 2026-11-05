@@ -1,7 +1,8 @@
 import { parse as parseYaml } from 'yaml'
 import { compileLecture } from '../compiler/compile-slides'
+import { readSceneFiles } from '../compiler/scene-files'
 import { slideRanges, splitLines } from '../compiler/slide-ranges'
-import { setCameraView, setNamedView, type CameraView } from './camera-edit'
+import { addNamedView, newSceneFile, setCameraName, setCameraView, setNamedView, viewNameProblem, type CameraView } from './camera-edit'
 import { matchSlide, singleEdit } from './slide-match'
 
 /**
@@ -101,4 +102,91 @@ export function namedTarget(files: Record<string, string>, index: number): Named
   if (!path) return null
   const users = heads.flatMap((h, i) => (h.scene === head.scene && h.camera === head.camera ? [i] : []))
   return { view: head.camera, path, users }
+}
+
+// ---- Save view as… (Shift+V, docs/scene-files.md) ---------------------------------
+
+/** what Save view as… can do on a slide */
+export interface SaveAsChoices {
+  /** the scene the slide names in `scene:` */
+  scene: string
+  /** its scene file, or where a new one goes */
+  path: string
+  /** the lecture has that scene file */
+  exists: boolean
+  /** the view the slide names, if any */
+  current: string | null
+  /** the scene file's views, with the slides (0-based) that fly to each */
+  views: Array<{ name: string; users: number[] }>
+}
+
+/**
+ * The choices for slide `index` of `files['slides.md']` (the files the panel
+ * shows); `users` gives the slides that fly to a view (viewUsers, which the
+ * runtime keeps per text). null if the slide has no scene.
+ */
+export function saveAsChoices(
+  files: Record<string, string>,
+  index: number,
+  users: (target: NamedTarget) => number[],
+): SaveAsChoices | null {
+  const head = slideHeads(files['slides.md'] ?? '')[index]
+  if (!head || typeof head.scene !== 'string') return null
+  const scene = head.scene
+  const path = [`scenes/${scene}.yaml`, `scenes/${scene}.yml`].find((p) => typeof files[p] === 'string')
+  const current = typeof head.camera === 'string' ? head.camera : null
+  if (!path) return { scene, path: `scenes/${scene}.yaml`, exists: false, current: null, views: [] }
+  let names: string[] = []
+  try {
+    names = [...(readSceneFiles({ [path]: files[path] }).get(scene)?.views.keys() ?? [])]
+  } catch {
+    // a scene file with an error: no views to offer; a new view will say why
+  }
+  return { scene, path, exists: true, current, views: names.map((name) => ({ name, users: users({ view: name, path, users: [] }) })) }
+}
+
+/** a Save view as… choice: the slide alone, an existing view, or a new view */
+export type SaveAs = { kind: 'slide' } | { kind: 'view'; name: string } | { kind: 'new'; name: string }
+
+/** the changes for a choice: to slides.md, and to the scene file, or the scene file to create */
+export interface SaveAsChanges {
+  slides: Change | null
+  scene: Change | null
+  create: string | null
+}
+
+/**
+ * The changes that save `view` by `choice` for slide `slide` of `shown` (the
+ * slides.md the panel shows), computed on the files as they are now in VS
+ * Code: `slides`, and the scene file's text (null if there is none).
+ */
+export function saveAsChanges(
+  shown: string,
+  current: { slides: string; scene: string | null },
+  slide: number,
+  choices: SaveAsChoices,
+  choice: SaveAs,
+  view: CameraView,
+): SaveAsChanges | { problem: string } {
+  const index = matchSlide(shown, current.slides, slide)
+  if (index < 0) {
+    return { problem: 'that slide has been edited since the preview last updated. Save the file (Ctrl+S), then try again.' }
+  }
+  try {
+    if (choice.kind === 'slide') {
+      return { slides: singleEdit(current.slides, setCameraView(current.slides, index, view)), scene: null, create: null }
+    }
+    const slides = singleEdit(current.slides, setCameraName(current.slides, index, choice.name))
+    if (choice.kind === 'view') {
+      if (current.scene === null) return { problem: `${choices.path} is gone; save the file (Ctrl+S) and try again` }
+      return { slides, scene: singleEdit(current.scene, setNamedView(current.scene, choice.name, view)), create: null }
+    }
+    const names = choices.views.map((v) => v.name)
+    const problem = viewNameProblem(choice.name, names)
+    if (problem) return { problem }
+    if (current.scene === null) return { slides, scene: null, create: newSceneFile(choices.scene, choice.name, view) }
+    return { slides, scene: singleEdit(current.scene, addNamedView(current.scene, choice.name, view)), create: null }
+  } catch (err) {
+    return { problem: String((err as Error)?.message ?? err) }
+  }
 }
