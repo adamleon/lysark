@@ -65,7 +65,19 @@ v2.6.0, no extension change. The panel opens its own dialog (VS Code's lists may
 after a click on the panel's buttons); Scene Actions… offers the same in VS Code's list. The
 proposal asks for it to be tried in github.dev before release (a two-file edit and its undo);
 the real-extension check already does that in VS Code for the web. Then tag v2.6.0 and Update
-engine. Next: step 4, named poses.
+engine.
+
+Step 4, named poses, is built and checked (2026-11-06), not yet released: engine v2.7.0, no
+extension change. `poses:` in a scene file (a q list in joint order, or a mapping of some
+joints), used as `joints: <name>` and a trajectory's `from:`/`to:`; the build checks a list's
+length and the joint limits against src/scenes/joints.ts, a table of each scene's joints that a
+test keeps in step with the URDF files and the pendulum scene's constants. Next: step 5, posing the robot in the panel.
+
+**Releases wait (2026-11-06):** GitHub Actions don't start on the author's account (the
+education plan expired; renewal pending), so Update engine and Publish lectures can't run, and
+engine CI doesn't run on pushes. Until then every push is checked locally first (vitest, the
+student-file check, check-editor in Chromium and Firefox, check-extension). v2.6.0 is not tagged
+yet: tag it on the step-3 commit (20675c8) and v2.7.0 on step 4's, once Actions run again.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -205,7 +217,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**228**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**237**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.

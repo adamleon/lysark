@@ -473,6 +473,12 @@ HTTPS server.
   creating `scenes/<scene>.yaml` when the lecture has no scene file for that slide's scene. One edit across slides.md and the scene
   file; one Ctrl+Z undoes both (checked with the real extension in VS Code for the web). Engine
   v2.6.0, no extension change. [scene-files.md](scene-files.md).
+- Scene files, step 4 (2026-11-06, built, not yet released): named poses in the scene file
+  (`poses:`, a q list in joint order or a mapping of some joints), used as `joints: <name>` and
+  as a trajectory's `from:`/`to:`. The build checks a list's length and the robot's joint limits
+  (a table of each scene's joints, src/scenes/joints.ts, checked against the URDF files and the
+  pendulum scene's constants). Engine
+  v2.7.0, no extension change. [scene-files.md](scene-files.md).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).

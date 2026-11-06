@@ -2,6 +2,7 @@ import MarkdownIt from 'markdown-it'
 import katex from 'katex'
 import { isMap, isScalar, LineCounter, parseDocument, parse as parseYaml, type Pair } from 'yaml'
 import { mergeCameraSpec } from '../engine/camera-merge'
+import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
 import { readSceneFiles, type SceneFile } from './scene-files'
 import { slideRanges, splitLines } from './slide-ranges'
@@ -67,9 +68,17 @@ function splitSlides(source: string): RawSlide[] {
       for (const item of doc.contents.items as Pair[]) {
         const key = item.key as { value?: unknown; range?: [number, number, number] } | null
         if (isScalar(key) && key.range) keyLines.set(String(key.value), counter.linePos(key.range[0]).line)
+        // a trajectory's from: and to: may name poses; their errors point at their own lines
+        if (isScalar(key) && key.value === 'trajectory' && isMap(item.value)) {
+          for (const end of item.value.items as Pair[]) {
+            const k = end.key as { value?: unknown; range?: [number, number, number] } | null
+            if (isScalar(k) && k.range) keyLines.set(`trajectory.${String(k.value)}`, counter.linePos(k.range[0]).line)
+          }
+        }
       }
     }
-    const lineOf = (key: string) => r.yamlStart + (keyLines.get(key) ?? 1)
+    // a nested key not written (or not found) falls back to its top-level key's line
+    const lineOf = (key: string) => r.yamlStart + (keyLines.get(key) ?? keyLines.get(key.split('.')[0]) ?? 1)
     return { frontmatter: frontmatter as Record<string, unknown>, body: lines.slice(r.bodyStart, r.bodyEnd).join('\n'), lineOf }
   })
 }
@@ -233,22 +242,27 @@ function validateCamera(raw: unknown, slideNo: number): CameraTargetSpec | undef
   return cam as CameraTargetSpec
 }
 
-/** the camera of view `name`, for a slide in scene `sceneName`, or an error saying what to do */
-function namedView(
+/**
+ * What a slide's name stands for: a camera view, or a pose, from the lecture's
+ * scene file for the slide's scene; or an error that says what to do.
+ */
+function named<T>(
+  kind: 'view' | 'pose',
   name: string,
   sceneName: string,
   file: SceneFile | undefined,
   scenes: Map<string, SceneFile>,
   slideNo: number,
   line: number,
-): CameraTargetSpec {
+): T {
   const where = `slides.md, line ${line}: slide ${slideNo}`
+  const what = kind === 'view' ? `the camera view '${name}'` : `the pose '${name}'`
   if (!file && !(SCENE_NAMES as readonly string[]).includes(sceneName)) {
     // not a scene at all: most likely a typo in `scene:`
     const names = [...new Set<string>([...scenes.keys(), ...SCENE_NAMES])]
     const guess = closest(sceneName, names)
     throw new Error(
-      `${where} names the camera view '${name}' in scene '${sceneName}', which is neither one of the lecture's scene files ` +
+      `${where} names ${what} in scene '${sceneName}', which is neither one of the lecture's scene files ` +
         `nor an engine scene. ` +
         (guess ? `Did you mean '${guess}'? ` : '') +
         `Scenes: ${names.join(', ')}.`,
@@ -256,24 +270,30 @@ function namedView(
   }
   if (!file) {
     const others = [...scenes.values()].map((f) => `${f.path} (scene: ${f.name})`)
+    const joints = SCENE_JOINTS[sceneName as (typeof SCENE_NAMES)[number]] ?? []
+    const example =
+      kind === 'view'
+        ? `views:\n  ${name}:\n    lookAt: [0, 0.5, 0]\n    offset: [1.5, 1, 1.5]`
+        : `poses:\n  ${name}: [${joints.map(() => '0').join(', ')}]   # ${joints.map((j) => j.name).join(', ')}`
     throw new Error(
-      `${where} names the camera view '${name}', but the lecture has no scenes/${sceneName}.yaml to find it in. ` +
-        `Create scenes/${sceneName}.yaml in the lecture folder with:\n` +
-        `base: ${sceneName}\nviews:\n  ${name}:\n    lookAt: [0, 0.5, 0]\n    offset: [1.5, 1, 1.5]` +
+      `${where} names ${what}, but the lecture has no scenes/${sceneName}.yaml to find it in. ` +
+        `Create scenes/${sceneName}.yaml in the lecture folder with:\nbase: ${sceneName}\n${example}` +
         (others.length > 0 ? `\n(The lecture's scene files: ${others.join(', ')}.)` : ''),
     )
   }
-  const view = file.views.get(name)
-  if (!view) {
-    const names = [...file.views.keys()]
+  const map: Map<string, unknown> = kind === 'view' ? file.views : file.poses
+  const found = map.get(name) as { camera?: unknown; joints?: unknown } | undefined
+  if (!found) {
+    const names = [...map.keys()]
     const guess = closest(name, names)
+    const list = kind === 'view' ? 'views' : 'poses'
     throw new Error(
-      `${where} names the camera view '${name}', which ${file.path} doesn't have. ` +
+      `${where} names ${what}, which ${file.path} doesn't have. ` +
         (guess ? `Did you mean '${guess}'? ` : '') +
-        (names.length > 0 ? `Its views: ${names.join(', ')}.` : `It has no views yet; add them under 'views:'.`),
+        (names.length > 0 ? `Its ${list}: ${names.join(', ')}.` : `It has no ${list} yet; add them under '${list}:'.`),
     )
   }
-  return view.camera
+  return (kind === 'view' ? found.camera : found.joints) as T
 }
 
 const PLOT_FIELDS = ['measured', 'setpoint', 'error']
@@ -854,10 +874,18 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
         throw new Error(`slides: scene-less slide ${slideNo} cannot declare joints, camera, widgets, anchored, idle, or trajectory (spec §3)`)
       }
     } else {
-      Object.assign(joints, validateJoints(frontmatter.joints, slideNo))
+      // a named pose sets the joints it lists, as a `joints:` block does (docs/scene-files.md)
+      Object.assign(
+        joints,
+        typeof frontmatter.joints === 'string'
+          ? named<Record<string, number>>('pose', frontmatter.joints, frontmatter.scene as string, sceneFile, scenes, slideNo, lineOf('joints'))
+          : validateJoints(frontmatter.joints, slideNo),
+      )
       if (typeof frontmatter.camera === 'string') {
         // a named view is the whole camera: it replaces what the slide carried (docs/scene-files.md)
-        camera = structuredClone(namedView(frontmatter.camera, frontmatter.scene as string, sceneFile, scenes, slideNo, lineOf('camera')))
+        camera = structuredClone(
+          named<CameraTargetSpec>('view', frontmatter.camera, frontmatter.scene as string, sceneFile, scenes, slideNo, lineOf('camera')),
+        )
       } else {
         camera = mergeCameraSpec(camera, validateCamera(frontmatter.camera, slideNo))
       }
@@ -865,7 +893,36 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
       if (camera) effective.camera = structuredClone(camera)
       anchored = validateAnchored(frontmatter.anchored, slideNo)
       idle = validateIdle(frontmatter.idle, slideNo)
-      trajectory = validateTrajectory(frontmatter.trajectory, slideNo)
+      // `from: q0`, `to: qf`: named poses, as the joints they set
+      let rawTrajectory = frontmatter.trajectory
+      if (isMapping(rawTrajectory)) {
+        rawTrajectory = { ...rawTrajectory }
+        const poseNames: Partial<Record<'from' | 'to', string>> = {}
+        for (const end of ['from', 'to'] as const) {
+          const value = (rawTrajectory as Record<string, unknown>)[end]
+          if (typeof value === 'string') {
+            poseNames[end] = value
+            ;(rawTrajectory as Record<string, unknown>)[end] = {
+              ...named<Record<string, number>>('pose', value, frontmatter.scene as string, sceneFile, scenes, slideNo, lineOf(`trajectory.${end}`)),
+            }
+          }
+        }
+        // both ends must set the same joints; with a pose at either end, say which joints each sets
+        const { from, to } = rawTrajectory as Record<string, unknown>
+        if ((poseNames.from !== undefined || poseNames.to !== undefined) && isMapping(from) && isMapping(to)) {
+          const fromJoints = Object.keys(from)
+          const toJoints = Object.keys(to)
+          if (fromJoints.length !== toJoints.length || fromJoints.some((joint) => !(joint in to))) {
+            const sets = (end: 'from' | 'to', joints: string[]) =>
+              `'${end}'${poseNames[end] !== undefined ? ` (the pose '${poseNames[end]}')` : ''} sets ${joints.join(', ')}`
+            throw new Error(
+              `slides.md, line ${lineOf('trajectory')}: slide ${slideNo} trajectory ${sets('from', fromJoints)}, ` +
+                `but ${sets('to', toJoints)}. Both ends must set the same joints: two list poses always do.`,
+            )
+          }
+        }
+      }
+      trajectory = validateTrajectory(rawTrajectory, slideNo)
     }
 
     const fragments = splitFragments(body)

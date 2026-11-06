@@ -1,5 +1,6 @@
-import { isMap, isScalar, LineCounter, parseDocument, visit, type Node, type Pair } from 'yaml'
+import { isMap, isScalar, isSeq, LineCounter, parseDocument, visit, type Node, type Pair } from 'yaml'
 import type { CameraTargetSpec } from '../engine/slide-types'
+import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
 
 /**
@@ -25,6 +26,14 @@ export interface SceneFile {
   /** the engine scene it builds on */
   base: string
   views: Map<string, NamedView>
+  poses: Map<string, NamedPose>
+}
+
+/** a named pose: the joints it sets, by name; a list in the file sets them all, in order */
+export interface NamedPose {
+  joints: Record<string, number>
+  /** where it is written, for errors */
+  line: number
 }
 
 const SCENE_FILE = /^scenes\/([^/]+)\.ya?ml$/i
@@ -44,7 +53,7 @@ function suggestName(name: string): string {
     .replace(/^[^a-z]+|-+$/g, '')
   return plain || 'scene'
 }
-const TOP_KEYS = ['base', 'views']
+const TOP_KEYS = ['base', 'views', 'poses']
 const VIEW_KEYS = ['lookAt', 'offset', 'spring']
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -106,7 +115,7 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
   for (const p of root.items as Pair<Node, Node>[]) {
     const key = isScalar(p.key) ? p.key.value : undefined
     if (typeof key !== 'string' || !TOP_KEYS.includes(key)) {
-      fail(p.key, `unknown key '${String(key)}'. A scene file has 'base' and 'views'`)
+      fail(p.key, `unknown key '${String(key)}'. A scene file has 'base', 'views' and 'poses'`)
     }
   }
 
@@ -160,5 +169,57 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
       views.set(name, { camera, line: lineOf(p.key) })
     }
   }
-  return { path, name, base: base as string, views }
+  const poses = new Map<string, NamedPose>()
+  const posesPair = pair(root, 'poses')
+  if (posesPair && posesPair.value !== null && !(isScalar(posesPair.value) && posesPair.value.value === null)) {
+    const map = posesPair.value
+    if (!isMap(map)) fail(map, "'poses' is a mapping of names to poses")
+    const joints = SCENE_JOINTS[base as (typeof SCENE_NAMES)[number]]
+    const names = joints.map((j) => j.name)
+    // limits are shown to 3 decimals, rounded inward, so every value the message allows is
+    // allowed (the 1e-6 slack is the check's own 1e-9 rad, and keeps 0.785 from showing as 0.784)
+    const lower = (v: number) => Math.ceil(v * 1000 - 1e-6) / 1000
+    const upper = (v: number) => Math.floor(v * 1000 + 1e-6) / 1000
+    for (const p of (map as { items: Pair<Node, Node>[] }).items) {
+      const poseName = isScalar(p.key) ? p.key.value : undefined
+      if (typeof poseName !== 'string' || poseName.trim() === '' || poseName !== poseName.trim()) {
+        fail(p.key, `a pose's name is a word or two, such as 'q0' (got ${JSON.stringify(poseName)})`)
+      }
+      const where = `pose '${poseName as string}'`
+      const v = p.value
+      const set: Record<string, number> = {}
+      const check = (joint: string, value: unknown, node: unknown) => {
+        if (typeof value !== 'number' || !Number.isFinite(value)) fail(node ?? p.key, `${where}: ${joint} must be a number (radians)`)
+        const limits = joints.find((j) => j.name === joint)!
+        if ((value as number) < limits.min - 1e-9 || (value as number) > limits.max + 1e-9) {
+          fail(
+            node ?? p.key,
+            `${where} sets ${joint} to ${value as number}, outside its limits, ${lower(limits.min)} to ${upper(limits.max)} (radians)`,
+          )
+        }
+        set[joint] = value as number
+      }
+      if (isSeq(v)) {
+        // a list: every joint of the robot, in order
+        if (v.items.length !== joints.length) {
+          fail(v, `${where} lists ${v.items.length} value${v.items.length === 1 ? '' : 's'}, but '${base as string}' has ${joints.length} joints: ${names.join(', ')}`)
+        }
+        v.items.forEach((item, k) => check(names[k], isScalar(item) ? item.value : undefined, item))
+      } else if (isMap(v)) {
+        // a mapping: only the joints it names
+        if (v.items.length === 0) fail(v, `${where} names no joints`)
+        for (const q of v.items as Pair<Node, Node>[]) {
+          const joint = isScalar(q.key) ? q.key.value : undefined
+          if (typeof joint !== 'string' || !names.includes(joint)) {
+            fail(q.key, `${where} names the joint '${String(joint)}', which '${base as string}' doesn't have. Its joints: ${names.join(', ')}`)
+          }
+          check(joint as string, isScalar(q.value) ? q.value.value : undefined, q.value)
+        }
+      } else {
+        fail(v ?? p.key, `${where} is a list of the ${joints.length} joint values (${names.join(', ')}) or a mapping of joint names to values`)
+      }
+      poses.set(poseName as string, { joints: set, line: lineOf(p.key) })
+    }
+  }
+  return { path, name, base: base as string, views, poses }
 }

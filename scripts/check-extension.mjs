@@ -39,8 +39,18 @@ const TEST_WEB = '@vscode/test-web@0.0.80'
  * message for a misspelled one is in its files
  */
 function knowsNamedViews(editorDir) {
+  return buildSays(editorDir, 'a named view needs')
+}
+
+/** true if the editor build knows named poses (engine v2.7.0): the compiler's limits message is in its files */
+function knowsPoses(editorDir) {
+  return buildSays(editorDir, 'outside its limits')
+}
+
+/** true if one of the editor build's scripts holds `text` */
+function buildSays(editorDir, text) {
   const assets = join(editorDir, 'assets')
-  return readdirSync(assets).some((f) => f.endsWith('.js') && readFileSync(join(assets, f), 'utf8').includes('names the camera view'))
+  return readdirSync(assets).some((f) => f.endsWith('.js') && readFileSync(join(assets, f), 'utf8').includes(text))
 }
 
 /** true if the editor build has Save view as… (engine v2.6.0): its dialog's title is in its files */
@@ -58,8 +68,19 @@ function inlineViews(slides, sceneText) {
   return slides.replace(/^camera: *(\S[^\r\n]*?) *(?=\r?$)/gm, (line, name) => (views[name] ? `camera: ${JSON.stringify(views[name])}` : line))
 }
 
+/**
+ * The demo's slides.md with every `joints: <name>` written out as the pose's
+ * values, for an editor that doesn't know named poses (the demo's arm scene:
+ * a list is joint1, joint2, joint3).
+ */
+function inlinePoses(slides, sceneText) {
+  const poses = parseYaml(sceneText).poses ?? {}
+  const asJoints = (pose) => (Array.isArray(pose) ? Object.fromEntries(pose.map((v, k) => [`joint${k + 1}`, v])) : pose)
+  return slides.replace(/^joints: *(\S[^\r\n]*?) *(?=\r?$)/gm, (line, name) => (poses[name] ? `joints: ${JSON.stringify(asJoints(poses[name]))}` : line))
+}
+
 /** a course folder whose workspace settings point the extension at `editorUrl` */
-function makeCourse(editorUrl, namedViews) {
+function makeCourse(editorUrl, namedViews, poses) {
   const dir = mkdtempSync(join(tmpdir(), 'lysark-course-'))
   const lecture = join(dir, 'lectures', 'demo')
   mkdirSync(join(lecture, 'scenes'), { recursive: true })
@@ -68,7 +89,9 @@ function makeCourse(editorUrl, namedViews) {
   cpSync(join(ROOT, 'lectures/demo/images'), join(lecture, 'images'), { recursive: true })
   const arm = readFileSync(join(ROOT, 'lectures/demo/scenes/arm.yaml'), 'utf8')
   let slides = readFileSync(join(ROOT, 'lectures/demo/slides.md'), 'utf8')
-  if (namedViews) writeFileSync(join(lecture, 'scenes/arm.yaml'), arm)
+  // what an older editor doesn't know is written out as numbers
+  if (!poses) slides = inlinePoses(slides, arm)
+  if (namedViews) writeFileSync(join(lecture, 'scenes/arm.yaml'), poses ? arm : arm.replace(/\r?\nposes:[\s\S]*$/, '\n'))
   else slides = inlineViews(slides, arm)
   writeFileSync(join(lecture, 'slides.md'), `${slides}\n---\nid: asset-image\n---\n## An image from the course assets\n\n![dot](../../assets/dot.svg)\n`)
   writeFileSync(join(lecture, 'scenes/agilus.yaml'), 'base: agilus\n')
@@ -358,7 +381,8 @@ async function checkExtension(editorDir) {
   const lines = []
   const site = await serveEditor(editorDir)
   const namedViews = knowsNamedViews(editorDir)
-  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews)
+  const poses = knowsPoses(editorDir)
+  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews, poses)
   let stopTestWeb
   let browser
   let ok = false

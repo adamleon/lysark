@@ -1,26 +1,31 @@
 # Scene files
 
-How to give a lecture its own named camera views, from engine v2.5.0 (step 2 of
-[scene-files-proposal.md](scene-files-proposal.md)). Written for the author; no engine knowledge
-needed. Poses and objects come in later steps.
+How to give a lecture its own named camera views (from engine v2.5.0) and robot poses (from
+v2.7.0), steps 2 to 4 of [scene-files-proposal.md](scene-files-proposal.md). Written for the
+author; no engine knowledge needed. Objects come in a later step.
 
 ## In short
 
 A lecture can have a file `scenes/<name>.yaml` next to its `slides.md`. It says which of the
-engine's scenes it builds on, and gives camera views names. A slide then writes the name where it
-wrote numbers before:
+engine's scenes it builds on, and gives camera views and robot poses names. A slide then writes
+the name where it wrote numbers before:
 
 ```markdown
 ---
 scene: agilus
-camera: oversikt
+camera: nært
+joints: konfigurasjon
+trajectory:
+  control: slider
+  from: q0
+  to: qf
 ---
 ```
 
-The build turns the name into the view's numbers, as if the slide had written that whole camera
-(spring included: a view without one flies with the default), so the student file holds numbers
-only. Every slide that names a view flies to the same camera, and changing the view in one place
-changes it on all of them.
+The build turns each name into its numbers, so the student file holds numbers only. A view
+becomes the whole camera, as if the slide had written it (spring included: a view without one
+flies with the default); a pose becomes the joints it sets. Every slide that names a view or a
+pose gets the same numbers, and changing them in one place changes them on all of them.
 
 ## The file
 
@@ -40,6 +45,12 @@ views:                       # a view is a whole camera: lookAt, offset, optiona
   verktøy:                   # follows the tool as it moves
     lookAt: tool0
     offset: [0.4, 0.2, 0.5]
+
+poses:                       # q in radians
+  konfigurasjon: [0.3, -0.6, 0.9, 0.0, 0.9, 0.0]   # every joint, in order: joint_1 … joint_6
+  q0: [-1.5, -0.5, 1.3, 0.0, 0.7, 0.0]
+  qf: [ 1.5, -1.6, 0.4, 0.0, 1.3, 0.0]
+  vri: { joint_4: 1.2, joint_6: -0.8 }             # only these two joints
 ```
 
 - **`base`** (required): the engine scene, one of `arm`, `pendulum`, `agilus`, `agilus-duo`. A file
@@ -51,8 +62,20 @@ views:                       # a view is a whole camera: lookAt, offset, optiona
     view: a view must look the same from whichever slide flies to it.)
   - `spring` (optional): how the camera flies there, `{ omega, zeta }`. Without it, the default
     (omega 4, zeta 1).
-- **View names** can be any word, Norwegian letters included. Comments (`#`) are fine anywhere,
-  and the editor keeps them.
+- **`poses`** (from v2.7.0): names, each a robot pose in radians, written one of two ways:
+  - **a list**, every joint of the robot in order (`[q1, q2, …]`), like the q vector in the lecture;
+  - **a mapping** of some joints (`{ joint_4: 1.2 }`), which sets only those.
+
+  The build checks each value against the robot's joint limits, and a list's length against the
+  number of joints, and says which line is wrong. The joints, in order:
+
+  | Scene | Joints |
+  | --- | --- |
+  | `arm` | joint1, joint2, joint3 |
+  | `pendulum` | swing |
+  | `agilus`, `agilus-duo` | joint_1, joint_2, joint_3, joint_4, joint_5, joint_6 |
+- **View and pose names** can be any word, Norwegian letters included. Comments (`#`) are fine
+  anywhere, and the editor keeps them.
 - **The file's name** is lower-case letters, digits and dashes, starting with a letter, and ends in
   `.yaml` or `.yml` (`agilus.yaml`, `robot-celle.yaml`): it is the name slides use in `scene:`, and
   the editor can save only into such files. The build says so, with a name to use, for any other.
@@ -72,6 +95,17 @@ views:                       # a view is a whole camera: lookAt, offset, optiona
   always has.
 - **A slide has a name or a block, never both.** So V always knows where to write.
 - **Numbers stay allowed everywhere.** A lecture without scene files works as before.
+
+## Using a pose in a slide
+
+- **`joints: <name>`** on a slide sets the joints the pose names, as a `joints:` block does: a
+  list sets them all, a mapping only its own. Later slides carry them on, as always.
+- **`from: <name>`** and **`to: <name>`** in a `trajectory:` take a pose as either end. Both ends
+  must set the same joints, as before: two list poses always do.
+- As for views, the pose is looked up in the scene file for the slide's `scene:`, and a slide
+  writes a name or numbers, never both in one place.
+- Inline numbers aren't checked against the limits (an out-of-range value is held at the limit
+  when the robot moves, as before); only poses are.
 
 ## Which scene
 
@@ -121,14 +155,23 @@ The build (and the panel) names the file, the line and what to do. For example:
 
 - `slides.md, line 12: slide 4 names the camera view 'oversikt', but the lecture has no
   scenes/agilus.yaml to find it in.` The message shows what to put in the new file.
-- `slides.md, line 12: slide 4 names the camera view 'oversigt', which scenes/agilus.yaml doesn't
-  have. Did you mean 'oversikt'?`
+- `slides.md, line 12: slide 4 names the camera view 'verktoy', which scenes/agilus.yaml doesn't
+  have. Did you mean 'verktøy'? Its views: tittel, nært, verktøy.`
 - A misspelled `scene:`: `slides.md, line 12: slide 4 names the camera view 'oversikt' in scene
   'agilsu', which is neither one of the lecture's scene files nor an engine scene. Did you mean
   'agilus'?`
 - `scenes/agilus.yaml, line 7: view 'nært' has no offset: where the camera is, [x, y, z] from the
   point it looks at`
-- `scenes/agilus.yaml, line 2: unknown key 'poses'. A scene file has 'base' and 'views'`
+- `scenes/agilus.yaml, line 17: pose 'q0' sets joint_2 to 1.2, outside its limits, -3.316 to
+  0.785 (radians)` (limits are shown to three decimals, rounded inward)
+- `scenes/agilus.yaml, line 18: pose 'qf' lists 5 values, but 'agilus' has 6 joints: joint_1,
+  joint_2, joint_3, joint_4, joint_5, joint_6`
+- `slides.md, line 30: slide 8 names the pose 'q1', which scenes/agilus.yaml doesn't have. Did you
+  mean 'q0'? Its poses: konfigurasjon, q0, qf, vri.`
+- `slides.md, line 14: slide 5 trajectory 'from' (the pose 'q0') sets joint_1, joint_2, joint_3,
+  joint_4, joint_5, joint_6, but 'to' (the pose 'vri') sets joint_4, joint_6. Both ends must set
+  the same joints: two list poses always do.`
+- `scenes/agilus.yaml, line 2: unknown key 'objects'. A scene file has 'base', 'views' and 'poses'`
 
 **Slide keys are checked too** (from v2.5.0). A misspelled key used to be ignored without a word;
 now `camrea:` stops the build: `slides.md, line 9: slide 3 has the key 'camrea', which a slide
@@ -140,8 +183,16 @@ doesn't have. Did you mean 'camera'?` A slide's keys are `id`, `scene`, `layout`
 The compiler gets the text of the lecture's scene files from whoever calls it (the build reads
 `scenes/*.yaml`; in the panel, the VS Code extension sends them with `slides.md`), since it never
 reads files itself. It checks them (`src/compiler/scene-files.ts`), and where a slide names a view
-it puts the view's numbers into the slide (`src/compiler/compile-slides.ts`). Everything after
-that, the slide engine and the student file included, sees numbers only, as before. The course
+it puts the view's numbers into the slide (`src/compiler/compile-slides.ts`). A pose works the
+same way: where a slide says `joints: <name>`, or a trajectory's `from:` or `to:` names a pose,
+the compiler puts in the joints the pose sets, then checks the slide as before. Everything after
+that, the slide engine and the student file included, sees numbers only, as before.
+
+To read a list pose and check the limits, the compiler needs each scene's joints in order with
+their limits. It can't load the scenes themselves (they bring three.js and the robot models), so
+`src/scenes/joints.ts` holds a small table of them. A test (`src/scenes/joints.test.ts`) reads the
+URDF files and the pendulum scene's constants and fails if the table disagrees, so a change to a
+robot can't leave the table behind. The course
 site rebuilds a lecture when anything in its folder changes, scene files included.
 
 In the panel, V works out whether the slide names a view (`src/editor/save-view.ts`). If it does,
@@ -152,5 +203,5 @@ sends, reads and edits scene files.
 
 ## Not yet
 
-- Named poses (`joints: q0`, `from: q0`), step 4; posing the robot in the panel, step 5.
+- Posing the robot in the panel (joint sliders, P and Shift+P to save a pose), step 5.
 - Objects (tables, workpieces, frames), steps 6 and 7; models from `assets/`, steps 8 and 9.

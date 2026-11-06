@@ -47,7 +47,7 @@ describe('readSceneFiles', () => {
     }
     expect(problem('views:\n  a:\n    lookAt: [0, 0, 0]\n    offset: [1, 1, 1]\n')).toMatch(/^scenes\/agilus\.yaml, line 1: 'base:' is missing/)
     expect(problem('base: agilu\n')).toMatch(/^scenes\/agilus\.yaml, line 1: base 'agilu' is not one of the engine's scenes: arm, pendulum, agilus/)
-    expect(problem('base: agilus\nposes:\n  q0: [0, 0, 0, 0, 0, 0]\n')).toMatch(/line 2: unknown key 'poses'/)
+    expect(problem('base: agilus\nobjects:\n  table: {}\n')).toMatch(/line 2: unknown key 'objects'/)
     expect(problem('base: agilus\nviews:\n  a:\n    lookAt: [0, 0, 0]\n')).toMatch(/line 3: view 'a' has no offset/)
     expect(problem('base: agilus\nviews:\n  a:\n    offset: [0, 0, 0]\n')).toMatch(/line 3: view 'a' has no lookAt/)
     expect(problem('base: agilus\nviews:\n  a:\n    lookAt: [0, 0, 0]\n    distance: 2\n')).toMatch(/line 5: view 'a' has 'distance'/)
@@ -190,5 +190,107 @@ describe('scene file rules, second round', () => {
     expect(message).toMatch(/Did you mean 'agilus'\?/)
     const list = message.slice(message.indexOf('Scenes: ') + 8).replace(/\.$/, '').split(', ')
     expect(new Set(list).size).toBe(list.length)
+  })
+})
+
+describe('named poses (scene-files-proposal.md step 4)', () => {
+  const AGILUS_POSES = `base: agilus
+poses:
+  q0: [-1.5, -0.5, 1.3, 0.0, 0.7, 0.0]
+  qf: [ 1.5, -1.6, 0.4, 0.0, 1.3, 0.0]
+  vri: { joint_4: 1.2, joint_6: -0.8 }
+`
+  const files = { 'scenes/agilus.yaml': AGILUS_POSES }
+  const problem = (scene: string, slides = '') => {
+    try {
+      if (slides) compileSlides(slides, { 'scenes/agilus.yaml': scene })
+      else readSceneFiles({ 'scenes/agilus.yaml': scene })
+      return 'no error'
+    } catch (err) {
+      return (err as Error).message
+    }
+  }
+
+  it('reads a list in joint order, and a mapping of some joints', () => {
+    const poses = readSceneFiles(files).get('agilus')!.poses
+    expect(poses.get('q0')!.joints).toEqual({ joint_1: -1.5, joint_2: -0.5, joint_3: 1.3, joint_4: 0, joint_5: 0.7, joint_6: 0 })
+    expect(poses.get('vri')!.joints).toEqual({ joint_4: 1.2, joint_6: -0.8 })
+    expect(poses.get('qf')!.line).toBe(4)
+  })
+
+  it('sets the joints a pose lists, as a joints: block does, and carries them on', () => {
+    const slides = compileSlides(
+      '---\nscene: agilus\njoints: q0\n---\n# A\n---\nscene: agilus\njoints: vri\n---\n# B\n---\nscene: agilus\n---\n# C\n',
+      files,
+    )
+    expect(slides[0].effective.joints).toEqual({ joint_1: -1.5, joint_2: -0.5, joint_3: 1.3, joint_4: 0, joint_5: 0.7, joint_6: 0 })
+    expect(slides[1].effective.joints).toEqual({ joint_1: -1.5, joint_2: -0.5, joint_3: 1.3, joint_4: 1.2, joint_5: 0.7, joint_6: -0.8 })
+    expect(slides[2].effective.joints).toEqual(slides[1].effective.joints)
+  })
+
+  it('uses poses as the ends of a trajectory', () => {
+    const [slide] = compileSlides('---\nscene: agilus\ntrajectory:\n  control: slider\n  from: q0\n  to: qf\n---\n# T\n', files)
+    expect(slide.trajectory!.from).toEqual({ joint_1: -1.5, joint_2: -0.5, joint_3: 1.3, joint_4: 0, joint_5: 0.7, joint_6: 0 })
+    expect(slide.trajectory!.to).toEqual({ joint_1: 1.5, joint_2: -1.6, joint_3: 0.4, joint_4: 0, joint_5: 1.3, joint_6: 0 })
+    // a mapping pose at one end and a full list at the other don't name the same joints
+    expect(() => compileSlides('---\nscene: agilus\ntrajectory:\n  control: slider\n  from: q0\n  to: vri\n---\n# T\n', files)).toThrow(
+      "slides.md, line 3: slide 1 trajectory 'from' (the pose 'q0') sets joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, " +
+        "but 'to' (the pose 'vri') sets joint_4, joint_6. Both ends must set the same joints: two list poses always do.",
+    )
+    // a pose at one end and numbers at the other
+    expect(() =>
+      compileSlides('---\nscene: agilus\ntrajectory:\n  control: slider\n  from: vri\n  to: { joint_4: 0 }\n---\n# T\n', files),
+    ).toThrow("trajectory 'from' (the pose 'vri') sets joint_4, joint_6, but 'to' sets joint_4.")
+    // numbers at both ends keep the old message
+    expect(() =>
+      compileSlides('---\nscene: agilus\ntrajectory:\n  control: slider\n  from: { joint_4: 0 }\n  to: { joint_6: 0 }\n---\n# T\n', files),
+    ).toThrow(/is in 'from' but not 'to'/)
+  })
+
+  it("points an unknown trajectory pose at its own from: or to: line", () => {
+    expect(problem(AGILUS_POSES, '---\nscene: agilus\ntrajectory:\n  control: slider\n  from: q0\n  to: qF2\n---\n# T\n')).toMatch(
+      /^slides\.md, line 6: slide 1 names the pose 'qF2'/,
+    )
+    expect(problem(AGILUS_POSES, '---\nscene: agilus\ntrajectory:\n  control: slider\n  from: q9\n  to: qf\n---\n# T\n')).toMatch(
+      /^slides\.md, line 5: slide 1 names the pose 'q9'/,
+    )
+    // the one-line form: its own line is the trajectory's
+    expect(problem(AGILUS_POSES, '---\nscene: agilus\ntrajectory: { control: slider, from: q0, to: q7 }\n---\n# T\n')).toMatch(
+      /^slides\.md, line 3: slide 1 names the pose 'q7'/,
+    )
+  })
+
+  it("checks a pose's length, joint names and the robot's limits, naming the line", () => {
+    expect(problem('base: agilus\nposes:\n  q0: [0, 0, 0]\n')).toMatch(
+      /^scenes\/agilus\.yaml, line 3: pose 'q0' lists 3 values, but 'agilus' has 6 joints: joint_1, joint_2/,
+    )
+    expect(problem('base: agilus\nposes:\n  q0: [0, 1.2, 0, 0, 0, 0]\n')).toMatch(
+      /line 3: pose 'q0' sets joint_2 to 1\.2, outside its limits, -3\.316 to 0\.785 \(radians\)/,
+    )
+    // limits are shown rounded inward: 3.142 is past the arm's 3.1416, and the message must not say 3.142 is the limit
+    let message = ''
+    try {
+      readSceneFiles({ 'scenes/arm.yaml': 'base: arm\nposes:\n  flip: [3.142, 0, 0]\n' })
+    } catch (err) {
+      message = (err as Error).message
+    }
+    expect(message).toBe("scenes/arm.yaml, line 3: pose 'flip' sets joint1 to 3.142, outside its limits, -3.141 to 3.141 (radians)")
+    expect(problem('base: agilus\nposes:\n  q0: { joint_7: 0 }\n')).toMatch(/line 3: pose 'q0' names the joint 'joint_7', which 'agilus' doesn't have/)
+    expect(problem('base: agilus\nposes:\n  q0: { joint_1: fast }\n')).toMatch(/line 3: pose 'q0': joint_1 must be a number/)
+    expect(problem('base: agilus\nposes:\n  q0: 3\n')).toMatch(/line 3: pose 'q0' is a list of the 6 joint values/)
+  })
+
+  it('says how to add a pose, or which poses there are', () => {
+    expect(problem('base: agilus\n', '---\nscene: agilus\njoints: q0\n---\n# A\n')).toMatch(
+      /slides\.md, line 3: slide 1 names the pose 'q0', which scenes\/agilus\.yaml doesn't have\. It has no poses yet; add them under 'poses:'\./,
+    )
+    expect(problem(AGILUS_POSES, '---\nscene: agilus\njoints: q1\n---\n# A\n')).toMatch(/Did you mean 'q0'\? Its poses: q0, qf, vri\./)
+    let message = ''
+    try {
+      compileSlides('---\nscene: arm\njoints: rest\n---\n# A\n', {})
+    } catch (err) {
+      message = (err as Error).message
+    }
+    expect(message).toMatch(/names the pose 'rest', but the lecture has no scenes\/arm\.yaml[\s\S]*poses:\n  rest: \[0, 0, 0\]   # joint1, joint2, joint3/)
   })
 })

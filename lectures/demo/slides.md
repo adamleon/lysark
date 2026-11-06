@@ -19,10 +19,7 @@ Use **→ / space** to advance, **←** to go back, **d** for the debug panel.
 ---
 id: pid-control
 scene: arm
-joints:
-  joint1: 0.9
-  joint2: 1.1
-  joint3: -1.5
+joints: reach
 camera: overview
 ---
 ## Joint control is a PID loop
@@ -74,8 +71,7 @@ camera: overview
 ---
 id: overshoot
 scene: arm
-joints:
-  joint2: 0.3
+joints: low
 camera:
   lookAt: [0, 0.5, 0]
   offset: [1.5, 0.35, 0.6]

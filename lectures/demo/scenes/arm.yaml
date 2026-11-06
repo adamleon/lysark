@@ -1,5 +1,6 @@
 # This lecture's version of the engine's arm scene: the same arm, plus named
-# camera views. A slide uses one with `camera: overview` (docs/scene-files.md).
+# camera views and poses. A slide uses them with `camera: overview` and
+# `joints: reach` (docs/scene-files.md).
 base: arm
 
 views:
@@ -10,3 +11,7 @@ views:
     lookAt: end_effector
     offset: [0.4, 0.22, 0.5]
     spring: { omega: 5, zeta: 1.0 }
+
+poses:                       # radians
+  reach: [0.9, 1.1, -1.5]    # every joint, in order: joint1, joint2, joint3
+  low: { joint2: 0.3 }       # only the joints it names
