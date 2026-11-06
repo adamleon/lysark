@@ -375,18 +375,28 @@ function createWidget(spec: WidgetSpec): WidgetHandle | null {
     return null
   }
   const limits = spec.range ?? [channel.min, channel.max]
+  let shown = channel.setpoint
+  const slider = createSlider({
+    label: spec.label ?? spec.bind,
+    min: limits[0],
+    max: limits[1],
+    value: shown,
+    format: (v) => `${v.toFixed(2)} rad`,
+    onInput: (v) => {
+      shown = v
+      channel.setpoint = v
+      ensureTicking()
+    },
+  })
   return {
-    el: createSlider({
-      label: spec.label ?? spec.bind,
-      min: limits[0],
-      max: limits[1],
-      value: channel.setpoint,
-      format: (v) => `${v.toFixed(2)} rad`,
-      onInput: (v) => {
-        channel.setpoint = v
-        ensureTicking()
-      },
-    }).el,
+    el: slider.el,
+    // the slider follows its joint when something else moves it (the debug
+    // panel, the editor's joint sliders), so grabbing it never jumps
+    onFrame: () => {
+      if (channel.setpoint === shown) return
+      shown = channel.setpoint
+      slider.set(shown)
+    },
   }
 }
 
