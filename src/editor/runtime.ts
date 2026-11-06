@@ -7,7 +7,22 @@ import { createHost, type HostChange } from './host'
 import { createJointPanel, type PanelState } from './joint-panel'
 import { loadImages } from './panel-images'
 import { EDITOR_PROTOCOL } from './panel-page.js'
-import { motionOf, namedPoseEdit, poseEdit, poseTarget, poseUsers, poseValue, sceneJoints, type PoseTarget } from './pose-edit'
+import {
+  motionOf,
+  namedPoseEdit,
+  poseAsChanges,
+  poseJointValue,
+  poseAsChoices,
+  poseEdit,
+  poseNameProblem,
+  poseTarget,
+  poseUsers,
+  poseValue,
+  sceneJoints,
+  type PoseAsChoices,
+  type PoseTarget,
+  type SavePoseAs,
+} from './pose-edit'
 import {
   namedTarget,
   namedViewEdit,
@@ -312,8 +327,8 @@ function updateHint(): void {
   const pose = engine ? poseTarget(shownFiles, engine.currentIndex) : null
   const poseText = (users: number[]) =>
     pose
-      ? `P: change the pose '${pose.pose}' in ${pose.path}` + (users.length > 1 ? ` (slides ${listSlides(users)} use it)` : '')
-      : `P: save this pose into slide ${(index ?? 0) + 1}`
+      ? `P: change the pose '${pose.pose}' in ${pose.path}` + (users.length > 1 ? ` (slides ${listSlides(users)} use it)` : '') + ' · Shift+P: save as…'
+      : `P: save this pose into slide ${(index ?? 0) + 1} · Shift+P: save as…`
   jointPanel.setFooter(poseText([]))
   window.clearTimeout(hintTimer)
   if (!target && !pose) return
@@ -483,19 +498,20 @@ async function sceneActions(): Promise<void> {
   ]
   if (choices) {
     if (choices.current) {
-      items.push({ label: 'Save as: only this slide', description: `its own camera, instead of the view '${choices.current}'`, value: 'slide' })
+      items.push({ label: 'Save view as: only this slide', description: `its own camera, instead of the view '${choices.current}'`, value: 'slide' })
     }
     for (const v of choices.views) {
       if (v.name === choices.current) continue
       items.push({
-        label: `Save as: the view '${v.name}'`,
+        label: `Save view as: the view '${v.name}'`,
         description: 'this slide uses it from now on' + (v.users.length > 0 ? `; now on slides ${listSlides(v.users)}` : ''),
         value: `view:${v.name}`,
       })
     }
-    items.push({ label: 'Save as: a new view…', description: choices.exists ? `in ${choices.path}` : `creates ${choices.path}`, value: 'new' })
+    items.push({ label: 'Save view as: a new view…', description: choices.exists ? `in ${choices.path}` : `creates ${choices.path}`, value: 'new' })
   }
-  if (engine?.current.scene && !movesItself(engine.current)) {
+  const poses = engine?.current.scene && !movesItself(engine.current) ? await poseChoicesHere() : null
+  if (engine && poses) {
     const pose = poseTarget(shownFiles, engine.currentIndex)
     const posers = pose ? await posedBy(pose) : []
     items.push({
@@ -503,10 +519,57 @@ async function sceneActions(): Promise<void> {
       description: pose ? `P, in ${pose.path}` + (posers.length > 1 ? `; slides ${listSlides(posers)} use it` : '') : 'P',
       value: 'save-pose',
     })
+    if (poses.current) {
+      items.push({ label: 'Save pose as: only this slide', description: `its own joints, instead of the pose '${poses.current}'`, value: 'pose-slide' })
+    }
+    for (const p of poses.poses) {
+      if (p.name === poses.current) continue
+      items.push({
+        label: `Save pose as: the pose '${p.name}'`,
+        description: 'this slide uses it from now on' + (p.users.length > 0 ? `; now on slides ${listSlides(p.users)}` : ''),
+        value: `pose:${p.name}`,
+      })
+    }
+    items.push({ label: 'Save pose as: a new pose…', description: poses.exists ? `in ${poses.path}` : `creates ${poses.path}`, value: 'pose-new' })
   }
+  const asked = engine?.currentIndex
   const choice = await host.ask({ title: 'Lysark: scene actions', items })
   if (choice === 'save-view') return saveView()
   if (choice === 'save-pose') return savePose()
+  if (choice && poses) {
+    // the files, the slide or a pose may have changed while VS Code asked:
+    // save against the choices as they are now, as the Shift+P dialog does
+    const now = async (): Promise<PoseAsChoices | null> => {
+      const fresh = lysark()?.engine.currentIndex === asked ? await poseChoicesHere() : null
+      if (!fresh) showBanner('The pose was not saved: the slide changed meanwhile; choose again.')
+      return fresh
+    }
+    if (choice === 'pose-slide') {
+      const fresh = await now()
+      return fresh ? savePoseAs({ kind: 'slide' }, fresh) : undefined
+    }
+    if (choice.startsWith('pose:')) {
+      const name = choice.slice(5)
+      const fresh = await now()
+      if (fresh && !fresh.poses.some((p) => p.name === name)) {
+        return showBanner(`The pose was not saved: the pose '${name}' is no longer in ${fresh.path}.`)
+      }
+      return fresh ? savePoseAs({ kind: 'pose', name }, fresh) : undefined
+    }
+    if (choice === 'pose-new') {
+      let prompt = "The new pose's name: one word, such as 'q0'"
+      for (;;) {
+        const answer = await host.ask({ title: 'Lysark: new pose', input: { prompt, placeholder: 'q0' } })
+        if (answer === null) return
+        const name = answer.trim()
+        const fresh = await now()
+        if (!fresh) return
+        const problem = poseNameProblem(name, fresh.poses.map((p) => p.name))
+        if (!problem) return savePoseAs({ kind: 'new', name }, fresh)
+        prompt = `${problem[0].toUpperCase()}${problem.slice(1)}. Try another name.`
+      }
+    }
+  }
   if (!choice || !choices) return
   if (choice === 'slide') await saveAs({ kind: 'slide' }, choices)
   else if (choice.startsWith('view:')) await saveAs({ kind: 'view', name: choice.slice(5) }, choices)
@@ -745,6 +808,21 @@ const jointPanel = createJointPanel((): PanelState => {
   return { key: `${index}:${slide.scene}`, joints, ...(why ? { note: `${why[0].toUpperCase()}${why.slice(1)}, so it can't be posed here.` } : {}) }
 }, () => (hint.isConnected ? Math.max(44, hint.getBoundingClientRect().bottom + 6) : 44))
 
+/**
+ * What a slide shows of the robot, to tell whether a save changes it: the
+ * joints the engine puts (the scene's `defaults` under the slide's, in any
+ * order; those its trajectory drives left out), and its trajectory.
+ */
+function robotShown(slide: { effective: { joints?: Record<string, number> }; trajectory?: unknown }, defaults: Record<string, number>): string {
+  const joints: Record<string, number> = { ...defaults, ...slide.effective.joints }
+  const driven = (slide.trajectory as { from?: Record<string, number> } | undefined)?.from ?? {}
+  const put = Object.keys(joints)
+    .filter((name) => !(name in driven))
+    .sort()
+    .map((name) => [name, joints[name]])
+  return JSON.stringify([put, slide.trajectory ?? null])
+}
+
 /** how the slides move the robot as the panel shows them (the running deck) */
 async function shownMotions(): Promise<string[]> {
   const { default: deck } = await import('./deck-from-source')
@@ -754,19 +832,30 @@ async function shownMotions(): Promise<string[]> {
 /** the slides whose robot the pose moves, worked out once per pose and text (a compile) */
 let posersOf: { seq: number | null; lists: Map<string, number[]> } = { seq: null, lists: new Map() }
 async function posedBy(target: PoseTarget): Promise<number[]> {
-  const motions = await shownMotions()
-  if (posersOf.seq !== shownSeq) posersOf = { seq: shownSeq, lists: new Map() }
-  const key = `${target.path}\n${target.pose}`
-  if (!posersOf.lists.has(key)) posersOf.lists.set(key, poseUsers(shownFiles, target, motions))
-  return posersOf.lists.get(key)!
+  return posersWith(await shownMotions())(target)
+}
+function posersWith(motions: string[]): (target: PoseTarget) => number[] {
+  return (target) => {
+    if (posersOf.seq !== shownSeq) posersOf = { seq: shownSeq, lists: new Map() }
+    const key = `${target.path}\n${target.pose}`
+    if (!posersOf.lists.has(key)) posersOf.lists.set(key, poseUsers(shownFiles, target, motions))
+    return posersOf.lists.get(key)!
+  }
 }
 
 /**
- * The pose to save on the slide shown: the joints moved (jointMoved), as P
- * writes them (two decimals, inside the limits), and the joints the slide then
- * has. null, saying why, if there is nothing to save.
+ * The robot's pose on the slide shown: every joint as a pose writes it, and
+ * the joints moved (jointMoved). A moved joint is written to two decimals,
+ * inside its limits; one that isn't, as the slide (or the scene) puts it,
+ * unless that is outside its limits. null, saying why, if it can't be saved.
  */
-function currentPose(): { index: number; scene: string; values: Record<string, number> } | null {
+function robotPose(): {
+  index: number
+  scene: string
+  robot: Record<string, number>
+  moved: string[]
+  defaults: Record<string, number>
+} | null {
   const L = lysark()
   if (!L) return null
   const slide = L.engine.current
@@ -784,23 +873,45 @@ function currentPose(): { index: number; scene: string; values: Record<string, n
     showBanner(`The pose was not saved: ${why}.`)
     return null
   }
-  const values: Record<string, number> = {}
+  const robot: Record<string, number> = {}
+  const moved: string[] = []
   for (const joint of sceneJoints(slide.scene)) {
-    if (jointMoved(slide, active, joint.name)) values[joint.name] = poseValue(active.channels[joint.name].setpoint, joint)
+    const channel = active.channels[joint.name]
+    if (!channel) continue
+    const target = slide.effective.joints?.[joint.name] ?? active.defaults.joints?.[joint.name]
+    const isMoved = jointMoved(slide, active, joint.name)
+    if (isMoved) moved.push(joint.name)
+    robot[joint.name] = poseJointValue(joint, channel.setpoint, target, isMoved)
   }
-  if (Object.keys(values).length === 0) {
+  return { index: L.engine.currentIndex, scene: slide.scene, robot, moved, defaults: { ...(active.defaults.joints ?? {}) } }
+}
+
+/**
+ * The pose P saves on the slide shown: the joints moved, as written. null,
+ * saying why, if there is nothing to save.
+ */
+function currentPose(): { index: number; scene: string; values: Record<string, number> } | null {
+  const pose = robotPose()
+  if (!pose) return null
+  if (pose.moved.length === 0) {
     showBanner('No joint has moved on this slide: move one with the joint sliders (J), then press P.', 'ok')
     return null
   }
-  return { index: L.engine.currentIndex, scene: slide.scene, values }
+  return { index: pose.index, scene: pose.scene, values: Object.fromEntries(pose.moved.map((j) => [j, pose.robot[j]])) }
+}
+
+/**
+ * A pose is being saved, or its text hasn't come back yet: a second save now
+ * would reload the panel (one at a time). Says so.
+ */
+function posePending(): boolean {
+  if (!savingPose && !(savedPose && performance.now() - savedPose.at < POSE_PENDING_MS)) return false
+  showBanner('The last pose is still on its way into the slides; try again in a moment.', 'ok')
+  return true
 }
 
 async function savePose(): Promise<void> {
-  // one at a time: a second save before the first comes back in the text would reload the panel
-  if (savingPose || (savedPose && performance.now() - savedPose.at < POSE_PENDING_MS)) {
-    showBanner('The last pose is still on its way into the slides; press P again in a moment.', 'ok')
-    return
-  }
+  if (posePending()) return
   if (saving) return // a view is being saved
   const now = currentPose()
   if (!now) return
@@ -898,6 +1009,130 @@ async function saveNamedPose(target: PoseTarget, now: NonNullable<ReturnType<typ
   )
 }
 
+// ---- Save pose as… (Shift+P, Scene Actions…; docs/scene-files.md) ----------
+
+/** the Save pose as… choices for the slide shown; null without a scene */
+async function poseChoicesHere(): Promise<PoseAsChoices | null> {
+  const engine = lysark()?.engine
+  return engine ? poseAsChoices(shownFiles, engine.currentIndex, posersWith(await shownMotions())) : null
+}
+
+/**
+ * Save the robot's pose by a Save pose as… choice: into the slide alone, into
+ * an existing pose the slide then uses, or into a new pose (and a new scene
+ * file, if the lecture has none for the slide's scene). One edit, in up to two
+ * files, applied only if neither changed since it was read.
+ */
+async function savePoseAs(choice: SavePoseAs, choices: PoseAsChoices): Promise<void> {
+  if (saving || posePending()) return
+  const pose = robotPose()
+  if (!pose) return
+  saving = true
+  savingPose = true
+  try {
+    const read = await host.read(choices.exists ? ['slides.md', choices.path] : ['slides.md'], 'text')
+    const slides = read['slides.md']
+    const scene = choices.exists ? read[choices.path] : null
+    for (const [path, file] of [['slides.md', slides], [choices.path, scene]] as const) {
+      if (file && (typeof file.text !== 'string' || typeof file.version !== 'number')) {
+        showBanner(`The pose was not saved: ${path} could not be read (${file.error ?? 'no text'}).`)
+        return
+      }
+    }
+    const plan = poseAsChanges(
+      shownFiles['slides.md'],
+      { slides: slides.text!, scene: scene?.text ?? null },
+      pose.index,
+      choices,
+      choice,
+      pose.robot,
+      pose.moved,
+    )
+    if ('problem' in plan) {
+      showBanner(`The pose was not saved: ${plan.problem}`)
+      return
+    }
+    if (!plan.slides && !plan.scene && !plan.create) {
+      showBanner(
+        choice.kind === 'slide' && !choices.current
+          ? 'No joint has moved on this slide: move one with the joint sliders (J), then save.'
+          : 'Nothing to change: it is saved like that already',
+        'ok',
+      )
+      return
+    }
+    const apply = (text: string, change: { start: number; end: number; text: string } | null) =>
+      change ? text.slice(0, change.start) + change.text + text.slice(change.end) : text
+    const before: Record<string, string> = { ...shownFiles, 'slides.md': slides.text! }
+    if (scene) before[choices.path] = scene.text!
+    const after: Record<string, string> = { ...before, 'slides.md': apply(slides.text!, plan.slides) }
+    if (scene) after[choices.path] = apply(scene.text!, plan.scene)
+    if (plan.create) after[choices.path] = plan.create
+    const broken = problemWith(after)
+    if (broken && !problemWith(before)) {
+      showBanner(`The pose was not saved: the slides would have an error:\n${broken}`)
+      return
+    }
+    // the other slides whose robot moves with it: users of the pose, and those that carry the slide on
+    // (worked out on the text the panel shows, so the numbers are the panel's)
+    let others: number[] = []
+    try {
+      const shownSlides = shownFiles['slides.md']
+      const current = { slides: shownSlides, scene: scene?.text ?? null }
+      const onShown = poseAsChanges(shownSlides, current, pose.index, choices, choice, pose.robot, pose.moved)
+      if (!('problem' in onShown)) {
+        const was: Record<string, string> = { ...shownFiles }
+        if (scene) was[choices.path] = scene.text!
+        const is: Record<string, string> = { ...was, 'slides.md': apply(shownSlides, onShown.slides) }
+        if (scene) is[choices.path] = apply(scene.text!, onShown.scene)
+        if (onShown.create) is[choices.path] = onShown.create
+        const shows = (files: Record<string, string>) =>
+          compileLecture(files['slides.md'], files).slides.map((s) => (s.scene === pose.scene ? robotShown(s, pose.defaults) : motionOf(s)))
+        const a = shows(was)
+        const b = shows(is)
+        others = b.flatMap((m, i) => (m !== a[i] && i !== pose.index ? [i] : []))
+      }
+    } catch {
+      // the slides as they are now don't compile: name none
+    }
+    const alsoChanged = others.length > 0 ? `; slide${others.length > 1 ? 's' : ''} ${listSlides(others)} change${others.length > 1 ? '' : 's'} with it` : ''
+    const changes: HostChange[] = []
+    if (plan.slides) changes.push({ path: 'slides.md', version: slides.version!, ...plan.slides })
+    if (plan.scene) changes.push({ path: choices.path, version: scene!.version!, ...plan.scene })
+    if (plan.create) changes.push({ path: choices.path, create: plan.create })
+    // slides.md comes last when the edit also makes a file (VS Code reports the file first)
+    savedPose = {
+      slide: pose.index,
+      scene: pose.scene,
+      values: plan.written,
+      expect: plan.slides ? { path: 'slides.md', text: after['slides.md'] } : { path: choices.path, text: after[choices.path] },
+      at: performance.now(),
+    }
+    const result = await host.edit('Save robot pose as', changes)
+    if (!result.ok) {
+      savedPose = null
+      showBanner(`The pose was not saved: ${result.message ?? 'VS Code refused the edit'}`)
+      return
+    }
+    if (savedPose) savedPose.at = performance.now() // its text comes after VS Code's answer
+    const n = pose.index + 1
+    showSaved(
+      (choice.kind === 'slide'
+        ? `Slide ${n} has its own joints now`
+        : choice.kind === 'pose'
+          ? plan.scene
+            ? `Slide ${n} uses the pose '${choice.name}' now, changed to this pose in ${choices.path} (not saved yet)`
+            : `Slide ${n} uses the pose '${choice.name}' now (it already is this pose)`
+          : plan.create
+            ? `New pose '${choice.name}' in a new file, ${choices.path}; slide ${n} uses it`
+            : `New pose '${choice.name}' in ${choices.path} (not saved yet); slide ${n} uses it`) + alsoChanged,
+    )
+  } finally {
+    saving = false
+    savingPose = false
+  }
+}
+
 // ---- Save view as… (Shift+V, Scene Actions…; docs/scene-files.md) ----------------
 
 /** the slides' cameras as the panel shows them (the running deck) */
@@ -988,61 +1223,59 @@ async function saveAs(choice: SaveAs, choices: SaveAsChoices): Promise<void> {
   }
 }
 
-/** the Save view as… dialog, if open */
+/** the Save view as… or Save pose as… dialog, if open */
 let dialog: { close(): void } | null = null
 
-/**
- * Shift+V: the panel's own dialog for Save view as… (VS Code's lists can't
- * open from a key pressed in the panel; docs/editor-host.md). Arrow keys
- * choose, Enter saves, Escape closes; the deck's keys wait meanwhile.
- */
-async function openSaveAs(): Promise<void> {
-  if (dialog || saving || !currentView()) return
-  const choices = await choicesHere()
-  if (!choices || dialog) return
-  type Row = { label: string; detail: string; choice: SaveAs | 'new' }
-  const rows: Row[] = [
-    {
-      label: 'Only this slide',
-      detail: choices.current ? `its own camera, instead of the view '${choices.current}'` : 'its own camera, as V saves it',
-      choice: { kind: 'slide' },
-    },
-    ...choices.views.map((v) => ({
-      label: `The view '${v.name}'`,
-      detail:
-        (v.name === choices.current ? "this slide's view, as V saves it" : 'this slide uses it from now on') +
-        (v.users.length > 0 ? ` · slides ${listSlides(v.users)}` : ''),
-      choice: { kind: 'view', name: v.name } as SaveAs,
-    })),
-    { label: 'A new view', detail: choices.exists ? `in ${choices.path}` : `in a new file, ${choices.path}`, choice: 'new' },
-  ]
-  // what V doesn't do: the slide alone for a slide that names a view, otherwise a new view
-  let selected = choices.current ? 0 : rows.length - 1
+/** a row of a Save … as dialog: a choice, or the new name typed under the list */
+interface DialogRow<C> {
+  label: string
+  detail: string
+  choice: C | 'new'
+}
 
+/**
+ * The panel's own dialog for Save view as… and Save pose as… (VS Code's lists
+ * can't open from a key pressed in the panel; docs/editor-host.md). Arrow keys
+ * choose, Enter saves, Escape closes; the deck's keys wait meanwhile. `apply`
+ * saves the choice, closing the dialog first, or returns why it can't.
+ */
+function openChoiceDialog<C>(spec: {
+  title: string
+  listLabel: string
+  inputLabel: string
+  placeholder: string
+  rows: DialogRow<C>[]
+  selected: number
+  apply(choice: C | 'new', name: string, close: () => void): Promise<string | void>
+}): void {
+  const rows = spec.rows
+  let selected = spec.selected
+  // the focus goes back where it was when the dialog closes (a joint slider, say)
+  const opener = document.activeElement
   const box = document.createElement('div')
   box.setAttribute('role', 'dialog')
-  box.setAttribute('aria-label', 'Save this camera view')
+  box.setAttribute('aria-label', spec.title)
   box.style.cssText =
     'position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:1002;width:min(520px,calc(100vw - 24px));' +
     'max-height:calc(100vh - 56px);overflow:auto;box-sizing:border-box;' +
     'background:rgba(var(--surface-rgb),0.97);color:var(--text);border:1px solid var(--border-soft);border-radius:10px;' +
     'box-shadow:var(--shadow-text);font:14px/1.35 system-ui,sans-serif;padding:10px 10px 8px;outline:none'
   const title = document.createElement('div')
-  title.textContent = 'Save this camera view'
+  title.textContent = spec.title
   title.style.cssText = 'font-weight:600;margin:0 4px 2px'
   const keys = document.createElement('div')
   keys.textContent = '↑ ↓ choose · Enter save · Esc cancel'
   keys.style.cssText = 'color:var(--text-dim);font-size:12px;margin:0 4px 8px'
   const list = document.createElement('div')
   list.setAttribute('role', 'listbox')
-  list.setAttribute('aria-label', 'Where to save the camera view')
+  list.setAttribute('aria-label', spec.listLabel)
   list.tabIndex = -1
   list.style.outline = 'none'
   const input = document.createElement('input')
-  input.placeholder = 'name, such as oversikt'
-  input.setAttribute('aria-label', 'Name of the new view')
+  input.placeholder = spec.placeholder
+  input.setAttribute('aria-label', spec.inputLabel)
   input.spellcheck = false
-  // typing a name is choosing a new view
+  // typing a name is choosing the new one
   input.addEventListener('focus', () => {
     if (rows[selected].choice !== 'new') select(rows.length - 1)
   })
@@ -1098,33 +1331,13 @@ async function openSaveAs(): Promise<void> {
     } else list.focus()
   }
   async function apply(): Promise<void> {
-    const row = rows[selected]
-    // the files may have changed while the dialog was open: choose against them as they are now
-    const now = await choicesHere()
-    if (!now) return close()
-    const say = (text: string) => {
-      problem.textContent = text[0].toUpperCase() + text.slice(1)
-    }
-    if (row.choice === 'new') {
-      const name = input.value.trim()
-      const wrong = viewNameProblem(name, now.views.map((v) => v.name))
-      if (wrong) {
-        say(wrong)
-        input.focus()
-        return
-      }
-      close()
-      return saveAs({ kind: 'new', name }, now)
-    }
-    const choice = row.choice
-    if (choice.kind === 'view' && !now.views.some((v) => v.name === choice.name)) {
-      say(`the view '${choice.name}' is no longer in ${now.path}; press Esc and Shift+V again`)
-      return
-    }
-    close()
-    return saveAs(choice, now)
+    const choice = rows[selected].choice
+    const wrong = await spec.apply(choice, input.value.trim(), close)
+    if (!wrong) return
+    problem.textContent = wrong[0].toUpperCase() + wrong.slice(1)
+    if (choice === 'new') input.focus()
   }
-  // the dialog has the keys while open: arrows would change slides, and V
+  // the dialog has the keys while open: arrows would change slides, and V or P
   // save. Not VS Code's shortcuts (Ctrl+S, F1, …), which go on to VS Code
   const onKey = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey || /^F\d+$/.test(e.key)) return
@@ -1146,11 +1359,109 @@ async function openSaveAs(): Promise<void> {
     window.removeEventListener('hashchange', onSlide)
     box.remove()
     dialog = null
+    if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) opener.focus()
   }
   window.addEventListener('keydown', onKey, true)
   window.addEventListener('hashchange', onSlide)
   dialog = { close }
   select(selected)
+}
+
+/** Shift+V: Save view as…, in the panel's own dialog */
+async function openSaveAs(): Promise<void> {
+  if (dialog || saving || !currentView()) return
+  const choices = await choicesHere()
+  if (!choices || dialog) return
+  const rows: DialogRow<SaveAs>[] = [
+    {
+      label: 'Only this slide',
+      detail: choices.current ? `its own camera, instead of the view '${choices.current}'` : 'its own camera, as V saves it',
+      choice: { kind: 'slide' },
+    },
+    ...choices.views.map((v) => ({
+      label: `The view '${v.name}'`,
+      detail:
+        (v.name === choices.current ? "this slide's view, as V saves it" : 'this slide uses it from now on') +
+        (v.users.length > 0 ? ` · slides ${listSlides(v.users)}` : ''),
+      choice: { kind: 'view', name: v.name } as SaveAs,
+    })),
+    { label: 'A new view', detail: choices.exists ? `in ${choices.path}` : `in a new file, ${choices.path}`, choice: 'new' },
+  ]
+  openChoiceDialog<SaveAs>({
+    title: 'Save this camera view',
+    listLabel: 'Where to save the camera view',
+    inputLabel: 'Name of the new view',
+    placeholder: 'name, such as oversikt',
+    rows,
+    // what V doesn't do: the slide alone for a slide that names a view, otherwise a new view
+    selected: choices.current ? 0 : rows.length - 1,
+    async apply(choice, name, close) {
+      // the files may have changed while the dialog was open: choose against them as they are now
+      const now = await choicesHere()
+      if (!now) return close()
+      if (choice === 'new') {
+        const wrong = viewNameProblem(name, now.views.map((v) => v.name))
+        if (wrong) return wrong
+        close()
+        return saveAs({ kind: 'new', name }, now)
+      }
+      if (choice.kind === 'view' && !now.views.some((v) => v.name === choice.name)) {
+        return `the view '${choice.name}' is no longer in ${now.path}; press Esc and Shift+V again`
+      }
+      close()
+      return saveAs(choice, now)
+    },
+  })
+}
+
+/** Shift+P: Save pose as…, in the panel's own dialog */
+async function openSavePoseAs(): Promise<void> {
+  if (dialog || saving || posePending() || !robotPose()) return
+  const choices = await poseChoicesHere()
+  if (!choices || dialog) return
+  const rows: DialogRow<SavePoseAs>[] = [
+    {
+      label: 'Only this slide',
+      detail: choices.current ? `its own joints, instead of the pose '${choices.current}'` : 'its own joints, as P saves them',
+      choice: { kind: 'slide' },
+    },
+    ...choices.poses.map((p) => ({
+      label: `The pose '${p.name}'`,
+      detail:
+        (p.name === choices.current ? "this slide's pose, as P saves it" : 'this slide uses it from now on') +
+        (p.users.length > 0 ? ` · slides ${listSlides(p.users)}` : ''),
+      choice: { kind: 'pose', name: p.name } as SavePoseAs,
+    })),
+    {
+      label: 'A new pose',
+      detail: (choices.exists ? `in ${choices.path}` : `in a new file, ${choices.path}`) + ', every joint',
+      choice: 'new',
+    },
+  ]
+  openChoiceDialog<SavePoseAs>({
+    title: "Save the robot's pose",
+    listLabel: "Where to save the robot's pose",
+    inputLabel: 'Name of the new pose',
+    placeholder: 'name, such as q0',
+    rows,
+    // what P doesn't do: the slide alone for a slide that names a pose, otherwise a new pose
+    selected: choices.current ? 0 : rows.length - 1,
+    async apply(choice, name, close) {
+      const now = await poseChoicesHere()
+      if (!now) return close()
+      if (choice === 'new') {
+        const wrong = poseNameProblem(name, now.poses.map((p) => p.name))
+        if (wrong) return wrong
+        close()
+        return savePoseAs({ kind: 'new', name }, now)
+      }
+      if (choice.kind === 'pose' && !now.poses.some((p) => p.name === choice.name)) {
+        return `the pose '${choice.name}' is no longer in ${now.path}; press Esc and Shift+P again`
+      }
+      close()
+      return savePoseAs(choice, now)
+    },
+  })
 }
 
 window.addEventListener('keydown', (e) => {
@@ -1161,8 +1472,9 @@ window.addEventListener('keydown', (e) => {
   if (key === 'v') {
     if (e.shiftKey) void openSaveAs()
     else void saveView()
-  } else if (key === 'p' && !e.shiftKey) {
-    void savePose()
+  } else if (key === 'p') {
+    if (e.shiftKey) void openSavePoseAs()
+    else void savePose()
   } else if (key === 'j' && !e.shiftKey) {
     jointPanel.toggle()
   }

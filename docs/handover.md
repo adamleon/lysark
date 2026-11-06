@@ -77,15 +77,19 @@ Step 5 lands in three parts. 5a is built and checked (2026-11-06), not yet relea
 v2.8.0, no extension change. J opens joint sliders in the panel (src/editor/joint-panel.ts), which
 move the robot at once; P saves the joints moved into the pose the slide names or into its own
 `joints:` block (src/editor/pose-edit.ts), put into the running deck in place. A slide's own
-slider now follows its joint (src/main.ts), its own small engine change. Next: 5b, Shift+P
-("Save pose as…", the pose counterpart of Shift+V); then 5c, dragging the tool with IK.
+slider now follows its joint (src/main.ts), its own small engine change.
+
+5b is built and checked (2026-11-07), not yet released: engine v2.9.0, no extension change.
+Shift+P, "Save pose as…" (only this slide, an existing pose, a new pose, creating the scene file
+if needed), in the dialog Shift+V uses (runtime.ts, openChoiceDialog) and in Scene Actions….
+Next: 5c, dragging the tool with IK.
 
 **Releases wait (2026-11-06):** GitHub Actions don't start on the author's account (the
 education plan expired; renewal pending), so Update engine and Publish lectures can't run, and
 engine CI doesn't run on pushes. Until then every push is checked locally first (vitest, the
 student-file check, check-editor in Chromium and Firefox, check-extension). v2.6.0 is not tagged
-yet: tag it on the step-3 commit (20675c8), v2.7.0 on step 4's (6bf9cf9) and v2.8.0 on step
-5a's, once Actions run again.
+yet: tag it on the step-3 commit (20675c8), v2.7.0 on step 4's (6bf9cf9), v2.8.0 on step 5a's
+(defeca7) and v2.9.0 on step 5b's, once Actions run again.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -225,7 +229,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**262**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**274**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.

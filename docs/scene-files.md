@@ -1,7 +1,7 @@
 # Scene files
 
 How to give a lecture its own named camera views (from engine v2.5.0) and robot poses (from
-v2.7.0), and to pose the robot in the editor (from v2.8.0): steps 2 to 5 of
+v2.7.0), and to pose the robot in the editor (from v2.8.0, Save pose as… from v2.9.0): steps 2 to 5 of
 [scene-files-proposal.md](scene-files-proposal.md). Written for the author; no engine knowledge
 needed. Objects come in a later step.
 
@@ -173,6 +173,31 @@ From engine v2.8.0.
 
   The line under the sliders says where P will write before you press it, and which slides use
   that pose now.
+- **Shift+P, "Save pose as…"** (from engine v2.9.0) opens the same kind of list as Shift+V (↑ and ↓
+  choose, Enter saves, Esc closes; Scene Actions… offers the same). The slide keeps the pose it
+  shows, whichever you choose:
+  - **Only this slide:** a slide that names a pose gets a `joints:` block of its own in place of
+    the name: the pose's joints, and the ones you moved. On a slide with a block, or none, it is
+    what P does.
+  - **The pose 'X'**, for each pose in the scene file, with the slides that use it: the slide says
+    `joints: X` from now on, and X takes the robot's pose. A list pose gets every joint; a mapping
+    pose its own joints, the joints the slide set itself, and the ones you moved. Every slide that
+    uses X changes with it.
+  - **A new pose:** type its name (one word, as for a new view). It goes into the scene file as a
+    list of every joint, in order, and the slide says `joints: <name>`. If the lecture has no
+    scene file for the slide's scene yet, it makes one, `scenes/<scene>.yaml`, with `base:` set.
+
+  A joint you moved is written to two decimals, inside its limits. One you didn't keeps the value
+  the slide gives it (or the scene's), or the limit if that value is outside it. A joint that
+  neither the slide nor the scene sets is written where the robot holds it, to two decimals (after
+  an `idle:` slide, wherever the idle left it). The panel then says which other slides change with
+  the save.
+
+  A save that would leave the slides with an error is refused, and the panel says why. For
+  example, joints can't be added to a mapping pose that is one end of a trajectory, since both ends
+  must set the same joints: choose a list pose or a new pose there. A slide that sets joints a pose
+  of its scene can't hold (in `agilus-duo`, the other robot's `ghost_joint_*`) can only be saved
+  into the slide itself (P, or "Only this slide").
 - **Which joints are marked:** a joint away from where the slide puts it (its own joints, carried
   ones, a pose, or the scene's), and a joint you moved with the sliders that no slide puts
   anywhere. The robot keeps such a joint where you left it on the next slides too, until a slide
@@ -238,8 +263,8 @@ it reads the scene file from VS Code, changes only that view's `lookAt` and `off
 edit (docs/editor-host.md). No extension update was needed for this: extension 0.3.0 already
 sends, reads and edits scene files.
 
-P is built the same way. The joint sliders (`src/editor/joint-panel.ts`) set the robot's joints in
-the running deck. P works out which joints moved, and where the slide's joints come from (its own
+P and Shift+P are built the same way, Shift+P in the same dialog as Shift+V. The joint sliders
+(`src/editor/joint-panel.ts`) set the robot's joints in the running deck. P works out which joints moved, and where the slide's joints come from (its own
 block, or a pose it names), and computes the edit (`src/editor/pose-edit.ts`, only those numbers
 changed). New text that changes only cameras and joints goes into the running deck without
 loading the panel afresh (`src/editor/editor-compile.ts`, `updateTargets`); the slide shown may
@@ -247,6 +272,5 @@ only change to the view or pose just saved from it.
 
 ## Not yet
 
-- Shift+P, "Save pose as…" (only this slide, an existing pose, or a new one), step 5b; posing the
-  robot by dragging its tool (inverse kinematics), step 5c.
+- Posing the robot by dragging its tool (inverse kinematics), step 5c.
 - Objects (tables, workpieces, frames), steps 6 and 7; models from `assets/`, steps 8 and 9.

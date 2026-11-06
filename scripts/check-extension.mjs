@@ -13,7 +13,8 @@
 //      and every slide that uses it takes it; with Save view as… (v2.6.0),
 //      Shift+V makes a new view and scene file, and one Ctrl+Z undoes both;
 //      with the joint sliders (v2.8.0), J and P change the pose a slide
-//      names in the scene file, in place
+//      names in the scene file, in place; with Save pose as… (v2.9.0),
+//      Shift+P adds a new pose to a scene file and names it on the slide
 //   2  (engine v2.3.x) V writes the view; Scene Actions… says to update the engine
 //
 //   node scripts/check-extension.mjs <editor dir> [<editor dir> …]
@@ -59,6 +60,11 @@ function buildSays(editorDir, text) {
 /** true if the editor build has the joint sliders and P (engine v2.8.0): the sliders' line about P is in its files */
 function knowsPosePanel(editorDir) {
   return buildSays(editorDir, 'P: save this pose into slide')
+}
+
+/** true if the editor build has Save pose as… (engine v2.9.0): its dialog's title is in its files */
+function knowsSavePoseAs(editorDir) {
+  return buildSays(editorDir, "Save the robot's pose")
 }
 
 /** true if the editor build has Save view as… (engine v2.6.0): its dialog's title is in its files */
@@ -168,7 +174,7 @@ process.on('SIGINT', () => {
 })
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, saveAs, posePanel, lines) {
+async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, lines) {
   let ok = true
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
@@ -414,6 +420,46 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, lines) {
         posed.inPlace && /reach: \[0\.9, 0\.5, -1\.5\]/.test(posed.arm) && posed.joints.every((q) => q === 0.5),
         `P changed the pose 'reach' in scenes/arm.yaml, in place; slides 2 and 3 take joint2 ${JSON.stringify(posed.joints)}`,
       )
+
+      // Shift+P on the demo's KUKA slide (10): a new pose in scenes/agilus.yaml,
+      // which has no poses yet, named on the slide; one edit to both files
+      if (!savePoseAs) {
+        lines.push('(Save pose as… not checked: this editor has none)')
+        return ok
+      }
+      await frame.evaluate(() => {
+        window.__received = []
+        location.hash = '#10'
+      })
+      const onKuka = await frame
+        .waitForFunction(() => {
+          const L = window.__lysark
+          return L.engine.currentIndex === 9 && !L.sceneManager.busy && L.sceneManager.activeSceneId === 'agilus'
+        }, null, { timeout: 30_000 })
+        .then(() => true, () => false)
+      await frame.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', shiftKey: true, bubbles: true })))
+      const poseDialog = await frame
+        .waitForSelector('[role="dialog"] input', { timeout: 10_000 })
+        .then(() => true, () => false)
+      check(onKuka && poseDialog, 'on slide 10, Shift+P opened the Save pose as… dialog')
+      await frame.evaluate(() => {
+        const input = document.querySelector('[role="dialog"] input')
+        input.focus()
+        input.value = 'grip'
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      })
+      await page.waitForTimeout(3500)
+      const gripped = await frame
+        .evaluate(() => ({
+          inPlace: Array.isArray(window.__received),
+          joints: JSON.stringify(window.__lysark.engine.opts.slides[9].effective.joints),
+          agilus: (window.__received ?? []).filter((m) => m?.type === 'lysark:source').map((m) => m.files['scenes/agilus.yaml']).pop() ?? '',
+        }))
+        .catch(() => ({ inPlace: false, joints: '', agilus: '' }))
+      check(
+        gripped.inPlace && /\n {2}grip: \[/.test(gripped.agilus) && /"joint_6"/.test(gripped.joints),
+        `Shift+P saved a new pose 'grip' in scenes/agilus.yaml, in place; slide 10's joints ${gripped.joints}`,
+      )
     }
   } else {
     await tab('Lysark').click()
@@ -443,7 +489,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), lines)
+    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

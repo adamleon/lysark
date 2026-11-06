@@ -242,24 +242,40 @@ export function plainText(source: string): { yaml: string; restore: (text: strin
 
 const RESERVED = /^(true|false|null|yes|no|on|off|y|n)$/i
 
+/** a YAML comment at the end of `text` (part of one line), with the spaces before it; '' if none */
+export function commentOf(text: string): string {
+  for (let at = text.indexOf('#'); at >= 0; at = text.indexOf('#', at + 1)) {
+    if (at > 0 && !/\s/.test(text[at - 1])) continue // `a#b` isn't a comment
+    let from = at
+    while (from > 0 && /\s/.test(text[from - 1])) from--
+    return text.slice(from)
+  }
+  return ''
+}
+
 /** `text` as YAML that reads back as the same string: bare when it can be, quoted when not */
-function yamlScalar(text: string): string {
+export function yamlScalar(text: string): string {
   return stringify(text, { lineWidth: 0 }).trimEnd()
 }
 
 /**
- * null if `name` will do as a new view's name, otherwise why not. One word, so
- * it is written without quotes in both files: letters (Norwegian ones too),
- * digits, - and _, starting with a letter.
+ * null if `name` will do as a new view's (or pose's) name, otherwise why not.
+ * One word, so it is written without quotes in both files: letters (Norwegian
+ * ones too), digits, - and _, starting with a letter.
  */
-export function viewNameProblem(name: string, existing: Iterable<string>): string | null {
-  if (name.trim() === '') return "write a name for the view, such as 'oversikt'"
+export function nameProblem(name: string, existing: Iterable<string>, what: 'view' | 'pose'): string | null {
+  if (name.trim() === '') return `write a name for the ${what}, such as '${what === 'view' ? 'oversikt' : 'q0'}'`
   if (!/^\p{L}[\p{L}\p{N}_-]*$/u.test(name)) {
-    return "a view's name is one word: letters (æ, ø and å too), digits, - and _, starting with a letter"
+    return `a ${what}'s name is one word: letters (æ, ø and å too), digits, - and _, starting with a letter`
   }
   if (RESERVED.test(name)) return `'${name}' reads as a value in YAML; choose another name`
-  for (const other of existing) if (other === name) return `there is already a view called '${name}'`
+  for (const other of existing) if (other === name) return `there is already a ${what} called '${name}'`
   return null
+}
+
+/** null if `name` will do as a new view's name, otherwise why not (nameProblem) */
+export function viewNameProblem(name: string, existing: Iterable<string>): string | null {
+  return nameProblem(name, existing, 'view')
 }
 
 /**
@@ -268,6 +284,16 @@ export function viewNameProblem(name: string, existing: Iterable<string>): strin
  * or the line is added. Everything else stays byte for byte.
  */
 export function setCameraName(source: string, slideIndex: number, name: string): string {
+  return setSlideName(source, slideIndex, 'camera', name)
+}
+
+/**
+ * The whole slides.md with slide `slideIndex` (0-based) naming `name` in
+ * `key` (`camera: oversikt`, `joints: q0`): the key's value (a block of its
+ * own, or another name) becomes the name, or the line is added. Everything
+ * else stays byte for byte.
+ */
+export function setSlideName(source: string, slideIndex: number, key: 'camera' | 'joints', name: string): string {
   const r = slideRanges(source)[slideIndex]
   if (!r) throw new Error(`there is no slide ${slideIndex + 1}`)
   const eol = source.includes('\r\n') ? '\r\n' : '\n'
@@ -278,24 +304,29 @@ export function setCameraName(source: string, slideIndex: number, name: string):
   if (doc.errors.length > 0) throw new Error(`this slide's frontmatter has a YAML error: ${doc.errors[0].message}`)
   const root = doc.contents
   if (root !== null && !isMap(root)) throw new Error("this slide's frontmatter is not a YAML mapping")
-  const pair = root?.items.find((p) => keyName(p as Pair) === 'camera') as Pair | undefined
+  const pair = root?.items.find((p) => keyName(p as Pair) === key) as Pair | undefined
   let edited: string
-  const key = pair?.key as { range?: Range } | undefined
-  if (pair && key?.range) {
-    const start = key.range[0]
+  const keyNode = pair?.key as { range?: Range } | undefined
+  if (pair && keyNode?.range) {
+    const start = keyNode.range[0]
+    const colon = yaml.indexOf(':', keyNode.range[1])
+    const keyLineEnd = yaml.indexOf('\n', colon) < 0 ? yaml.length : yaml.indexOf('\n', colon)
     const value = pair.value as { range?: Range } | null
     let end: number
+    // a comment on the key's line stays when what it holds goes (a block under it, or nothing)
+    let comment = ''
     if (value?.range && value.range[1] > value.range[0]) {
       // to the value's last character (a block mapping's range runs on past its newline)
       end = value.range[1]
       while (end > start && /\s/.test(yaml[end - 1])) end--
+      if (value.range[0] > keyLineEnd) comment = commentOf(yaml.slice(colon + 1, keyLineEnd))
     } else {
-      end = yaml.indexOf('\n', start)
-      if (end < 0) end = yaml.length
+      end = keyLineEnd
+      comment = commentOf(yaml.slice(colon + 1, keyLineEnd))
     }
-    edited = yaml.slice(0, start) + `camera: ${yamlScalar(name)}` + yaml.slice(end)
+    edited = yaml.slice(0, start) + `${key}: ${yamlScalar(name)}${comment}` + yaml.slice(end)
   } else {
-    const line = `camera: ${yamlScalar(name)}`
+    const line = `${key}: ${yamlScalar(name)}`
     edited = yaml.trim() === '' ? line : yaml.replace(/\n*$/, '') + `\n${line}` + (yaml.endsWith('\n') ? '\n' : '')
   }
   return bom + [...lines.slice(0, r.yamlStart), ...edited.split('\n'), ...lines.slice(r.yamlEnd)].join(eol)
@@ -319,20 +350,45 @@ function viewValues(view: CameraView): { look: string; offset: string; spring: s
  * stays byte for byte.
  */
 export function addNamedView(source: string, name: string, view: CameraView): string {
+  const { look, offset, spring } = viewValues(view)
+  return addNamedEntry(source, 'views', name, {
+    block: (indent, inner) =>
+      `${indent}${name}:\n${indent}${inner}lookAt: ${look}\n${indent}${inner}offset: ${offset}\n` +
+      (spring ? `${indent}${inner}spring: ${spring}\n` : ''),
+    flow: `${name}: { lookAt: ${look}, offset: ${offset}${spring ? `, spring: ${spring}` : ''} }`,
+  })
+}
+
+/**
+ * A new entry under `views:` or `poses:`, as the file writes them: `block`
+ * gives its lines at an indent (and the indent inside a view the file uses),
+ * `flow` its text inside `{ }`; `comment`, for a section the edit adds, goes
+ * after its key.
+ */
+export interface NamedEntry {
+  block(indent: string, inner: string): string
+  flow: string
+  comment?: string
+}
+
+/**
+ * The whole scene file with the entry `name` added under `section` (which is
+ * added if missing), written like the entries already there. Everything else
+ * stays byte for byte.
+ */
+export function addNamedEntry(source: string, section: 'views' | 'poses', name: string, entry: NamedEntry): string {
+  const what = section === 'views' ? 'view' : 'pose'
   const { yaml, restore } = plainText(source)
   const doc = parseDocument(yaml)
-  if (doc.errors.length > 0) throw new Error(`the scene file has a YAML error, so the view can't be added: ${doc.errors[0].message}`)
+  if (doc.errors.length > 0) throw new Error(`the scene file has a YAML error, so the ${what} can't be added: ${doc.errors[0].message}`)
   const root = doc.contents
   if (!isMap(root)) throw new Error('the scene file is not a YAML mapping')
-  const { look, offset, spring } = viewValues(view)
-  const block = (indent: string, inner: string) =>
-    `${indent}${name}:\n${indent}${inner}lookAt: ${look}\n${indent}${inner}offset: ${offset}\n` +
-    (spring ? `${indent}${inner}spring: ${spring}\n` : '')
-  const viewsPair = root.items.find((p) => keyName(p as Pair) === 'views') as Pair | undefined
+  const block = entry.block
+  const viewsPair = root.items.find((p) => keyName(p as Pair) === section) as Pair | undefined
   const v = viewsPair?.value as (YAMLMap<unknown, unknown> & { range?: Range }) | { value?: unknown; range?: Range } | null | undefined
 
   if (!viewsPair) {
-    return restore(`${yaml.replace(/\n*$/, '\n')}\nviews:\n${block('  ', '  ')}`)
+    return restore(`${yaml.replace(/\n*$/, '\n')}\n${section}:${entry.comment ?? ''}\n${block('  ', '  ')}`)
   }
   if (v === null || v === undefined || (isScalar(v) && v.value === null)) {
     // `views:` with nothing under it (or `~`, `null`, which go): right after that line
@@ -348,17 +404,16 @@ export function addNamedView(source: string, name: string, view: CameraView): st
     if (lineEnd < 0) return restore(`${text}\n${block('  ', '  ')}`)
     return restore(text.slice(0, lineEnd + 1) + block('  ', '  ') + text.slice(lineEnd + 1))
   }
-  if (!isMap(v)) throw new Error("the scene file's 'views' is not a mapping of names to views")
-  if (v.items.some((p) => keyName(p as Pair) === name)) throw new Error(`the scene file already has a view '${name}'`)
+  if (!isMap(v)) throw new Error(`the scene file's '${section}' is not a mapping of names to ${section}`)
+  if (v.items.some((p) => keyName(p as Pair) === name)) throw new Error(`the scene file already has a ${what} '${name}'`)
   if (v.flow) {
     // `views: { a: { … } }`: one more entry before the closing brace
-    const entry = `${name}: { lookAt: ${look}, offset: ${offset}${spring ? `, spring: ${spring}` : ''} }`
-    if (v.items.length === 0) return restore(yaml.slice(0, v.range![0]) + `{ ${entry} }` + yaml.slice(v.range![1]))
+    if (v.items.length === 0) return restore(yaml.slice(0, v.range![0]) + `{ ${entry.flow} }` + yaml.slice(v.range![1]))
     const last = v.items[v.items.length - 1] as Pair
     const at = ((last.value as { range?: Range } | null)?.range ?? (last.key as { range: Range }).range)[1]
-    return restore(yaml.slice(0, at) + `, ${entry}` + yaml.slice(at))
+    return restore(yaml.slice(0, at) + `, ${entry.flow}` + yaml.slice(at))
   }
-  // block style: after the last view, indented as the others
+  // block style: after the last entry, indented as the others
   const firstKey = (v.items[0] as Pair).key as { range: Range }
   const indent = ' '.repeat(firstKey.range[0] - lineStart(yaml, firstKey.range[0]))
   const firstView = (v.items[0] as Pair).value

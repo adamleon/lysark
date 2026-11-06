@@ -486,6 +486,11 @@ HTTPS server.
   something else moves it (the joint sliders, the debug panel), so grabbing it never jumps.
   Shift+P (step 5b) and dragging the tool with IK (step 5c) follow. Engine v2.8.0, no extension
   change. [scene-files.md](scene-files.md).
+- Scene files, step 5b (2026-11-07, built, not yet released): Shift+P, "Save pose as…", in the
+  panel's dialog (shared with Shift+V) and in Scene Actions…: only this slide, an existing pose,
+  or a new pose (a list of every joint), creating `scenes/<scene>.yaml` when the lecture has none.
+  The slide keeps the pose it shows. Engine v2.9.0, no extension change.
+  [scene-files.md](scene-files.md).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).

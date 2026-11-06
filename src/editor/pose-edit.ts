@@ -1,10 +1,22 @@
 import { isMap, isScalar, isSeq, parseDocument, type Pair, type YAMLMap } from 'yaml'
 import { compileLecture } from '../compiler/compile-slides'
-import { readSceneFiles } from '../compiler/scene-files'
+import { readSceneFiles, type SceneFile } from '../compiler/scene-files'
 import { slideRanges, splitLines } from '../compiler/slide-ranges'
 import { SCENE_JOINTS, type JointInfo } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
-import { applyEdits, keyName, lineStart, plainText, setValue, type Edit, type Range } from './camera-edit'
+import {
+  addNamedEntry,
+  applyEdits,
+  commentOf,
+  keyName,
+  lineStart,
+  nameProblem,
+  plainText,
+  setSlideName,
+  setValue,
+  type Edit,
+  type Range,
+} from './camera-edit'
 import { slideHeads } from './save-view'
 import { matchSlide, singleEdit } from './slide-match'
 
@@ -41,6 +53,18 @@ interface PoseEditOptions {
 }
 
 /**
+ * A joint's value as Save pose as… writes it: a moved joint where the robot
+ * holds it (two decimals, inside its limits); one that isn't, as the slide or
+ * the scene puts it (`target`), or the limit, rounded inward, if that is
+ * outside it; one that neither puts anywhere, where the robot holds it.
+ */
+export function poseJointValue(joint: JointInfo, setpoint: number, target: number | undefined, moved: boolean): number {
+  if (moved || target === undefined) return poseValue(setpoint, joint)
+  if (target >= joint.min - 1e-9 && target <= joint.max + 1e-9) return target
+  return poseValue(target, joint)
+}
+
+/**
  * The edit to a mapping of joints (a slide's `joints:` block, or a pose
  * written as a mapping): each joint in `values` set where it is written, or
  * added after the others.
@@ -56,6 +80,7 @@ function editJointsMapping(yaml: string, map: YAMLMap<unknown, unknown>, values:
       missing.push([joint, value])
       continue
     }
+    if (isScalar(pair.value) && pair.value.value === value) continue // already that number, as written
     // a tag (`!!int`) would apply to the new number, and an anchor (`&q`) would
     // carry it to the joints that refer to it: leave such a joint to the author
     const written = pair.value as { tag?: string; anchor?: string } | null
@@ -90,7 +115,7 @@ function editJointsMapping(yaml: string, map: YAMLMap<unknown, unknown>, values:
 }
 
 /** the pose edit for one slide's YAML (without its `---` fences) */
-function editJointsYaml(yaml: string, values: Record<string, number>): string {
+function editJointsYaml(yaml: string, values: Record<string, number>, replaceName = false): string {
   const doc = parseDocument(yaml)
   if (doc.errors.length > 0) {
     throw new Error(`this slide's frontmatter has a YAML error, so the pose can't be saved: ${doc.errors[0].message}`)
@@ -100,7 +125,10 @@ function editJointsYaml(yaml: string, values: Record<string, number>): string {
   const pair = root?.items.find((p) => keyName(p as Pair) === 'joints') as Pair | undefined
   const value = pair?.value
   if (isMap(value)) return editJointsMapping(yaml, value as YAMLMap<unknown, unknown>, values)
-  const empty = value === null || value === undefined || (isScalar(value) && value.value === null)
+  const empty =
+    value === null ||
+    value === undefined ||
+    (isScalar(value) && (value.value === null || (replaceName && typeof value.value === 'string')))
   if (!empty) {
     throw new Error(
       isScalar(value) && typeof value.value === 'string'
@@ -108,7 +136,7 @@ function editJointsYaml(yaml: string, values: Record<string, number>): string {
         : "this slide's joints: is not a mapping of joints to radians",
     )
   }
-  // no joints on this slide yet, or an empty `joints:`: a block of its own
+  // no joints on this slide yet, an empty `joints:`, or (replaceName) the name of a pose: a block of its own
   const lines = Object.entries(values).map(([joint, v]) => `\n  ${joint}: ${v}`).join('')
   if (pair && isScalar(pair.key) && pair.key.range) {
     // `joints:` keeps its line and a comment on it; what stood for nothing (a
@@ -120,14 +148,21 @@ function editJointsYaml(yaml: string, values: Record<string, number>): string {
     const keyLineEnd = lineEnd(colon)
     const head = yaml.slice(start, colon + 1) + commentOf(yaml.slice(colon + 1, keyLineEnd))
     const range = (value as { range?: Range } | null | undefined)?.range
-    if (range && range[1] > range[0] && range[0] > keyLineEnd) {
-      const nullStart = lineStart(yaml, range[0])
-      const nullEnd = lineEnd(range[1])
-      const indent = /^[ \t]*/.exec(yaml.slice(nullStart, range[0]))![0]
-      const comment = commentOf(yaml.slice(range[1], nullEnd)).trimStart()
-      return (
-        yaml.slice(0, start) + head + yaml.slice(keyLineEnd, nullStart - 1) + (comment ? `\n${indent}${comment}` : '') + lines + yaml.slice(nullEnd)
-      )
+    if (range && range[1] > range[0]) {
+      // the value's last character (a block scalar's range runs on past its newline)
+      let end = range[1]
+      while (end > range[0] && /\s/.test(yaml[end - 1])) end--
+      if (range[0] > keyLineEnd) {
+        const nullStart = lineStart(yaml, range[0])
+        const nullEnd = lineEnd(end)
+        const indent = /^[ \t]*/.exec(yaml.slice(nullStart, range[0]))![0]
+        const comment = commentOf(yaml.slice(end, nullEnd)).trimStart()
+        return (
+          yaml.slice(0, start) + head + yaml.slice(keyLineEnd, nullStart - 1) + (comment ? `\n${indent}${comment}` : '') + lines + yaml.slice(nullEnd)
+        )
+      }
+      // a value from the key's line over the next (a block scalar `>-`): its lines go too
+      if (end > keyLineEnd) return yaml.slice(0, start) + head + lines + yaml.slice(lineEnd(end))
     }
     return yaml.slice(0, start) + head + lines + yaml.slice(keyLineEnd)
   }
@@ -136,25 +171,19 @@ function editJointsYaml(yaml: string, values: Record<string, number>): string {
   return yaml.replace(/\n*$/, '') + '\n' + block + (yaml.endsWith('\n') ? '\n' : '')
 }
 
-/** a YAML comment at the end of `text` (part of one line), with the spaces before it; '' if none */
-function commentOf(text: string): string {
-  for (let at = text.indexOf('#'); at >= 0; at = text.indexOf('#', at + 1)) {
-    if (at > 0 && !/\s/.test(text[at - 1])) continue // `a#b` isn't a comment
-    let from = at
-    while (from > 0 && /\s/.test(text[from - 1])) from--
-    return text.slice(from)
-  }
-  return ''
-}
-
-/** the whole slides.md with `values` (joint → radians) written into slide `slideIndex`'s `joints:` (0-based) */
-export function setSlideJoints(source: string, slideIndex: number, values: Record<string, number>): string {
+/**
+ * The whole slides.md with `values` (joint → radians) written into slide
+ * `slideIndex`'s `joints:` (0-based). `replaceName`: a pose the slide names
+ * is replaced with a block of `values` (Save pose as… only this slide);
+ * otherwise such a slide is refused.
+ */
+export function setSlideJoints(source: string, slideIndex: number, values: Record<string, number>, replaceName = false): string {
   const r = slideRanges(source)[slideIndex]
   if (!r) throw new Error(`there is no slide ${slideIndex + 1}`)
   const eol = source.includes('\r\n') ? '\r\n' : '\n'
   const bom = source.startsWith('\uFEFF') ? '\uFEFF' : ''
   const lines = splitLines(source)
-  const edited = editJointsYaml(lines.slice(r.yamlStart, r.yamlEnd).join('\n'), values)
+  const edited = editJointsYaml(lines.slice(r.yamlStart, r.yamlEnd).join('\n'), values, replaceName)
   const yamlLines = edited === '' ? [] : edited.split('\n')
   return bom + [...lines.slice(0, r.yamlStart), ...yamlLines, ...lines.slice(r.yamlEnd)].join(eol)
 }
@@ -186,6 +215,7 @@ export function setNamedPose(
   const edits: Edit[] = []
   for (const [joint, value] of Object.entries(values)) {
     const item = items[order.indexOf(joint)]
+    if (isScalar(item) && item.value === value) continue // already that number, as written
     // a tag (`!!float`) or an anchor (`&a`) would apply to the new number: leave such a pose to the author
     if (!isScalar(item) || typeof item.value !== 'number' || ((item.tag || item.anchor) && !options.overProps) || !item.range) {
       throw new Error(`the pose '${name}' isn't written as plain numbers, so it can't be saved into; change it by hand`)
@@ -277,5 +307,158 @@ export function poseUsers(files: Record<string, string>, target: PoseTarget, sho
     return now.flatMap((s, i) => (motionOf(s) !== shown[i] ? [i] : []))
   } catch {
     return target.users
+  }
+}
+
+// ---- Save pose as… (Shift+P, Scene Actions…; docs/scene-files.md) ----------
+
+/** null if `name` will do as a new pose's name, otherwise why not (nameProblem) */
+export function poseNameProblem(name: string, existing: Iterable<string>): string | null {
+  return nameProblem(name, existing, 'pose')
+}
+
+/** a pose as a q list: every joint, in order */
+const qList = (q: number[]) => `[${q.join(', ')}]`
+
+/**
+ * The whole scene file with a new pose `name` added under `poses:` (which is
+ * added if missing), as a list of every joint in `order`. Everything else
+ * stays byte for byte.
+ */
+export function addNamedPose(source: string, name: string, q: number[], order: string[]): string {
+  return addNamedEntry(source, 'poses', name, {
+    block: (indent) => `${indent}${name}: ${qList(q)}\n`,
+    flow: `${name}: ${qList(q)}`,
+    comment: `   # radians, every joint in order: ${order.join(', ')}`,
+  })
+}
+
+/** a new scene file for the engine scene `scene`, with the pose `name` (every joint in `order`) */
+export function newPoseSceneFile(scene: string, name: string, q: number[], order: string[]): string {
+  return (
+    `# This lecture's version of the engine scene '${scene}', with named robot poses\n` +
+    `# (docs/scene-files.md in the Lysark engine). A slide uses one with \`joints: ${name}\`.\n` +
+    `base: ${scene}\n\nposes:   # radians, every joint in order: ${order.join(', ')}\n  ${name}: ${qList(q)}\n`
+  )
+}
+
+/** what Save pose as… can do on a slide */
+export interface PoseAsChoices {
+  /** the scene the slide names in `scene:` */
+  scene: string
+  /** the engine scene it runs (its scene file's base), whose joints a pose sets */
+  base: string
+  /** its scene file, or where a new one goes */
+  path: string
+  /** the lecture has that scene file */
+  exists: boolean
+  /** the pose the slide names, if any */
+  current: string | null
+  /** the joints the slide sets itself: its own block's, or those of the pose it names */
+  own: string[]
+  /** the scene file's poses, with the joints each sets and the slides (0-based) whose robot it moves */
+  poses: Array<{ name: string; joints: string[]; users: number[] }>
+}
+
+/**
+ * The choices for slide `index` of `files['slides.md']` (the files the panel
+ * shows); `users` gives the slides whose robot a pose moves (poseUsers, which
+ * the runtime keeps per text). null if the slide has no scene.
+ */
+export function poseAsChoices(
+  files: Record<string, string>,
+  index: number,
+  users: (target: PoseTarget) => number[],
+): PoseAsChoices | null {
+  const heads = slideHeads(files['slides.md'] ?? '')
+  const head = heads[index]
+  if (!head || typeof head.scene !== 'string') return null
+  const scene = head.scene
+  const path = [`scenes/${scene}.yaml`, `scenes/${scene}.yml`].find((p) => typeof files[p] === 'string')
+  const block = head.joints !== null && typeof head.joints === 'object' && !Array.isArray(head.joints) ? Object.keys(head.joints) : []
+  if (!path) return { scene, base: scene, path: `scenes/${scene}.yaml`, exists: false, current: null, own: block, poses: [] }
+  const current = typeof head.joints === 'string' ? head.joints : null
+  let file: SceneFile | undefined
+  try {
+    file = readSceneFiles({ [path]: files[path] }).get(scene)
+  } catch {
+    // a scene file with an error: no poses to offer; a new pose will say why
+  }
+  const naming = (pose: string) => heads.flatMap((h, i) => (h.scene === scene && h.joints === pose ? [i] : []))
+  const poses = [...(file?.poses ?? [])].map(([name, pose]) => ({
+    name,
+    joints: Object.keys(pose.joints),
+    users: users({ pose: name, path, users: naming(name) }),
+  }))
+  const own = current ? (poses.find((p) => p.name === current)?.joints ?? []) : block
+  return { scene, base: file?.base ?? scene, path, exists: true, current, own, poses }
+}
+
+/** a Save pose as… choice: the slide alone, an existing pose, or a new pose */
+export type SavePoseAs = { kind: 'slide' } | { kind: 'pose'; name: string } | { kind: 'new'; name: string }
+
+/** the changes for a choice, and the joints they write (joint → radians) */
+export interface PoseAsChanges {
+  slides: Change | null
+  scene: Change | null
+  create: string | null
+  written: Record<string, number>
+}
+
+/**
+ * The changes that save the robot's pose by `choice` for slide `slide` of
+ * `shown` (the slides.md the panel shows), computed on the files as they are
+ * now in VS Code: `slides`, and the scene file's text (null if there is
+ * none). `robot`: every joint as it would be written; `moved`: the joints P
+ * writes. The slide keeps the pose it shows: what it set itself goes along.
+ */
+export function poseAsChanges(
+  shown: string,
+  current: { slides: string; scene: string | null },
+  slide: number,
+  choices: PoseAsChoices,
+  choice: SavePoseAs,
+  robot: Record<string, number>,
+  moved: string[],
+): PoseAsChanges | { problem: string } {
+  const index = matchSlide(shown, current.slides, slide)
+  if (index < 0) {
+    return { problem: 'that slide has been edited since the preview last updated. Save the file (Ctrl+S), then try again.' }
+  }
+  const pick = (names: string[]) => Object.fromEntries([...new Set(names)].filter((n) => n in robot).map((n) => [n, robot[n]]))
+  const order = sceneJoints(choices.base).map((j) => j.name)
+  try {
+    if (choice.kind === 'slide') {
+      // a slide that names a pose gets a block with the pose's joints; one with joints of its own, P's edit
+      const written = pick(choices.current ? [...choices.own, ...moved] : moved)
+      const edited = Object.keys(written).length > 0 ? setSlideJoints(current.slides, index, written, true) : current.slides
+      return { slides: singleEdit(current.slides, edited), scene: null, create: null, written }
+    }
+    // joints the slide sets that a pose of this scene can't hold (agilus-duo's
+    // ghost_joint_*, or a misspelt one) would be lost with its block
+    const extra = choices.current ? [] : choices.own.filter((n) => !order.includes(n))
+    if (extra.length > 0) {
+      return {
+        problem:
+          `this slide also sets ${extra.join(', ')}, which a pose of '${choices.base}' can't hold; ` +
+          `save the pose into the slide itself (P, or 'Only this slide'), or move ${extra.length > 1 ? 'them' : 'it'} out of the slide by hand first`,
+      }
+    }
+    const slides = singleEdit(current.slides, setSlideName(current.slides, index, 'joints', choice.name))
+    if (choice.kind === 'pose') {
+      if (current.scene === null) return { problem: `${choices.path} is gone; save the file (Ctrl+S) and try again` }
+      const pose = choices.poses.find((p) => p.name === choice.name)
+      const written = pick([...(pose?.joints ?? []), ...choices.own, ...moved])
+      return { slides, scene: singleEdit(current.scene, setNamedPose(current.scene, choice.name, written, order)), create: null, written }
+    }
+    const problem = poseNameProblem(choice.name, choices.poses.map((p) => p.name))
+    if (problem) return { problem }
+    const written = pick(order)
+    const q = order.map((n) => written[n])
+    if (q.some((v) => v === undefined)) return { problem: `the robot shown doesn't have every joint of '${choices.base}'` }
+    if (current.scene === null) return { slides, scene: null, create: newPoseSceneFile(choices.base, choice.name, q, order), written }
+    return { slides, scene: singleEdit(current.scene, addNamedPose(current.scene, choice.name, q, order)), create: null, written }
+  } catch (err) {
+    return { problem: String((err as Error)?.message ?? err) }
   }
 }

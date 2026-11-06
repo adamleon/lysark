@@ -7,8 +7,8 @@ It is built in the steps below. Step 1 is released (2026-11-03: extension 0.3.0,
 format reference is [scene-files.md](scene-files.md). Step 3, Save view as…, is built (2026-11-05,
 engine v2.6.0), to be tried in github.dev before release. Step 4, named poses, is built
 (2026-11-06, engine v2.7.0). Step 5 lands in three parts, as V did across steps 2 and 3: 5a, the
-joint sliders (J) and P, is built (2026-11-06, engine v2.8.0); 5b is Shift+P, "Save pose as…";
-5c is dragging the tool with inverse kinematics.
+joint sliders (J) and P, is built (2026-11-06, engine v2.8.0); 5b, Shift+P, "Save pose as…", is
+built (2026-11-07, engine v2.9.0); 5c is dragging the tool with inverse kinematics.
 It came from four independent designs (smallest change, editor-first, lecturer-first,
 engine-first), scored by three reviewers and combined; the claims about today's code were
 checked against the code.

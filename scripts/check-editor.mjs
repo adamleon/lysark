@@ -30,8 +30,9 @@
 // moved since P left where it is and its slider keeping the keys, a slide's
 // own slider following the joint, a joint no slide sets written once moved,
 // P refused on a slide that moves the robot itself (no line about P there),
-// a hand edit to the shown slide's joints loading the panel afresh, Space on
-// the panel's × not changing the slide, a new text
+// a hand edit to the shown slide's joints loading the panel afresh, Shift+P's
+// dialog saving the robot's pose into an existing pose and into a new pose in
+// a new scene file, Space on the panel's × not changing the slide, a new text
 // accepted and shown after a reload, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
@@ -260,6 +261,9 @@ function createHost(lectureDir, lectureText) {
     typeBeforeNextEdit: false,
     /** paths asked for outside the lecture folder */
     outside: [],
+    /** every question the panel asked (lists and inputs), and the answers to give, in turn */
+    asks: [],
+    answers: [],
   }
   const inside = (rel) => {
     const file = resolve(lectureDir, rel)
@@ -313,8 +317,9 @@ function createHost(lectureDir, lectureText) {
       return reply(result)
     }
     if (message.type === 'lysark:ask') {
-      // the first choice offered, as if picked
-      return reply({ value: message.items?.[0]?.value ?? null })
+      // the next answer queued, or else the first choice offered, as if picked
+      host.asks.push(message)
+      return reply({ value: host.answers.length > 0 ? host.answers.shift() : (message.items?.[0]?.value ?? null) })
     }
     return reply({ ok: false, message: 'not supported by the check' })
   }
@@ -887,6 +892,129 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         return fail("a hand edit to the joints of the slide shown was put in place, where the robot wouldn't move to them")
       }
       lines.push('a hand edit to the joints of the slide shown loads the panel afresh')
+
+      // Shift+P, Save pose as…: on the arm slide with joints of its own, the
+      // pose 'low', chosen with the mouse; the slide names it, and 'low' takes
+      // the robot's pose, the slide's own joints included
+      await toRuntime({ type: 'lysark:goto', slide: ownSlide })
+      await settledOn(ownSlide)
+      const robotNow = await inPanel((w) => Object.fromEntries(Object.entries(w.__lysark.sceneManager.active.channels).map(([k, c]) => [k, c.setpoint])))
+      await inPanel((w) => w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'P', shiftKey: true, bubbles: true })))
+      const poseDialog = await waitFor(() => inPanel((w) => w.document.querySelector('[role="dialog"]')?.getAttribute('aria-label') ?? null), 20, 200)
+      if (poseDialog !== "Save the robot's pose") return fail(`Shift+P did not open the Save pose as… dialog (found ${poseDialog})`)
+      let editsHere = host.edits.length
+      const chose = await inPanel((w) => {
+        const row = [...w.document.querySelectorAll('[role="dialog"] [role="option"]')].find((o) => o.textContent.startsWith("The pose 'low'"))
+        if (!row) return false
+        row.dispatchEvent(new w.MouseEvent('mousedown', { button: 0, bubbles: true }))
+        row.dispatchEvent(new w.MouseEvent('click', { button: 0, bubbles: true }))
+        return true
+      })
+      if (!chose) return fail("the Save pose as… dialog has no row for the pose 'low'")
+      let asEdit = await waitFor(async () => host.edits[editsHere], 20, 300)
+      const asPaths = asEdit?.message.changes.map((c) => c.path) ?? []
+      if (!asEdit?.result.ok || JSON.stringify(asPaths) !== JSON.stringify(['slides.md', 'scenes/arm.yaml'])) {
+        return fail(`Save pose as… the pose 'low' was not one edit to slides.md and scenes/arm.yaml: ${JSON.stringify(asEdit ?? null)} (the panel says: ${await banner()})`)
+      }
+      const low = parseYaml(host.docs.get('scenes/arm.yaml').text).poses.low
+      if (JSON.stringify(low) !== JSON.stringify({ joint2: robotNow.joint2, joint1: robotNow.joint1 })) {
+        return fail(`after Save pose as… the pose 'low' is ${JSON.stringify(low)}, expected joint2 and joint1 as the robot has them: ${JSON.stringify(robotNow)}`)
+      }
+      if (frontmatters()[ownSlide].joints !== 'low') return fail(`slide ${ownSlide + 1} doesn't name the pose 'low' after Save pose as…: ${JSON.stringify(frontmatters()[ownSlide].joints)}`)
+      // the panel names the other slides whose robot moves: those that use 'low' (and only those)
+      const lowUsers = frontmatters().flatMap((fm, i) => (fm.joints === 'low' && i !== ownSlide ? [i + 1] : []))
+      const said = await banner()
+      const expected = lowUsers.length === 1 ? `slide ${lowUsers[0]} changes with it` : null
+      if (expected && !said.endsWith(expected)) return fail(`after Save pose as… the pose 'low', the panel said "${said}", expected it to end "${expected}"`)
+      const lowInPlace = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: lowInPlace }, 10000))) return fail("Save pose as… the pose 'low' was not put into the running deck")
+      if (await page.evaluate((n) => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === n), lowInPlace)) {
+        return fail("Save pose as… the pose 'low' made the panel load afresh instead of updating in place")
+      }
+      lines.push(`Shift+P on slide ${ownSlide + 1}: the pose 'low', chosen with the mouse, took the robot's pose (${JSON.stringify(low)}); the slide names it`)
+
+      // Scene Actions… offers Save pose as… too: a new pose, its name asked in
+      // VS Code's box, a name taken asked for again
+      const robotThen = await inPanel((w) => Object.fromEntries(Object.entries(w.__lysark.sceneManager.active.channels).map(([k, c]) => [k, c.setpoint])))
+      host.answers.push('pose-new', 'low', 'q1')
+      const asksBefore = host.asks.length
+      editsHere = host.edits.length
+      await toRuntime({ type: 'lysark:request-actions' })
+      const q1Edit = await waitFor(async () => host.edits[editsHere], 20, 300)
+      const asks = host.asks.slice(asksBefore)
+      const offered = asks[0]?.items?.map((item) => item.value) ?? []
+      if (!offered.includes('pose-new') || !offered.includes('pose:reach') || !offered.includes('pose-slide')) {
+        return fail(`Scene Actions… on slide ${ownSlide + 1} didn't offer Save pose as…: ${JSON.stringify(offered)}`)
+      }
+      if (!/already a pose called 'low'/.test(asks[2]?.input?.prompt ?? '')) {
+        return fail(`Scene Actions… didn't ask again for a new pose's name that is taken: ${JSON.stringify(asks.slice(1).map((a) => a.input?.prompt))}`)
+      }
+      if (!q1Edit?.result.ok || JSON.stringify(q1Edit.message.changes.map((c) => c.path)) !== JSON.stringify(['slides.md', 'scenes/arm.yaml'])) {
+        return fail(`Scene Actions… a new pose was not one edit to slides.md and scenes/arm.yaml: ${JSON.stringify(q1Edit ?? null)} (the panel says: ${await banner()})`)
+      }
+      // the robot's pose, as it was: nothing on the slide moves
+      const armPose = [robotThen.joint1, robotThen.joint2, robotThen.joint3]
+      const q1 = parseYaml(host.docs.get('scenes/arm.yaml').text).poses.q1
+      if (JSON.stringify(q1) !== JSON.stringify(armPose) || frontmatters()[ownSlide].joints !== 'q1') {
+        return fail(`after Scene Actions… a new pose, q1 is ${JSON.stringify(q1)} (the robot: ${JSON.stringify(armPose)}) and slide ${ownSlide + 1} names ${JSON.stringify(frontmatters()[ownSlide].joints)}`)
+      }
+      const q1InPlace = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: q1InPlace }, 10000))) return fail('the new pose from Scene Actions… was not put into the running deck')
+      // and an existing pose: 'reach' takes the robot's pose, and the slide names it
+      host.answers.push('pose:reach')
+      editsHere = host.edits.length
+      await toRuntime({ type: 'lysark:request-actions' })
+      const reachEdit = await waitFor(async () => host.edits[editsHere], 20, 300)
+      const reach = parseYaml(host.docs.get('scenes/arm.yaml').text).poses.reach
+      if (!reachEdit?.result.ok || JSON.stringify(reach) !== JSON.stringify(armPose) || frontmatters()[ownSlide].joints !== 'reach') {
+        return fail(`Scene Actions… 'Save pose as: the pose reach' gave reach ${JSON.stringify(reach)} and the slide ${JSON.stringify(frontmatters()[ownSlide].joints)}: ${JSON.stringify(reachEdit ?? null)} (the panel says: ${await banner()})`)
+      }
+      const reachInPlace = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: reachInPlace }, 10000))) return fail("the pose 'reach' from Scene Actions… was not put into the running deck")
+      const robotAfter = await inPanel((w) => ['joint1', 'joint2', 'joint3'].map((k) => w.__lysark.sceneManager.active.channels[k].setpoint))
+      if (JSON.stringify(robotAfter) !== JSON.stringify(armPose)) return fail(`saving poses from Scene Actions… moved the robot: ${JSON.stringify(robotAfter)}, was ${JSON.stringify(armPose)}`)
+      lines.push(
+        `Scene Actions… on slide ${ownSlide + 1}: a new pose, 'low' refused as taken, 'q1' ${JSON.stringify(q1)} saved and named; then the pose 'reach' took the robot`,
+      )
+
+      // a new pose on the KUKA slide, whose scene has no scene file: one edit
+      // that names it on the slide and creates scenes/agilus.yaml
+      if (kukaSlide >= 0 && !host.docs.has('scenes/agilus.yaml')) {
+        await toRuntime({ type: 'lysark:goto', slide: kukaSlide })
+        if (!(await settledOn(kukaSlide))) return fail(`the panel never settled on slide ${kukaSlide + 1}`)
+        await inPanel((w) => w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'P', shiftKey: true, bubbles: true })))
+        if (!(await waitFor(() => inPanel((w) => !!w.document.querySelector('[role="dialog"] input')), 20, 200))) return fail('Shift+P did not open the Save pose as… dialog on the KUKA slide')
+        const slidesBefore = host.doc.text
+        editsHere = host.edits.length
+        await inPanel((w) => {
+          const input = w.document.querySelector('[role="dialog"] input')
+          input.focus()
+          input.value = 'grip'
+          input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+        })
+        asEdit = await waitFor(async () => host.edits[editsHere], 20, 300)
+        const kinds = asEdit?.message.changes.map((c) => (typeof c.create === 'string' ? `create ${c.path}` : c.path)) ?? []
+        if (!asEdit?.result.ok || JSON.stringify(kinds) !== JSON.stringify(['slides.md', 'create scenes/agilus.yaml'])) {
+          return fail(`Save pose as… a new pose did not name it on the slide and create scenes/agilus.yaml: ${JSON.stringify(asEdit ?? null)} (the panel says: ${await banner()})`)
+        }
+        const made = parseYaml(host.docs.get('scenes/agilus.yaml').text)
+        const grip = made?.poses?.grip
+        if (made?.base !== 'agilus' || !Array.isArray(grip) || grip.length !== 6 || grip[0] !== 0.5 || grip[1] !== 0.3) {
+          return fail(`the new scene file is not right: ${host.docs.get('scenes/agilus.yaml').text}`)
+        }
+        if (frontmatters()[kukaSlide].joints !== 'grip') return fail(`slide ${kukaSlide + 1} doesn't name the new pose: ${JSON.stringify(frontmatters()[kukaSlide].joints)}`)
+        // as VS Code reports it: the new file first (slides.md as last sent), then the edit's text
+        const fileFirst = await source(slidesBefore)
+        if (!(await fromRuntime({ type: 'lysark:shown', seq: fileFirst }, 10000))) return fail('the new scene file alone was not shown')
+        const gripInPlace = await source(host.doc.text)
+        if (!(await fromRuntime({ type: 'lysark:shown', seq: gripInPlace }, 10000))) return fail('the new pose was not put into the running deck')
+        if (await page.evaluate((n) => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === n), gripInPlace)) {
+          return fail('saving a new pose made the panel load afresh instead of updating in place')
+        }
+        lines.push(`Shift+P on slide ${kukaSlide + 1}: a new pose 'grip' ${JSON.stringify(grip)} in a new scenes/agilus.yaml, one edit with slides.md, put in place`)
+      } else {
+        lines.push('(no KUKA slide whose scene has no scene file, so Shift+P making a scene file was not checked)')
+      }
       // Space on the panel's × presses the button, not "next slide"
       const stepNow = await deckStep()
       await inPanel((w) => {
