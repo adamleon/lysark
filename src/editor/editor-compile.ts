@@ -35,24 +35,39 @@ function imagePlaceholder(src: string): string {
 }
 
 /**
- * Copy the cameras of `fresh` into `running` (the deck's own slide objects,
- * which the engine reads when it flies to a slide), if cameras are all that
- * differ. Returns the indices whose camera changed, or null if anything else
- * differs and the panel must load afresh.
+ * Copy the cameras, joints and trajectory ends of `fresh` into `running` (the
+ * deck's own slide objects, which the engine reads when it enters a slide),
+ * if those are all that differ. Returns the indices whose camera, joints or
+ * trajectory changed, or null if anything else differs and the panel must
+ * load afresh.
  */
-export function updateCameras(running: CompiledSlide[], fresh: CompiledSlide[]): number[] | null {
+export function updateTargets(running: CompiledSlide[], fresh: CompiledSlide[]): number[] | null {
   if (running.length !== fresh.length) return null
-  const withoutCamera = (s: CompiledSlide) => JSON.stringify({ ...s, effective: { ...s.effective, camera: undefined } })
+  const rest = (s: CompiledSlide) =>
+    JSON.stringify({
+      ...s,
+      effective: { ...s.effective, camera: undefined, joints: undefined },
+      // a trajectory's ends may be poses (docs/scene-files.md), which change with them
+      trajectory: s.trajectory ? { ...s.trajectory, from: undefined, to: undefined } : undefined,
+    })
   for (let i = 0; i < running.length; i++) {
-    if (withoutCamera(running[i]) !== withoutCamera(fresh[i])) return null
+    if (rest(running[i]) !== rest(fresh[i])) return null
   }
   const changed: number[] = []
   for (let i = 0; i < running.length; i++) {
-    const camera = fresh[i].effective.camera
-    if (JSON.stringify(running[i].effective.camera) === JSON.stringify(camera)) continue
-    changed.push(i)
-    if (camera) running[i].effective.camera = camera
-    else delete running[i].effective.camera
+    let differs = false
+    for (const key of ['camera', 'joints'] as const) {
+      const value = fresh[i].effective[key]
+      if (JSON.stringify(running[i].effective[key]) === JSON.stringify(value)) continue
+      differs = true
+      if (value) (running[i].effective as Record<string, unknown>)[key] = value
+      else delete running[i].effective[key]
+    }
+    if (JSON.stringify(running[i].trajectory) !== JSON.stringify(fresh[i].trajectory)) {
+      differs = true
+      running[i].trajectory = fresh[i].trajectory
+    }
+    if (differs) changed.push(i)
   }
   return changed
 }

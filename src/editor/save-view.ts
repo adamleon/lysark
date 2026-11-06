@@ -45,14 +45,14 @@ export function namedViewEdit(sceneText: string, name: string, view: CameraView)
   }
 }
 
-/** each slide's own `scene:` and `camera:`, as written; [] if the text doesn't split into slides */
-function slideHeads(text: string): Array<{ scene?: unknown; camera?: unknown }> {
+/** each slide's own `scene:`, `camera:` and `joints:`, as written; [] if the text doesn't split into slides */
+export function slideHeads(text: string): Array<{ scene?: unknown; camera?: unknown; joints?: unknown }> {
   try {
     const lines = splitLines(text)
     return slideRanges(text).map((r) => {
       try {
         const fm = parseYaml(lines.slice(r.yamlStart, r.yamlEnd).join('\n')) as Record<string, unknown> | null
-        return fm && typeof fm === 'object' ? { scene: fm.scene, camera: fm.camera } : {}
+        return fm && typeof fm === 'object' ? { scene: fm.scene, camera: fm.camera, joints: fm.joints } : {}
       } catch {
         return {}
       }

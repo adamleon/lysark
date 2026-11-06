@@ -10,7 +10,10 @@
 //      again; V and Scene Actions… write the view into slides.md; undoing that
 //      edit reaches the panel; and with an engine that has named views
 //      (v2.5.0), V on a slide that names one writes it into the scene file,
-//      and every slide that uses it takes it
+//      and every slide that uses it takes it; with Save view as… (v2.6.0),
+//      Shift+V makes a new view and scene file, and one Ctrl+Z undoes both;
+//      with the joint sliders (v2.8.0), J and P change the pose a slide
+//      names in the scene file, in place
 //   2  (engine v2.3.x) V writes the view; Scene Actions… says to update the engine
 //
 //   node scripts/check-extension.mjs <editor dir> [<editor dir> …]
@@ -51,6 +54,11 @@ function knowsPoses(editorDir) {
 function buildSays(editorDir, text) {
   const assets = join(editorDir, 'assets')
   return readdirSync(assets).some((f) => f.endsWith('.js') && readFileSync(join(assets, f), 'utf8').includes(text))
+}
+
+/** true if the editor build has the joint sliders and P (engine v2.8.0): the sliders' line about P is in its files */
+function knowsPosePanel(editorDir) {
+  return buildSays(editorDir, 'P: save this pose into slide')
 }
 
 /** true if the editor build has Save view as… (engine v2.6.0): its dialog's title is in its files */
@@ -160,7 +168,7 @@ process.on('SIGINT', () => {
 })
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, saveAs, lines) {
+async function drive(page, protocol, namedViews, saveAs, posePanel, lines) {
   let ok = true
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
@@ -363,6 +371,49 @@ async function drive(page, protocol, namedViews, saveAs, lines) {
         `undoing it in slides.md took both back: slide 7's camera ${undoneCamera}, scenes/pendulum.yaml ${fileLeft === 0 ? 'gone' : 'still there'}` +
           (asked ? `; VS Code asked "${question.slice(0, 160)}" (first button taken)` : '; VS Code asked nothing'),
       )
+
+      // J and P on the demo's slide 2, which names the pose 'reach'
+      // (lectures/demo/scenes/arm.yaml): the slider moves the arm at once, and P
+      // changes the pose in the scene file, which the panel takes in place
+      if (!posePanel) {
+        lines.push('(the joint sliders and P not checked: this editor has none)')
+        return ok
+      }
+      await frame.evaluate(() => {
+        window.__received = []
+        window.addEventListener('message', (e) => window.__received.push(e.data))
+        location.hash = '#2'
+      })
+      const onArm = await frame
+        .waitForFunction(() => {
+          const L = window.__lysark
+          return L.engine.currentIndex === 1 && !L.sceneManager.busy && L.sceneManager.activeSceneId === 'arm'
+        }, null, { timeout: 20_000 })
+        .then(() => true, () => false)
+      const jogged = await frame.evaluate(() => {
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))
+        const input = document.querySelector('[aria-label="Joint sliders"] input[aria-label="joint2"]')
+        if (!input) return null
+        input.focus() // as a drag does; P then goes to the slider
+        input.value = '0.5'
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        return window.__lysark.sceneManager.active.channels.joint2.x
+      })
+      check(onArm && jogged === 0.5, `on slide 2, J showed the joint sliders and joint2's moved the arm at once: ${jogged}`)
+      await frame.evaluate(() => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true })))
+      await page.waitForTimeout(3500)
+      const posed = await frame
+        .evaluate(() => ({
+          // a panel loaded afresh would have lost what this page recorded
+          inPlace: Array.isArray(window.__received),
+          joints: window.__lysark.engine.opts.slides.slice(1, 3).map((s) => s.effective.joints.joint2),
+          arm: (window.__received ?? []).filter((m) => m?.type === 'lysark:source').map((m) => m.files['scenes/arm.yaml']).pop() ?? '',
+        }))
+        .catch(() => ({ inPlace: false, joints: [], arm: '' }))
+      check(
+        posed.inPlace && /reach: \[0\.9, 0\.5, -1\.5\]/.test(posed.arm) && posed.joints.every((q) => q === 0.5),
+        `P changed the pose 'reach' in scenes/arm.yaml, in place; slides 2 and 3 take joint2 ${JSON.stringify(posed.joints)}`,
+      )
     }
   } else {
     await tab('Lysark').click()
@@ -392,7 +443,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), lines)
+    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

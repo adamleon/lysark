@@ -14,20 +14,31 @@
 //   it sends texts, loads the page afresh when a text is accepted, answers the
 //   panel's reads and edits on copies of slides.md and the lecture's scene
 //   files with version numbers, and asks for saved views, by V and through
-//   Scene Actions, on a slide with its own camera and on one that names a view.
+//   Scene Actions, on a slide with its own camera and on one that names a view,
+//   and saves poses with P, into a named pose and into a slide.
 //
 // It requires: the lecture shown in an isolated panel with its images, VS
 // Code's default styles gone, a view computed on an older version refused, a
 // saved view written as one edit to the first slide's frontmatter and put into
 // the running deck, a camera-only change put in place, a named view saved into
 // its scene file and taken by the other slide that names it, Shift+V's
-// dialog saving a new view in a new scene file, a new text
+// dialog saving a new view in a new scene file, the joint sliders (J) moving
+// the robot and marking the joints P writes, P (pressed on a focused slider)
+// saving the pose into a named pose and into a slide, both put into the
+// running deck (also when the author is on to the next slide, which carries
+// the pose, before its text comes), a second P meanwhile told to wait, a joint
+// moved since P left where it is and its slider keeping the keys, a slide's
+// own slider following the joint, a joint no slide sets written once moved,
+// P refused on a slide that moves the robot itself (no line about P there),
+// a hand edit to the shown slide's joints loading the panel afresh, Space on
+// the panel's × not changing the slide, a new text
 // accepted and shown after a reload, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
 // course-style build in Chromium and Firefox.
 //
 //   node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png] [--headed]
+//   (--screenshot also saves file-joints.png, with the joint sliders open)
 import { createServer } from 'node:http'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -650,6 +661,247 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       lines.push(`Shift+V on slide ${bare.slide + 1}: the dialog held the keys, and a new view 'checked' was saved as one edit to slides.md and a new ${path}`)
     } else {
       lines.push('(every scene in the lecture has a scene file, so creating one was not checked)')
+    }
+
+    // 2e. the joint sliders (J) move the robot, and P saves the pose: into the
+    //     pose a slide names (`joints: reach`) in its scene file, and into a
+    //     slide's own frontmatter; both put into the running deck
+    const frontmatters = () => {
+      const all = []
+      const text = host.doc.text.replace(/\r\n/g, '\n').split('\n')
+      for (let n = 0; ; n++) {
+        const range = frontmatterLines(host.doc.text, n)
+        if (!range) return all
+        try {
+          all.push(parseYaml(text.slice(range.from, range.to).join('\n')) ?? {})
+        } catch {
+          all.push({})
+        }
+      }
+    }
+    const settledOn = (slide) =>
+      waitFor(() =>
+        inPanel((w, n) => {
+          const L = w.__lysark
+          return L?.engine.currentIndex === n && !L.sceneManager.busy && L.sceneManager.activeSceneId === L.engine.current.scene
+        }, slide),
+      )
+    // as a key press does: to the focused element (a slider just moved, say)
+    const key = (k) =>
+      inPanel((w, k) => (w.document.activeElement ?? w.document.body).dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true })), k)
+    /** move a joint with its slider in the panel; the joint's position after it, or null without that slider */
+    const jog = (joint, value) =>
+      inPanel(
+        (w, [joint, value]) => {
+          const input = w.document.querySelector(`[aria-label="Joint sliders"] input[aria-label="${joint}"]`)
+          if (!input || input.disabled) return null
+          input.focus() // as a drag does
+          input.value = String(value)
+          input.dispatchEvent(new w.Event('input', { bubbles: true }))
+          return w.__lysark.sceneManager.active.channels[joint].x
+        },
+        [joint, value],
+      )
+    const setpoint = (joint) => inPanel((w, joint) => w.__lysark.sceneManager.active?.channels[joint]?.setpoint ?? null, joint)
+    /** where the deck is: the slide and its step (the next fragment, before the next slide) */
+    const deckStep = () => inPanel((w) => JSON.stringify([w.__lysark.engine.currentIndex, w.__lysark.engine.visibleChunks]))
+    const fms = frontmatters()
+    const poseSlide = fms.findIndex((fm) => typeof fm.joints === 'string' && fm.scene === 'arm' && host.docs.has('scenes/arm.yaml'))
+    const ownSlide = fms.findIndex((fm) => fm.scene === 'arm' && fm.joints === undefined && !fm.trajectory && !fm.idle)
+    const idleSlide = fms.findIndex((fm) => fm.scene === 'arm' && fm.idle)
+    if (poseSlide >= 0 && ownSlide >= 0) {
+      await toRuntime({ type: 'lysark:goto', slide: poseSlide })
+      if (!(await settledOn(poseSlide))) return fail(`the panel never settled on slide ${poseSlide + 1}`)
+      await key('j')
+      const sliders = await waitFor(() => inPanel((w) => w.document.querySelectorAll('[aria-label="Joint sliders"] input[type="range"]').length || null), 10, 200)
+      if (sliders !== 3) return fail(`J did not show the arm's three joint sliders (found ${sliders})`)
+      const pose = fms[poseSlide].joints
+      const at = await jog('joint2', 0.5)
+      if (at === null || Math.abs(at - 0.5) > 1e-9) return fail(`the joint2 slider did not move the arm at once: joint2 is at ${at}`)
+      // the joints P writes are marked: joint2 only. P is pressed with its slider focused
+      const marked = await waitFor(
+        () =>
+          inPanel((w) => {
+            const inputs = [...w.document.querySelectorAll('[aria-label="Joint sliders"] input[type="range"]')]
+            const marks = inputs.filter((i) => i.parentElement.firstChild.title).map((i) => i.getAttribute('aria-label'))
+            return w.document.activeElement?.getAttribute('aria-label') === 'joint2' && JSON.stringify(marks) === '["joint2"]'
+          }),
+        10,
+        200,
+      )
+      if (!marked) return fail("after joint2's slider moved, the panel did not mark joint2 alone as the joint P writes, with its slider focused")
+      let editsBefore = host.edits.length
+      await key('p')
+      let edit = await waitFor(async () => host.edits[editsBefore], 20, 300)
+      if (!edit?.result.ok || edit.message.changes[0].path !== 'scenes/arm.yaml') {
+        return fail(`P on slide ${poseSlide + 1} did not write the pose '${pose}' into scenes/arm.yaml: ${JSON.stringify(edit ?? null)} (the panel says: ${await banner()})`)
+      }
+      const written = parseYaml(host.docs.get('scenes/arm.yaml').text).poses[pose]
+      const joint2 = Array.isArray(written) ? written[1] : written?.joint2
+      if (joint2 !== 0.5) return fail(`the pose '${pose}' has joint2 ${JSON.stringify(joint2)} after P, expected 0.5: ${JSON.stringify(written)}`)
+      // on to the next slide, which carries the pose on, before the edit's text
+      // comes back: the text still goes in place, and the robot there goes to the pose
+      const carrier = poseSlide + 1
+      const carries = fms[carrier]?.scene === 'arm' && fms[carrier].joints === undefined
+      if (carries) {
+        await toRuntime({ type: 'lysark:goto', slide: carrier })
+        if (!(await settledOn(carrier))) return fail(`the panel never settled on slide ${carrier + 1}`)
+      }
+      const inPlace = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: inPlace }, 10000))) return fail('the saved pose was not put into the running deck')
+      if (await page.evaluate((n) => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === n), inPlace)) {
+        return fail(`saving a pose made the panel load afresh instead of updating in place${carries ? ' (the panel had gone on to the next slide, which carries it)' : ''}`)
+      }
+      if (carries && !(await waitFor(async () => ((await setpoint('joint2')) === 0.5 ? true : null), 10, 200))) {
+        return fail(`slide ${carrier + 1}, which carries the pose '${pose}' on, puts joint2 at ${await setpoint('joint2')}, expected 0.5`)
+      }
+      lines.push(
+        `J showed the arm's joint sliders; P on slide ${poseSlide + 1} saved the pose '${pose}' in scenes/arm.yaml (joint2 0.5), put in place` +
+          (carries ? ` with the panel gone on to slide ${carrier + 1}, which carries it` : ''),
+      )
+
+      await toRuntime({ type: 'lysark:goto', slide: ownSlide })
+      if (!(await settledOn(ownSlide))) return fail(`the panel never settled on slide ${ownSlide + 1}`)
+      if ((await jog('joint1', -0.4)) === null) return fail(`slide ${ownSlide + 1} has no joint1 slider`)
+      editsBefore = host.edits.length
+      await key('p')
+      edit = await waitFor(async () => host.edits[editsBefore], 20, 300)
+      const change = edit?.message.changes[0]
+      const range = frontmatterLines(host.doc.text, ownSlide)
+      if (!edit?.result.ok || change.path !== 'slides.md') {
+        return fail(`P on slide ${ownSlide + 1} did not write into slides.md: ${JSON.stringify(edit ?? null)} (the panel says: ${await banner()})`)
+      }
+      const own = parseYaml(host.doc.text.replace(/\r\n/g, '\n').split('\n').slice(range.from, range.to).join('\n'))
+      if (JSON.stringify(own.joints) !== JSON.stringify({ joint1: -0.4 })) {
+        return fail(`slide ${ownSlide + 1}'s joints after P: ${JSON.stringify(own.joints)}, expected { joint1: -0.4 }`)
+      }
+      // moved again before the text comes back: P says to wait (one save at a time)
+      await jog('joint1', -0.2)
+      const editsNow = host.edits.length
+      await key('p')
+      if (!(await waitFor(async () => /still on its way/.test(await banner()), 10, 200))) {
+        return fail(`a second P before the first pose came back did not say to wait: ${await banner()}`)
+      }
+      if (host.edits.length !== editsNow) return fail('a second P before the first pose came back saved again')
+      const ownInPlace = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: ownInPlace }, 10000))) return fail("the slide's saved pose was not put into the running deck")
+      if (await page.evaluate((n) => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === n), ownInPlace)) {
+        return fail("saving a slide's pose made the panel load afresh instead of updating in place")
+      }
+      // after it: joint1 stays where the slider left it, still marked, and its
+      // slider keeps the focus, so an arrow key goes to it, not to the slides
+      await page.waitForTimeout(400)
+      const kept = await inPanel((w) => {
+        const input = w.document.querySelector('[aria-label="Joint sliders"] input[aria-label="joint1"]')
+        return {
+          at: w.__lysark.sceneManager.active.channels.joint1.setpoint,
+          marked: !!input?.parentElement.firstChild.title,
+          focus: w.document.activeElement?.getAttribute('aria-label') ?? w.document.activeElement?.tagName,
+          step: JSON.stringify([w.__lysark.engine.currentIndex, w.__lysark.engine.visibleChunks]),
+        }
+      })
+      if (Math.abs(kept.at + 0.2) > 1e-9 || !kept.marked || kept.focus !== 'joint1') {
+        return fail(`after the saved pose came back, joint1 should stay at -0.2, marked, its slider focused: ${JSON.stringify(kept)}`)
+      }
+      await key('ArrowRight')
+      await page.waitForTimeout(300)
+      if ((await deckStep()) !== kept.step) return fail('an arrow key on the focused joint slider moved the deck on')
+      // the slide keeps it: away and back, joint1 goes there again
+      await toRuntime({ type: 'lysark:goto', slide: ownSlide - 1 })
+      await settledOn(ownSlide - 1)
+      await toRuntime({ type: 'lysark:goto', slide: ownSlide })
+      await settledOn(ownSlide)
+      if ((await setpoint('joint1')) !== -0.4) return fail(`back on slide ${ownSlide + 1}, joint1 goes to ${await setpoint('joint1')}, expected -0.4`)
+      lines.push(
+        `P on slide ${ownSlide + 1} wrote joints: { joint1: -0.4 } into its frontmatter, put in place; a second P meanwhile said to wait; ` +
+          'joint1, moved since, stayed, marked, its slider focused; the slide keeps the pose',
+      )
+
+      // the KUKA slide with a slider of its own for joint_2: that slider follows
+      // the joint sliders; joint_1, which no slide sets, is written once moved
+      const kukaSlide = fms.findIndex(
+        (fm) => fm.scene === 'agilus' && !fm.idle && !fm.trajectory && (fm.widgets ?? []).some((w) => w.type === 'slider' && w.bind === 'joint_2'),
+      )
+      if (kukaSlide >= 0) {
+        await toRuntime({ type: 'lysark:goto', slide: kukaSlide })
+        if (!(await settledOn(kukaSlide))) return fail(`the panel never settled on slide ${kukaSlide + 1}`)
+        // the slide's own slider, built when the slide showed (after its fade), and the panel's rows
+        const ownSlider = () => inPanel((w) => w.document.querySelector('.slide-widgets .widget-slider output')?.textContent ?? null)
+        const before = await waitFor(ownSlider, 10, 200)
+        if (!before || /0\.30 rad/.test(before)) return fail(`slide ${kukaSlide + 1}'s own joint_2 slider is missing, or at 0.30 already: ${before}`)
+        if ((await waitFor(() => jog('joint_2', 0.3), 10, 200)) === null) return fail(`slide ${kukaSlide + 1} has no joint_2 slider in the panel`)
+        const follows = await waitFor(async () => /0\.30 rad/.test((await ownSlider()) ?? ''), 10, 200)
+        if (!follows) return fail(`slide ${kukaSlide + 1}'s own joint_2 slider did not follow the joint sliders: it shows ${await ownSlider()}, was ${before}`)
+        await jog('joint_1', 0.5)
+        // joint_1, which no slide sets, is marked once moved; the others no slide sets aren't
+        const kukaMarks = await waitFor(
+          () =>
+            inPanel((w) => {
+              const inputs = [...w.document.querySelectorAll('[aria-label="Joint sliders"] input[type="range"]')]
+              const marks = inputs.filter((i) => i.parentElement.firstChild.title).map((i) => i.getAttribute('aria-label'))
+              return JSON.stringify(marks) === '["joint_1","joint_2"]' ? marks : null
+            }),
+          10,
+          200,
+        )
+        if (!kukaMarks) return fail(`on slide ${kukaSlide + 1}, the panel did not mark joint_1 and joint_2 alone as the joints P writes`)
+        editsBefore = host.edits.length
+        await key('p')
+        edit = await waitFor(async () => host.edits[editsBefore], 20, 300)
+        if (!edit?.result.ok) return fail(`P on slide ${kukaSlide + 1} did not save: ${JSON.stringify(edit ?? null)} (the panel says: ${await banner()})`)
+        const kuka = frontmatters()[kukaSlide].joints
+        if (JSON.stringify(kuka) !== JSON.stringify({ joint_2: 0.3, joint_1: 0.5 })) {
+          return fail(`slide ${kukaSlide + 1}'s joints after P: ${JSON.stringify(kuka)}, expected { joint_2: 0.3, joint_1: 0.5 }`)
+        }
+        const kukaInPlace = await source(host.doc.text)
+        if (!(await fromRuntime({ type: 'lysark:shown', seq: kukaInPlace }, 10000))) return fail(`slide ${kukaSlide + 1}'s saved pose was not put into the running deck`)
+        lines.push(`slide ${kukaSlide + 1}'s own joint_2 slider followed the joint sliders; P wrote joint_2 and joint_1 (which no slide sets) into the slide`)
+      }
+
+      if (idleSlide >= 0) {
+        await toRuntime({ type: 'lysark:goto', slide: idleSlide })
+        if (!(await settledOn(idleSlide))) return fail(`the panel never settled on slide ${idleSlide + 1}`)
+        editsBefore = host.edits.length
+        await key('p')
+        if (!(await waitFor(async () => /moves the robot itself/.test(await banner()), 10, 300))) {
+          return fail(`P on slide ${idleSlide + 1}, whose robot moves by itself (idle:), did not say why it saves nothing: ${await banner()}`)
+        }
+        if (host.edits.length !== editsBefore) return fail(`P saved a pose on slide ${idleSlide + 1}, whose robot moves by itself`)
+        const noFooter = await waitFor(() => inPanel((w) => w.document.querySelector('[aria-label="Joint sliders"]').lastElementChild.style.display === 'none' || null), 10, 200)
+        if (!noFooter) return fail(`on slide ${idleSlide + 1}, where the robot can't be posed, the sliders still say where P writes`)
+        lines.push(`P on slide ${idleSlide + 1} (idle:) saved nothing, and said why`)
+      }
+      if (screenshot) {
+        // the joint sliders open, on the slide P just saved into
+        await toRuntime({ type: 'lysark:goto', slide: ownSlide })
+        await settledOn(ownSlide)
+        await page.waitForTimeout(2500)
+        await page.screenshot({ path: screenshot.replace(/(\.png)?$/i, '-joints.png') })
+      }
+      // a hand edit to the joints of the slide shown isn't a pose saved there:
+      // the panel loads afresh (where the robot goes to them), not in place
+      await toRuntime({ type: 'lysark:goto', slide: ownSlide })
+      await settledOn(ownSlide)
+      const hand = await source(host.doc.text.replace('joint1: -0.4', 'joint1: 0.3'))
+      if (!(await fromRuntime({ type: 'lysark:accepted', seq: hand }, 10000))) {
+        return fail("a hand edit to the joints of the slide shown was put in place, where the robot wouldn't move to them")
+      }
+      lines.push('a hand edit to the joints of the slide shown loads the panel afresh')
+      // Space on the panel's × presses the button, not "next slide"
+      const stepNow = await deckStep()
+      await inPanel((w) => {
+        const close = w.document.querySelector('[aria-label="Close the joint sliders"]')
+        close.focus()
+        close.dispatchEvent(new w.KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+      })
+      await page.waitForTimeout(300)
+      if ((await deckStep()) !== stepNow) return fail("Space on the joint sliders' × moved the deck on")
+      await inPanel((w) => w.document.querySelector('[aria-label="Close the joint sliders"]').click())
+      if (!(await inPanel((w) => w.document.querySelector('[aria-label="Joint sliders"]').style.display === 'none'))) {
+        return fail("the joint sliders' × did not close them")
+      }
+    } else {
+      lines.push('(the lecture has no arm slide that names a pose, or none without joints, so saving poses was not checked)')
     }
 
     // 3. other new text is accepted; the extension loads the page afresh and sends it on 'ready'

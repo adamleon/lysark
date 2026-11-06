@@ -46,6 +46,13 @@ describe('setCameraView', () => {
     expect(out).toBe('---\nscene: arm\ncamera:\n  lookAt: end_effector\n  offset: [0.4, 0.2, 0.5]\n---\nx')
   })
 
+  it('keeps a blank line before the closing fence when it adds a key', () => {
+    const src = '---\nscene: arm\ncamera:\n  lookAt: [0, 0.5, 0]\n\n---\n# A\n'
+    expect(setCameraView(src, 0, { lookAt: [0, 0.5, 0], offset: [1, 2, 3] })).toBe(
+      '---\nscene: arm\ncamera:\n  lookAt: [0, 0.5, 0]\n  offset: [1, 2, 3]\n\n---\n# A\n',
+    )
+  })
+
   it('rewrites a flow-style camera, keeping its other entries', () => {
     const src = '---\nscene: arm\ncamera: { lookAt: [0, 0.45, 0], distance: 2, spring: { omega: 5 } }\n---\nx'
     expect(setCameraView(src, 0, view)).toBe(

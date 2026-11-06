@@ -1,8 +1,9 @@
 # Scene files
 
 How to give a lecture its own named camera views (from engine v2.5.0) and robot poses (from
-v2.7.0), steps 2 to 4 of [scene-files-proposal.md](scene-files-proposal.md). Written for the
-author; no engine knowledge needed. Objects come in a later step.
+v2.7.0), and to pose the robot in the editor (from v2.8.0): steps 2 to 5 of
+[scene-files-proposal.md](scene-files-proposal.md). Written for the author; no engine knowledge
+needed. Objects come in a later step.
 
 ## In short
 
@@ -149,6 +150,42 @@ across, as within one scene.
   a new one, is undone in both with one Ctrl+Z in slides.md, the new file included.
 - Saving a scene file with Ctrl+S, or creating or deleting one in VS Code, updates the panel.
 
+## Posing the robot in the editor
+
+From engine v2.8.0.
+
+- **J** opens the joint sliders at the top right of the panel: one per joint of the slide's
+  robot, between its limits, in radians (and degrees). A slider moves its joint at once, as a
+  teach pendant jogs it, whatever gains the slide teaches with; a slider of the slide's own for
+  that joint follows. J again, or ×, closes them. In `agilus-duo` they move robot 0 (`joint_1` …
+  `joint_6`), the one a trajectory's `profile` drives; the other robot (`ghost_joint_*`) isn't
+  posed here.
+- **P** (or Scene Actions…) saves the pose: the joints marked in the sliders (their names in the
+  accent colour), to two decimals, each inside its limits. Like V, it writes where the slide's
+  joints come from:
+  - **a slide that names a pose** (`joints: reach`): into that pose in the scene file. A list pose
+    stays a list, its numbers replaced where they stand; a mapping pose gets the joints, added if
+    it didn't have them. Afterwards the panel says which slides changed with it, those that carry
+    it on included.
+  - **a slide with its own `joints:` block**: into the block. Joints it has change where they
+    stand; others are added after them.
+  - **a slide without `joints:`**: a block with the marked joints.
+
+  The line under the sliders says where P will write before you press it, and which slides use
+  that pose now.
+- **Which joints are marked:** a joint away from where the slide puts it (its own joints, carried
+  ones, a pose, or the scene's), and a joint you moved with the sliders that no slide puts
+  anywhere. The robot keeps such a joint where you left it on the next slides too, until a slide
+  puts it somewhere, so it stays marked there, and P there writes it as well. A joint you didn't
+  touch keeps coming from where it did. A slide's own slider can move a joint too; it is marked if
+  the slide puts that joint somewhere.
+- **A slide whose robot moves by itself** (a `trajectory:`, or `idle:`) can't be posed: the sliders
+  are off there, and P saves nothing.
+- As with views, the change is unsaved until you save it (File > Save All), Ctrl+Z in the file
+  undoes it, and the panel shows it without loading afresh, a trajectory that starts or ends in
+  the pose included. P saves one pose at a time: pressed again before the last one is back in the
+  text (a moment), it says so.
+
 ## When something is wrong
 
 The build (and the panel) names the file, the line and what to do. For example:
@@ -201,7 +238,15 @@ it reads the scene file from VS Code, changes only that view's `lookAt` and `off
 edit (docs/editor-host.md). No extension update was needed for this: extension 0.3.0 already
 sends, reads and edits scene files.
 
+P is built the same way. The joint sliders (`src/editor/joint-panel.ts`) set the robot's joints in
+the running deck. P works out which joints moved, and where the slide's joints come from (its own
+block, or a pose it names), and computes the edit (`src/editor/pose-edit.ts`, only those numbers
+changed). New text that changes only cameras and joints goes into the running deck without
+loading the panel afresh (`src/editor/editor-compile.ts`, `updateTargets`); the slide shown may
+only change to the view or pose just saved from it.
+
 ## Not yet
 
-- Posing the robot in the panel (joint sliders, P and Shift+P to save a pose), step 5.
+- Shift+P, "Save pose as…" (only this slide, an existing pose, or a new one), step 5b; posing the
+  robot by dragging its tool (inverse kinematics), step 5c.
 - Objects (tables, workpieces, frames), steps 6 and 7; models from `assets/`, steps 8 and 9.

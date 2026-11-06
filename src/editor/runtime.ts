@@ -2,10 +2,12 @@ import { compileLecture } from '../compiler/compile-slides'
 import type { CameraTargetSpec } from '../engine/slide-types'
 import { SCENE_NAMES } from '../scenes/registry'
 import { viewNameProblem, type CameraView } from './camera-edit'
-import { compileForEditor, updateCameras } from './editor-compile'
+import { compileForEditor, updateTargets } from './editor-compile'
 import { createHost, type HostChange } from './host'
+import { createJointPanel, type PanelState } from './joint-panel'
 import { loadImages } from './panel-images'
 import { EDITOR_PROTOCOL } from './panel-page.js'
+import { motionOf, namedPoseEdit, poseEdit, poseTarget, poseUsers, poseValue, sceneJoints, type PoseTarget } from './pose-edit'
 import {
   namedTarget,
   namedViewEdit,
@@ -26,7 +28,8 @@ import {
  * page's `include` patterns); this page checks that they compile, reads the
  * lecture's images through the extension, then starts the deck. New text that
  * only changes cameras (a saved view, say) is put into the running deck at
- * once and 'shown'. Other new text that compiles is 'accepted', and the
+ * once and 'shown', as is text that only changes joints (a saved pose). Other
+ * new text that compiles is 'accepted', and the
  * extension then loads the panel afresh and sends that text again on 'ready'.
  * Text that doesn't compile leaves the last good version running and shows
  * the error.
@@ -34,7 +37,8 @@ import {
  * Every set of files the extension sends carries a number (seq). The page
  * names the one it shows in 'shown' and 'slide', so the extension knows which
  * text a slide number counts in. Saving a view is computed here and written
- * through the extension's edit request (host.ts, save-view.ts).
+ * through the extension's edit request (host.ts, save-view.ts), as is
+ * saving the robot's pose (P; pose-edit.ts, joint-panel.ts).
  *
  * Messages version 3, all { type: 'lysark:…' } (docs/editor-host.md):
  *   page → extension  ready { protocol, render, include } · shown { seq, index } · accepted { seq }
@@ -55,6 +59,13 @@ interface Vec3Like {
   sub(v: Vec3Like): Vec3Like
   distanceTo(v: Vec3Like): number
 }
+/** a joint of the robot shown (engine/motion-system.ts, PidChannel) */
+interface JointChannel {
+  x: number
+  v: number
+  setpoint: number
+  pid: { reset(): void }
+}
 interface LysarkHandle {
   sceneLayer: { camera: { position: Vec3Like } }
   controls: { target: Vec3Like }
@@ -62,14 +73,25 @@ interface LysarkHandle {
   engine: {
     currentIndex: number
     slideCount: number
-    current: { scene?: string; effective: { camera?: { lookAt?: unknown; spring?: { omega?: number; zeta?: number } } } }
+    current: {
+      scene?: string
+      effective: { camera?: { lookAt?: unknown; spring?: { omega?: number; zeta?: number } }; joints?: Record<string, number> }
+      trajectory?: unknown
+      idle?: Record<string, unknown>
+    }
     goTo(index: number, direction?: 'forward' | 'backward'): void
   }
   sceneManager: {
     busy: boolean
     activeSceneId: string | undefined
-    active: { anchors: Record<string, { getWorldPosition(v: Vec3Like): Vec3Like }> } | null
+    active: {
+      anchors: Record<string, { getWorldPosition(v: Vec3Like): Vec3Like }>
+      channels: Record<string, JointChannel>
+      defaults: { joints?: Record<string, number> }
+    } | null
   }
+  /** run the render loop until the scene settles */
+  ensureTicking(): void
 }
 
 /** a saved view keeps the slide's anchor only if the camera still looks at it (metres) */
@@ -115,13 +137,44 @@ let savedView: {
   expect?: { path: string; text: string }
 } | null = null
 
+/**
+ * the last pose saved from this page: the slide and its scene, the joints
+ * written, the file text its edit makes, which uses it up (as savedView), and
+ * when VS Code took the edit
+ */
+let savedPose: {
+  slide: number
+  scene: string
+  values: Record<string, number>
+  expect: { path: string; text: string }
+  at: number
+} | null = null
+/** P waits this long for the last pose saved to come back in the text, then saves anyway */
+const POSE_PENDING_MS = 10_000
+/**
+ * the joints moved with the sliders, per scene, and where to: the engine
+ * leaves a joint that no slide sets where it is, so such a move stays on the
+ * next slides, and P writes it there. It is forgotten once the joint is
+ * elsewhere (a slide, idle or a trajectory moved it) or its pose is saved.
+ */
+const jogged = new Map<string, Map<string, number>>()
+/** a pose is being read and written (between P and VS Code's answer) */
+let savingPose = false
+
 const round2 = (n: number) => Number(n.toFixed(2))
+
+/** the joints whose values differ between `a` and `b` (set in one only, too) */
+function changedJoints(a: Record<string, number> | undefined, b: Record<string, number> | undefined): string[] {
+  const names = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])
+  return [...names].filter((name) => a?.[name] !== b?.[name])
+}
 
 /**
  * Put new text into the running deck without loading the page afresh, if
- * only cameras changed. The slide on screen may only change to the view just
- * saved from it (the camera is already there); any other change to it needs
- * the fresh page, where the camera flies to it.
+ * only cameras and joints changed. The slide on screen may only change to the
+ * view or the pose just saved from it (the camera, the robot, is already
+ * there); any other change to it needs the fresh page, where the camera flies
+ * to it.
  */
 async function updateInPlace(files: Record<string, string>): Promise<boolean> {
   const engine = lysark()?.engine
@@ -139,12 +192,53 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
     JSON.stringify(next.offset) === JSON.stringify(savedView.offset)
   const changesSlideShown = JSON.stringify(next) !== JSON.stringify(deck.slides[i]?.effective.camera)
   if (changesSlideShown && !isSavedView) return false
-  if (updateCameras(deck.slides, fresh) === null) return false
+  // likewise its joints: only to the pose just saved, on its slide or carried
+  // onto the slide shown (P, then on to the next slide before the text came)
+  const nowJoints = deck.slides[i]?.effective.joints
+  const nextJoints = fresh[i]?.effective.joints
+  const changed = changedJoints(nowJoints, nextJoints)
+  const posesSlideShown = changed.length > 0
+  const pose = savedPose
+  const fromSavedPose =
+    pose !== null && fresh[i]?.scene === pose.scene && changed.every((joint) => nextJoints?.[joint] !== undefined && nextJoints[joint] === pose.values[joint])
+  if (posesSlideShown && !fromSavedPose) return false
+  // the slide shown runs its trajectory from the ends it had when it was entered
+  if (JSON.stringify(fresh[i]?.trajectory) !== JSON.stringify(deck.slides[i]?.trajectory)) return false
+  if (updateTargets(deck.slides, fresh) === null) return false
   // the saved view is used up once its edit's text has come (or it was put on
   // the slide shown). Until then it waits: files in between (VS Code reports a
   // file the edit creates before the edit's own text comes) mustn't use it up
   const expect = savedView?.expect
   if ((expect && files[expect.path] === expect.text) || (changesSlideShown && isSavedView)) savedView = null
+  if (posesSlideShown && pose) {
+    // On the slide saved, the robot is at the pose already, up to the two
+    // decimals written; on a slide that carries it, it goes there, as entering
+    // the slide would have taken it. A joint the sliders moved since stays
+    // where it is, and still counts as moved
+    const active = lysark()?.sceneManager.active
+    const joints = sceneJoints(pose.scene)
+    for (const joint of changed) {
+      const channel = active?.channels[joint]
+      const info = joints.find((j) => j.name === joint)
+      const value = nextJoints![joint]
+      if (!channel || !info) continue
+      const was = nowJoints?.[joint] ?? active?.defaults.joints?.[joint]
+      if (poseValue(channel.setpoint, info) === value || was === undefined || Math.abs(channel.setpoint - was) < 1e-9) channel.setpoint = value
+    }
+    lysark()?.ensureTicking()
+  }
+  const poseExpect = savedPose?.expect
+  if (savedPose && ((poseExpect && files[poseExpect.path] === poseExpect.text) || (posesSlideShown && fromSavedPose))) {
+    // the joints saved are written now: moves with the sliders not made since are done
+    const moved = jogged.get(savedPose.scene)
+    const joints = sceneJoints(savedPose.scene)
+    for (const [joint, value] of Object.entries(savedPose.values)) {
+      const at = moved?.get(joint)
+      const info = joints.find((j) => j.name === joint)
+      if (at !== undefined && info && poseValue(at, info) === value) moved!.delete(joint)
+    }
+    savedPose = null
+  }
   return true
 }
 
@@ -171,7 +265,8 @@ banner.style.cssText =
   'position:fixed;left:12px;right:12px;bottom:12px;z-index:1000;padding:10px 14px;border-radius:8px;' +
   'font:14px/1.4 system-ui,sans-serif;white-space:pre-wrap;display:none;pointer-events:none'
 const hint = document.createElement('div')
-hint.textContent = 'Ctrl+S in the text updates the preview · V or the camera button above: save this camera view into the slide · Shift+V: save as…'
+hint.textContent =
+  'Ctrl+S in the text updates the preview · V or the camera button above: save this camera view into the slide · Shift+V: save as… · J: pose the robot'
 hint.style.cssText =
   'position:fixed;left:12px;top:10px;z-index:1000;padding:3px 8px;border-radius:6px;font:12px system-ui,sans-serif;' +
   'color:var(--text-dim);background:rgba(var(--surface-rgb),0.8);pointer-events:none'
@@ -211,14 +306,28 @@ function updateHint(): void {
       ? `V or the camera button above: change the view '${target.view}' in ${target.path}` +
         (users.length > 1 ? ` (slides ${listSlides(users)} fly to it)` : '')
       : 'V or the camera button above: save this camera view into the slide') +
-    ' · Shift+V: save as…'
+    ' · Shift+V: save as… · J: pose the robot'
   hint.textContent = text([])
+  // and the joint sliders say where P writes
+  const pose = engine ? poseTarget(shownFiles, engine.currentIndex) : null
+  const poseText = (users: number[]) =>
+    pose
+      ? `P: change the pose '${pose.pose}' in ${pose.path}` + (users.length > 1 ? ` (slides ${listSlides(users)} use it)` : '')
+      : `P: save this pose into slide ${(index ?? 0) + 1}`
+  jointPanel.setFooter(poseText([]))
   window.clearTimeout(hintTimer)
-  if (!target) return
+  if (!target && !pose) return
   const seq = shownSeq
   hintTimer = window.setTimeout(async () => {
-    const users = await flyingTo(target)
-    if (shownSeq === seq && lysark()?.engine.currentIndex === index) hint.textContent = text(users)
+    const here = () => shownSeq === seq && lysark()?.engine.currentIndex === index
+    if (target) {
+      const users = await flyingTo(target)
+      if (here()) hint.textContent = text(users)
+    }
+    if (pose) {
+      const users = await posedBy(pose)
+      if (here()) jointPanel.setFooter(poseText(users))
+    }
   }, 400)
 }
 
@@ -288,6 +397,7 @@ window.addEventListener('message', async (event) => {
       const seq = message.seq
       const report = () => {
         savedView = null // a view saved from this page is known again only in the text that comes right back
+        savedPose = null
         if (!booted) clearLoading() // nothing to show yet but the error
         showBanner(`Not updated, the slides have an error:\n${problem}`)
         post({ type: 'lysark:error', message: problem, seq })
@@ -313,6 +423,7 @@ window.addEventListener('message', async (event) => {
       }
       // other new text: the extension loads this page afresh and sends it again on 'ready'
       savedView = null
+      savedPose = null
       post({ type: 'lysark:accepted', seq: message.seq })
       return
     }
@@ -384,8 +495,18 @@ async function sceneActions(): Promise<void> {
     }
     items.push({ label: 'Save as: a new view…', description: choices.exists ? `in ${choices.path}` : `creates ${choices.path}`, value: 'new' })
   }
+  if (engine?.current.scene && !movesItself(engine.current)) {
+    const pose = poseTarget(shownFiles, engine.currentIndex)
+    const posers = pose ? await posedBy(pose) : []
+    items.push({
+      label: pose ? `Change the pose '${pose.pose}' to the robot's pose` : "Save the robot's pose into this slide",
+      description: pose ? `P, in ${pose.path}` + (posers.length > 1 ? `; slides ${listSlides(posers)} use it` : '') : 'P',
+      value: 'save-pose',
+    })
+  }
   const choice = await host.ask({ title: 'Lysark: scene actions', items })
   if (choice === 'save-view') return saveView()
+  if (choice === 'save-pose') return savePose()
   if (!choice || !choices) return
   if (choice === 'slide') await saveAs({ kind: 'slide' }, choices)
   else if (choice.startsWith('view:')) await saveAs({ kind: 'view', name: choice.slice(5) }, choices)
@@ -556,6 +677,225 @@ async function saveNamedView(target: NamedTarget, view: CameraView, rounded: Non
 function showSaved(text: string): void {
   showBanner(text, 'ok')
   savedShowing = true
+}
+
+// ---- pose the robot (J, P; docs/scene-files.md) ---------------------------
+
+/** why the robot on this slide can't be posed, if it can't: the slide moves it itself */
+function movesItself(slide: LysarkHandle['engine']['current']): string | null {
+  if (slide.trajectory) return 'this slide moves the robot along its trajectory'
+  if (slide.idle && Object.keys(slide.idle).length > 0) return 'this slide moves the robot itself (idle:)'
+  return null
+}
+
+/**
+ * Whether P writes this joint on the slide shown: it is away from where the
+ * slide puts it (its own joints, carried ones, a pose, the scene's), or the
+ * slide puts it nowhere and the sliders moved it.
+ */
+function jointMoved(slide: LysarkHandle['engine']['current'], active: NonNullable<LysarkHandle['sceneManager']['active']>, name: string): boolean {
+  const channel = active.channels[name]
+  if (!channel) return false
+  const target = slide.effective.joints?.[name] ?? active.defaults.joints?.[name]
+  if (target !== undefined) return Math.abs(channel.setpoint - target) > 1e-9
+  // no slide puts it anywhere: moved if the sliders left it where it is
+  const moved = jogged.get(slide.scene ?? '')
+  const at = moved?.get(name)
+  if (at === undefined) return false
+  if (Math.abs(channel.setpoint - at) < 1e-9) return true
+  moved!.delete(name) // something else has moved it since
+  return false
+}
+
+/** the joint sliders: one per joint of the robot shown, which move it at once */
+const jointPanel = createJointPanel((): PanelState => {
+  const L = lysark()
+  if (!L) return { key: 'loading', joints: [], note: 'The slides are starting.' }
+  const slide = L.engine.current
+  const index = L.engine.currentIndex
+  if (!slide.scene) return { key: `${index}`, joints: [], note: 'This slide has no 3D scene, so there is no robot to pose.' }
+  const active = L.sceneManager.active
+  if (L.sceneManager.busy || L.sceneManager.activeSceneId !== slide.scene || !active) {
+    return { key: `${index}:loading`, joints: [], note: 'The scene is loading…' }
+  }
+  const why = movesItself(slide)
+  const joints = sceneJoints(slide.scene)
+    .filter((j) => active.channels[j.name])
+    .map((j) => {
+      const channel = active.channels[j.name]
+      return {
+        name: j.name,
+        min: Math.ceil(j.min * 100 - 1e-6) / 100,
+        max: Math.floor(j.max * 100 + 1e-6) / 100,
+        get: () => channel.setpoint,
+        set: (value: number) => {
+          // at once, as a teach pendant jogs it, whatever gains the slide teaches with
+          channel.setpoint = value
+          channel.x = value
+          channel.v = 0
+          channel.pid.reset()
+          if (!jogged.has(slide.scene!)) jogged.set(slide.scene!, new Map())
+          jogged.get(slide.scene!)!.set(j.name, value)
+          L.ensureTicking()
+        },
+        moved: () => jointMoved(slide, active, j.name),
+      }
+    })
+  // (text put in place changes no row: what would reloads the panel)
+  return { key: `${index}:${slide.scene}`, joints, ...(why ? { note: `${why[0].toUpperCase()}${why.slice(1)}, so it can't be posed here.` } : {}) }
+}, () => (hint.isConnected ? Math.max(44, hint.getBoundingClientRect().bottom + 6) : 44))
+
+/** how the slides move the robot as the panel shows them (the running deck) */
+async function shownMotions(): Promise<string[]> {
+  const { default: deck } = await import('./deck-from-source')
+  return deck.slides.map(motionOf)
+}
+
+/** the slides whose robot the pose moves, worked out once per pose and text (a compile) */
+let posersOf: { seq: number | null; lists: Map<string, number[]> } = { seq: null, lists: new Map() }
+async function posedBy(target: PoseTarget): Promise<number[]> {
+  const motions = await shownMotions()
+  if (posersOf.seq !== shownSeq) posersOf = { seq: shownSeq, lists: new Map() }
+  const key = `${target.path}\n${target.pose}`
+  if (!posersOf.lists.has(key)) posersOf.lists.set(key, poseUsers(shownFiles, target, motions))
+  return posersOf.lists.get(key)!
+}
+
+/**
+ * The pose to save on the slide shown: the joints moved (jointMoved), as P
+ * writes them (two decimals, inside the limits), and the joints the slide then
+ * has. null, saying why, if there is nothing to save.
+ */
+function currentPose(): { index: number; scene: string; values: Record<string, number> } | null {
+  const L = lysark()
+  if (!L) return null
+  const slide = L.engine.current
+  if (!slide.scene) {
+    showBanner('This slide has no 3D scene, so there is no pose to save.')
+    return null
+  }
+  const active = L.sceneManager.active
+  if (L.sceneManager.busy || L.sceneManager.activeSceneId !== slide.scene || !active) {
+    showBanner('The scene is still loading; try again in a moment.')
+    return null
+  }
+  const why = movesItself(slide)
+  if (why) {
+    showBanner(`The pose was not saved: ${why}.`)
+    return null
+  }
+  const values: Record<string, number> = {}
+  for (const joint of sceneJoints(slide.scene)) {
+    if (jointMoved(slide, active, joint.name)) values[joint.name] = poseValue(active.channels[joint.name].setpoint, joint)
+  }
+  if (Object.keys(values).length === 0) {
+    showBanner('No joint has moved on this slide: move one with the joint sliders (J), then press P.', 'ok')
+    return null
+  }
+  return { index: L.engine.currentIndex, scene: slide.scene, values }
+}
+
+async function savePose(): Promise<void> {
+  // one at a time: a second save before the first comes back in the text would reload the panel
+  if (savingPose || (savedPose && performance.now() - savedPose.at < POSE_PENDING_MS)) {
+    showBanner('The last pose is still on its way into the slides; press P again in a moment.', 'ok')
+    return
+  }
+  if (saving) return // a view is being saved
+  const now = currentPose()
+  if (!now) return
+  // a slide that names a pose (`joints: reach`) saves into that pose; any other into the slide
+  const target = poseTarget(shownFiles, now.index)
+  saving = true
+  savingPose = true
+  try {
+    if (target) await saveNamedPose(target, now)
+    else await saveSlidePose(now)
+  } finally {
+    saving = false
+    savingPose = false
+  }
+}
+
+/** the pose into the slide's own `joints:` in slides.md */
+async function saveSlidePose(now: NonNullable<ReturnType<typeof currentPose>>): Promise<void> {
+  const file = (await host.read(['slides.md'], 'text'))['slides.md']
+  if (typeof file.text !== 'string' || typeof file.version !== 'number') {
+    showBanner(`The pose was not saved: slides.md could not be read (${file.error ?? 'no text'}).`)
+    return
+  }
+  const change = poseEdit(shownFiles['slides.md'], file.text, now.index, now.values)
+  if (change && 'problem' in change) {
+    showBanner(`The pose was not saved: ${change.problem}`)
+    return
+  }
+  if (!change) {
+    showBanner(`Slide ${now.index + 1} already has this pose`, 'ok')
+    return
+  }
+  const next = file.text.slice(0, change.start) + change.text + file.text.slice(change.end)
+  const broken = problemWith({ ...shownFiles, 'slides.md': next })
+  if (broken && !problemWith({ ...shownFiles, 'slides.md': file.text })) {
+    showBanner(`The pose was not saved: the slides would have an error:\n${broken}`)
+    return
+  }
+  savedPose = { slide: now.index, scene: now.scene, values: now.values, expect: { path: 'slides.md', text: next }, at: performance.now() }
+  const result = await host.edit('Save robot pose', [{ path: 'slides.md', version: file.version, ...change }])
+  if (!result.ok) {
+    savedPose = null
+    showBanner(`The pose was not saved: ${result.message ?? 'VS Code refused the edit'}`)
+    return
+  }
+  if (savedPose) savedPose.at = performance.now() // its text comes after VS Code's answer
+  showSaved(`Pose saved to slide ${now.index + 1}`)
+}
+
+/** the pose into the named pose the slide uses, in the lecture's scene file (docs/scene-files.md) */
+async function saveNamedPose(target: PoseTarget, now: NonNullable<ReturnType<typeof currentPose>>): Promise<void> {
+  const file = (await host.read([target.path], 'text'))[target.path]
+  if (typeof file.text !== 'string' || typeof file.version !== 'number') {
+    showBanner(`The pose was not saved: ${target.path} could not be read (${file.error ?? 'no text'}).`)
+    return
+  }
+  const order = sceneJoints(now.scene).map((j) => j.name)
+  const change = namedPoseEdit(file.text, target.pose, now.values, order)
+  if (change && 'problem' in change) {
+    showBanner(`The pose was not saved: ${change.problem}`)
+    return
+  }
+  if (!change) {
+    showBanner(`The pose '${target.pose}' already is this pose`, 'ok')
+    return
+  }
+  const next = file.text.slice(0, change.start) + change.text + file.text.slice(change.end)
+  const before = { ...shownFiles, [target.path]: file.text }
+  const after = { ...shownFiles, [target.path]: next }
+  const broken = problemWith(after)
+  if (broken && !problemWith(before)) {
+    showBanner(`The pose was not saved: the slides would have an error:\n${broken}`)
+    return
+  }
+  // every slide whose robot moves with it: the slides that name it, those that carry it on, trajectories
+  let changed: number[] = []
+  try {
+    const was = compileLecture(before['slides.md'], before).slides.map(motionOf)
+    const is = compileLecture(after['slides.md'], after).slides.map(motionOf)
+    changed = is.flatMap((m, i) => (m !== was[i] ? [i] : []))
+  } catch {
+    // the shown slides with the scene file as it is now don't compile: name none
+  }
+  savedPose = { slide: now.index, scene: now.scene, values: now.values, expect: { path: target.path, text: next }, at: performance.now() }
+  const result = await host.edit(`Save robot pose '${target.pose}'`, [{ path: target.path, version: file.version, ...change }])
+  if (!result.ok) {
+    savedPose = null
+    showBanner(`The pose was not saved: ${result.message ?? 'VS Code refused the edit'}`)
+    return
+  }
+  if (savedPose) savedPose.at = performance.now() // its text comes after VS Code's answer
+  showSaved(
+    `Pose '${target.pose}' changed in ${target.path}, not saved yet (File > Save All)` +
+      (changed.length > 0 ? `: slide${changed.length > 1 ? 's' : ''} ${listSlides(changed)} now take${changed.length > 1 ? '' : 's'} it` : ''),
+  )
 }
 
 // ---- Save view as… (Shift+V, Scene Actions…; docs/scene-files.md) ----------------
@@ -814,10 +1154,18 @@ async function openSaveAs(): Promise<void> {
 }
 
 window.addEventListener('keydown', (e) => {
-  if ((e.key !== 'v' && e.key !== 'V') || e.ctrlKey || e.metaKey || e.altKey) return
-  if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return
-  if (e.shiftKey) void openSaveAs()
-  else void saveView()
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  // not while typing; a slider (the joints', a slide's) has no use for letters
+  if (e.target instanceof HTMLElement && e.target.closest('input:not([type="range"]), textarea, select')) return
+  const key = e.key.toLowerCase()
+  if (key === 'v') {
+    if (e.shiftKey) void openSaveAs()
+    else void saveView()
+  } else if (key === 'p' && !e.shiftKey) {
+    void savePose()
+  } else if (key === 'j' && !e.shiftKey) {
+    jointPanel.toggle()
+  }
 })
 
 window.addEventListener('hashchange', () => {

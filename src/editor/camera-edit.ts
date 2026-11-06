@@ -24,28 +24,28 @@ export interface CameraView {
 const round = (n: number) => Number(n.toFixed(2))
 export const formatVec = (v: Vec3) => `[${v.map(round).join(', ')}]`
 
-interface Edit {
+export interface Edit {
   start: number
   end: number
   text: string
 }
 
-function lineStart(src: string, at: number): number {
+export function lineStart(src: string, at: number): number {
   return src.lastIndexOf('\n', at - 1) + 1
 }
 
-function keyName(p: Pair): unknown {
+export function keyName(p: Pair): unknown {
   return isScalar(p.key) ? p.key.value : undefined
 }
 
-type Range = [number, number, number]
+export type Range = [number, number, number]
 
 /**
  * The edits that set an existing entry's value to `text` (`numbers`, as a
  * list), written on the key's line. A list written one item per line keeps
  * its form and its comments: each number is replaced where it stands.
  */
-function setValue(yaml: string, pair: Pair, text: string, numbers?: number[]): Edit[] {
+export function setValue(yaml: string, pair: Pair, text: string, numbers?: number[]): Edit[] {
   const key = pair.key as { range: Range }
   const value = pair.value as { range?: Range; flow?: boolean } | null
   if (isSeq(value) && !value.flow && numbers && value.items.length === numbers.length) {
@@ -73,7 +73,7 @@ function setWhole(yaml: string, key: { range: Range }, value: { range?: Range; f
   return { start: key.range[1], end: colon + 1, text: `: ${text}` }
 }
 
-function applyEdits(yaml: string, edits: Edit[]): string {
+export function applyEdits(yaml: string, edits: Edit[]): string {
   let out = yaml
   for (const e of [...edits].sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.text + out.slice(e.end)
   return out
@@ -189,7 +189,8 @@ function editCameraMapping(yaml: string, cam: YAMLMap<unknown, unknown>, view: C
   if (missing.length > 0) {
     const at = cam.range[1]
     let text = (at > 0 && yaml[at - 1] !== '\n' ? '\n' : '') + missing.join('')
-    if (at === yaml.length) text = text.replace(/\n$/, '') // nothing follows: no trailing newline
+    // nothing follows and the text had no final newline: don't add one
+    if (at === yaml.length && yaml[at - 1] !== '\n') text = text.replace(/\n$/, '')
     edits.push({ start: at, end: at, text })
   }
   return applyEdits(yaml, edits)
@@ -230,7 +231,7 @@ export function setCameraView(source: string, slideIndex: number, view: CameraVi
 // ---- named views (docs/scene-files.md): using one on a slide, adding one --------
 
 /** the YAML text of a file, without a byte-order mark and with \n line endings, and how to put them back */
-function plainText(source: string): { yaml: string; restore: (text: string) => string } {
+export function plainText(source: string): { yaml: string; restore: (text: string) => string } {
   const bom = source.startsWith('﻿') ? '﻿' : ''
   const crlf = source.includes('\r\n')
   return {

@@ -479,6 +479,13 @@ HTTPS server.
   (a table of each scene's joints, src/scenes/joints.ts, checked against the URDF files and the
   pendulum scene's constants). Engine
   v2.7.0, no extension change. [scene-files.md](scene-files.md).
+- Scene files, step 5a (2026-11-06, built, not yet released): joint sliders in the panel (J),
+  which move the robot at once, and P, which saves the joints moved where the slide's joints come
+  from: the pose it names in the scene file, or its own `joints:` block. Saved poses go into the
+  running deck in place. One engine change with it: a slide's own slider follows its joint when
+  something else moves it (the joint sliders, the debug panel), so grabbing it never jumps.
+  Shift+P (step 5b) and dragging the tool with IK (step 5c) follow. Engine v2.8.0, no extension
+  change. [scene-files.md](scene-files.md).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).

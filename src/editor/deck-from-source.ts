@@ -8,7 +8,7 @@ import { compileForEditor } from './editor-compile'
  * (src/editor/runtime.ts sets them before the deck loads).
  * In the editor build this module stands in for `virtual:lysark-deck`. Its
  * slide objects are the ones the engine reads, so the runtime can update their
- * cameras in place (editor-compile.ts, updateCameras).
+ * cameras and joints in place (editor-compile.ts, updateTargets).
  */
 
 declare global {
