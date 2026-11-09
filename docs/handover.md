@@ -107,13 +107,13 @@ whose objects of the scene on screen differ only in where they are, dragged or t
 the running scene in place (runtime.ts, `placeObjects`); any other change to an object still
 loads the panel afresh. Next in docs/scene-files-proposal.md is step 8, models from `assets/`.
 
-**Releases wait (2026-11-06):** GitHub Actions don't start on the author's account (the
-education plan expired; renewal pending), so Update engine and Publish lectures can't run, and
-engine CI doesn't run on pushes. Until then every push is checked locally first (vitest, the
-student-file check, check-editor in Chromium and Firefox, check-extension). v2.6.0 is not tagged
-yet: tag it on the step-3 commit (20675c8), v2.7.0 on step 4's (6bf9cf9), v2.8.0 on step 5a's
-(defeca7), v2.9.0 on step 5b's (defbfbd), v2.10.0 on step 5c's (59c2cf9), v2.11.0 on
-step 6's (74d13a1) and v2.12.0 on step 7's, once Actions run again.
+**Tagged (2026-11-09):** GitHub Actions were off on the author's account from 2026-11-06 (the
+education plan had expired), so steps 3 to 7 were checked locally before each push. The plan is
+back: engine CI passed on step 7's push (9a63463), and v2.6.0 to v2.12.0 are tagged on their
+steps' commits (20675c8, 6bf9cf9, defeca7, defbfbd, 59c2cf9, 74d13a1, 9a63463). The course
+still runs v2.5.1. Next: Update engine with v2.12.0, then try steps 3 to 7 in github.dev on the
+course lecture (the proposal asks for Save view as… there: a new view in a new scene file, and
+one Ctrl+Z in slides.md undoing both).
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
