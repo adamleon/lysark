@@ -1,7 +1,8 @@
 # Scene files
 
 How to give a lecture its own named camera views (from engine v2.5.0) and robot poses (from
-v2.7.0), and to pose the robot in the editor (from v2.8.0, Save pose as… from v2.9.0): steps 2 to 5 of
+v2.7.0), and to pose the robot in the editor (from v2.8.0; Save pose as… from v2.9.0, dragging
+the tool from v2.10.0): steps 2 to 5 of
 [scene-files-proposal.md](scene-files-proposal.md). Written for the author; no engine knowledge
 needed. Objects come in a later step.
 
@@ -160,6 +161,24 @@ From engine v2.8.0.
   that joint follows. J again, or ×, closes them. In `agilus-duo` they move robot 0 (`joint_1` …
   `joint_6`), the one a trajectory's `profile` drives; the other robot (`ghost_joint_*`) isn't
   posed here.
+- **Dragging the tool** (from engine v2.10.0): while the sliders are open, a ring sits on the
+  robot's tool (in `arm` and `agilus`). Drag it, and the tool follows the pointer in the plane
+  that faces you; the joints follow by inverse kinematics, each step turning them as little as it
+  can from where they are, within their limits, so the wrist may turn too. The elbow stays bent
+  the way it is: past the edge of reach the tool stops at the edge, the elbow a little short of
+  straight, and slides along the edge as the pointer moves on. To bend the elbow the other way,
+  use its slider. A joint that reaches its stop stays there while the others take the tool on, and
+  the joints the tool doesn't need (the KUKA's wrist) lean back to the pose before you began
+  dragging (the pose you last set with a slider or saved, or the slide's), so dragging out and
+  back, in one drag or several, comes back to it. From an elbow held nearly straight, pulling the
+  KUKA's tool in can fold its wrist instead of bending the elbow; bend the elbow with its slider
+  first. Drawn over the top of the base,
+  close to its axis, the arm can swing the base half a turn and come back the other way round, or
+  stop short where the base reaches its stop, and right above the base the tool may not follow
+  sideways; turn the base with its slider instead. To move the tool nearer or farther, turn the view and drag again. Pressing the
+  ring stops a camera flight where it is. Only the joints the drag turned are marked (never the
+  KUKA's `joint_6`, whose axis runs through the tool), and P or Shift+P saves them, as for the
+  sliders. `agilus-duo` and `pendulum` have no ring.
 - **P** (or Scene Actions…) saves the pose: the joints marked in the sliders (their names in the
   accent colour), to two decimals, each inside its limits. Like V, it writes where the slide's
   joints come from:
@@ -264,7 +283,9 @@ edit (docs/editor-host.md). No extension update was needed for this: extension 0
 sends, reads and edits scene files.
 
 P and Shift+P are built the same way, Shift+P in the same dialog as Shift+V. The joint sliders
-(`src/editor/joint-panel.ts`) set the robot's joints in the running deck. P works out which joints moved, and where the slide's joints come from (its own
+(`src/editor/joint-panel.ts`) set the robot's joints in the running deck, and so does the ring at
+the tool (`src/editor/tool-handle.ts`), with the scene's inverse kinematics (`src/scene/ik.ts`;
+the arm's scene has it from v2.10.0, the KUKA's had it for MoveL). P works out which joints moved, and where the slide's joints come from (its own
 block, or a pose it names), and computes the edit (`src/editor/pose-edit.ts`, only those numbers
 changed). New text that changes only cameras and joints goes into the running deck without
 loading the panel afresh (`src/editor/editor-compile.ts`, `updateTargets`); the slide shown may
@@ -272,5 +293,4 @@ only change to the view or pose just saved from it.
 
 ## Not yet
 
-- Posing the robot by dragging its tool (inverse kinematics), step 5c.
 - Objects (tables, workpieces, frames), steps 6 and 7; models from `assets/`, steps 8 and 9.

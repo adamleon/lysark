@@ -82,14 +82,20 @@ slider now follows its joint (src/main.ts), its own small engine change.
 5b is built and checked (2026-11-07), not yet released: engine v2.9.0, no extension change.
 Shift+P, "Save pose as…" (only this slide, an existing pose, a new pose, creating the scene file
 if needed), in the dialog Shift+V uses (runtime.ts, openChoiceDialog) and in Scene Actions….
-Next: 5c, dragging the tool with IK.
+
+5c is built and checked (2026-11-07), not yet released: engine v2.10.0, no extension change. A
+ring at the robot's tool while the joint sliders are open (src/editor/tool-handle.ts); dragging it
+solves the scene's position IK (src/scene/ik.ts) and jogs the joints as the sliders do. The arm
+scene now exposes `ik` too. That finishes step 5; next in docs/scene-files-proposal.md is step 6,
+objects written by hand, by decision 7 as confirmed (y up, `at` at the middle of the underside,
+turns in degrees, colours as named presets).
 
 **Releases wait (2026-11-06):** GitHub Actions don't start on the author's account (the
 education plan expired; renewal pending), so Update engine and Publish lectures can't run, and
 engine CI doesn't run on pushes. Until then every push is checked locally first (vitest, the
 student-file check, check-editor in Chromium and Firefox, check-extension). v2.6.0 is not tagged
 yet: tag it on the step-3 commit (20675c8), v2.7.0 on step 4's (6bf9cf9), v2.8.0 on step 5a's
-(defeca7) and v2.9.0 on step 5b's, once Actions run again.
+(defeca7), v2.9.0 on step 5b's (defbfbd) and v2.10.0 on step 5c's, once Actions run again.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -175,7 +181,13 @@ tool stays within 0.7 mm of the line. The pptx's rendered-equation slides 6–8 
   a `trace-layer`). Eases to q₀ under PID first (`trajArmed`), then engages playback.
 - **IK** ([src/scene/ik.ts](../src/scene/ik.ts)): numeric position-only damped-least-
   squares over a geometric Jacobian, warm-started. Exposed as `ik` (fk/solve/get/set)
-  on the agilus SceneInstance. Robust for slowly-moving targets (the Lin scenario).
+  on the agilus and (from v2.10.0) arm SceneInstances: MoveL, task-space trajectories and
+  traces, and the editor's tool drag, which steps it with src/editor/tool-handle.ts
+  `stepToward`: aims of at most 3 cm, the elbow held bent the way it is as a bound of the
+  solve (each scene names its elbow, shoulder and wrist; ik.ts finds the straight angle), joints
+  at a stop set aside (`stopsAside`), and the spare joints leaning back in the null space to
+  the pose before dragging (`rest`). MoveL uses none of these options. Robust for
+  slowly-moving targets (the Lin scenario).
 - **Widgets** (`src/overlay/widgets/`): `curve` (analytic profile plot + phase
   marker), `path` (s slider), `toggle` (solid/ghost swap), `transport` (Run/Pause +
   normalized-time scrub), `compare` (one selectable quantity for two profiles), and
@@ -200,7 +212,7 @@ keep it green.
   channel-binding, camera-merge.
 - `src/scene/` — scene-layer (the one persistent renderer), camera-controller,
   **ik** (DLS solver), dispose.
-- `src/scenes/` — `arm`, `pendulum`, `agilus` (+ `parseAgilusRobot`, exposes `ik`),
+- `src/scenes/` — `arm` (exposes `ik` from v2.10.0), `pendulum`, `agilus` (+ `parseAgilusRobot`, exposes `ik`),
   `agilus-duo` (two robots). One scene's GPU alive at a time.
 - `src/overlay/` — overlay, anchor-layer (labels + live vector), presenter,
   `widgets/` (slider, plot, curve, path, toggle, transport, compare-curve,
@@ -229,7 +241,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**274**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**292**) · `npm run typecheck`
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.

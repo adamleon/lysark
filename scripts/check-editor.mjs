@@ -32,14 +32,17 @@
 // P refused on a slide that moves the robot itself (no line about P there),
 // a hand edit to the shown slide's joints loading the panel afresh, Shift+P's
 // dialog saving the robot's pose into an existing pose and into a new pose in
-// a new scene file, Space on the panel's × not changing the slide, a new text
+// a new scene file, the ring at the arm's tool dragged (the joints follow by
+// inverse kinematics, marked, and P saves them), Space on the panel's × not
+// changing the slide, a new text
 // accepted and shown after a reload, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
 // course-style build in Chromium and Firefox.
 //
 //   node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png] [--headed]
-//   (--screenshot also saves file-joints.png, with the joint sliders open)
+//   (--screenshot also saves file-joints.png, with the joint sliders open, and
+//   file-drag.png, after the arm's tool was dragged)
 import { createServer } from 'node:http'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -708,6 +711,52 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         [joint, value],
       )
     const setpoint = (joint) => inPanel((w, joint) => w.__lysark.sceneManager.active?.channels[joint]?.setpoint ?? null, joint)
+    /** the ring at the robot's tool, where it is on screen; null if there is none */
+    const ring = () =>
+      inPanel((w) => {
+        const el = w.document.querySelector('.lysark-tool-handle')
+        if (!el || el.style.display === 'none') return null
+        const r = el.getBoundingClientRect()
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+      })
+    /**
+     * press the ring at `from` (unless pressed already), move to `to` in six steps, the last move and
+     * the release at once; as a mouse sends them (the page can't capture this pointer, so the drag
+     * goes by the window's listeners)
+     */
+    const drag = async (from, to, pressed = false) => {
+      if (!pressed) await inPanel(
+        (w, from) =>
+          w.document
+            .querySelector('.lysark-tool-handle')
+            .dispatchEvent(new w.PointerEvent('pointerdown', { button: 0, buttons: 1, pointerType: 'mouse', pointerId: 7, clientX: from.x, clientY: from.y, bubbles: true })),
+        from,
+      )
+      const step = (k) => ({ x: from.x + ((to.x - from.x) * k) / 6, y: from.y + ((to.y - from.y) * k) / 6 })
+      for (let k = 1; k <= 5; k++) {
+        await inPanel((w, p) => w.dispatchEvent(new w.PointerEvent('pointermove', { buttons: 1, pointerType: 'mouse', pointerId: 7, clientX: p.x, clientY: p.y, bubbles: true })), step(k))
+        await page.waitForTimeout(60)
+      }
+      await inPanel((w, p) => {
+        w.dispatchEvent(new w.PointerEvent('pointermove', { buttons: 1, pointerType: 'mouse', pointerId: 7, clientX: p.x, clientY: p.y, bubbles: true }))
+        w.dispatchEvent(new w.PointerEvent('pointerup', { button: 0, buttons: 0, pointerType: 'mouse', pointerId: 7, clientX: p.x, clientY: p.y, bubbles: true }))
+      }, step(6))
+      await page.waitForTimeout(400)
+    }
+    const markedRows = () =>
+      inPanel((w) =>
+        [...w.document.querySelectorAll('[aria-label="Joint sliders"] input[type="range"]')]
+          .filter((i) => i.parentElement.firstChild.title)
+          .map((i) => i.getAttribute('aria-label')),
+      )
+    // a ring where the robot can be posed by its tool: the KUKA too; not the
+    // pendulum (no inverse kinematics), nor a slide whose robot moves by itself
+    const ringOn = async (slide) => {
+      await toRuntime({ type: 'lysark:goto', slide })
+      if (!(await settledOn(slide))) return null
+      await page.waitForTimeout(300)
+      return (await ring()) !== null
+    }
     /** where the deck is: the slide and its step (the next fragment, before the next slide) */
     const deckStep = () => inPanel((w) => JSON.stringify([w.__lysark.engine.currentIndex, w.__lysark.engine.visibleChunks]))
     const fms = frontmatters()
@@ -861,6 +910,49 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         const kukaInPlace = await source(host.doc.text)
         if (!(await fromRuntime({ type: 'lysark:shown', seq: kukaInPlace }, 10000))) return fail(`slide ${kukaSlide + 1}'s saved pose was not put into the running deck`)
         lines.push(`slide ${kukaSlide + 1}'s own joint_2 slider followed the joint sliders; P wrote joint_2 and joint_1 (which no slide sets) into the slide`)
+
+        // coming in from the slide before, the camera flies after the KUKA's tool while its joints
+        // settle: a press on the ring stops the flight, and the drag then follows the pointer
+        const kukaBefore = kukaSlide - 1
+        if (fms[kukaBefore]?.scene === 'agilus') {
+          await toRuntime({ type: 'lysark:goto', slide: kukaBefore })
+          if (!(await settledOn(kukaBefore))) return fail(`the panel never settled on slide ${kukaBefore + 1}`)
+          await page.waitForTimeout(1500)
+          await toRuntime({ type: 'lysark:goto', slide: kukaSlide })
+          if (!(await settledOn(kukaSlide))) return fail(`the panel never settled on slide ${kukaSlide + 1}`)
+          await page.waitForTimeout(800)
+          const elbow = await inPanel((w) => w.__lysark.sceneManager.active.ik?.elbow ?? null)
+          if (!elbow || elbow.joint !== 'joint_3' || !(elbow.straight > 0.02 && elbow.straight < 0.12)) {
+            return fail(`the KUKA's inverse kinematics should know its elbow, joint_3, straight at about 0.06 rad: ${JSON.stringify(elbow)}`)
+          }
+          const press = await inPanel((w) => {
+            const el = w.document.querySelector('.lysark-tool-handle')
+            if (!el || el.style.display === 'none') return null
+            const r = el.getBoundingClientRect()
+            const at = { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+            const flying = w.__lysark.cameraCtl.active
+            el.dispatchEvent(new w.PointerEvent('pointerdown', { button: 0, buttons: 1, pointerType: 'mouse', pointerId: 7, clientX: at.x, clientY: at.y, bubbles: true }))
+            return { at, flying, still: w.__lysark.cameraCtl.active }
+          })
+          if (!press) return fail(`on the KUKA slide ${kukaSlide + 1} there is no ring at the tool`)
+          if (!press.flying) return fail(`coming into slide ${kukaSlide + 1}, the camera was not following the tool when the ring was pressed (the check needs a flight there)`)
+          if (press.still) return fail('pressing the ring at the tool did not stop the camera following it')
+          const kukaTo = { x: press.at.x + 40, y: press.at.y + 15 }
+          await drag(press.at, kukaTo, true)
+          await page.waitForTimeout(600)
+          const kukaAt = await ring()
+          const kukaGap = kukaAt ? Math.hypot(kukaAt.x - kukaTo.x, kukaAt.y - kukaTo.y) : Infinity
+          if (kukaGap > 4) return fail(`after the press stopped the flight, the KUKA's tool ended ${Math.round(kukaGap)} px from the pointer`)
+          const untargeted = await inPanel((w) => w.__lysark.engine.current.effective.joints.joint_6 === undefined)
+          const kukaMarks = await markedRows()
+          if (kukaMarks.length === 0 || (untargeted && kukaMarks.includes('joint_6'))) {
+            return fail(`a drag of the KUKA's tool marked ${JSON.stringify(kukaMarks)}: some joints, and not joint_6, which it can't turn`)
+          }
+          lines.push(
+            `on slide ${kukaSlide + 1}, a press on the ring stopped the camera following the tool; the tool came within ${Math.round(kukaGap)} px of the pointer, ` +
+              `marking ${kukaMarks.join(', ')}${untargeted ? ' (not joint_6, which it can\'t turn)' : ''}; the elbow is straight at ${elbow.straight} rad`,
+          )
+        } else lines.push(`(slide ${kukaSlide} isn't a KUKA slide, so a press during the camera's flight was not checked)`)
       }
 
       if (idleSlide >= 0) {
@@ -1015,6 +1107,62 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       } else {
         lines.push('(no KUKA slide whose scene has no scene file, so Shift+P making a scene file was not checked)')
       }
+      // the ring at the arm's tool: dragged, the tool follows the pointer and
+      // the joints move with it; they are marked, and P saves them
+      await toRuntime({ type: 'lysark:goto', slide: ownSlide })
+      if (!(await settledOn(ownSlide))) return fail(`the panel never settled on slide ${ownSlide + 1}`)
+      const ringFrom = await waitFor(ring, 20, 200)
+      if (!ringFrom) return fail(`on slide ${ownSlide + 1}, with the joint sliders open, there is no ring at the arm's tool`)
+      const pendulumSlide = fms.findIndex((fm) => fm.scene === 'pendulum' && !fm.idle && !fm.trajectory)
+      if (pendulumSlide >= 0) {
+        const on = await ringOn(pendulumSlide)
+        if (on === null) return fail(`the panel never settled on slide ${pendulumSlide + 1}`)
+        if (on) return fail(`on the pendulum slide ${pendulumSlide + 1}, which has no inverse kinematics, there is a ring`)
+      } else lines.push('(no pendulum slide, so a scene without inverse kinematics showing no ring was not checked)')
+      if (idleSlide >= 0) {
+        const on = await ringOn(idleSlide)
+        if (on === null) return fail(`the panel never settled on slide ${idleSlide + 1}`)
+        if (on) return fail(`on slide ${idleSlide + 1}, whose robot moves by itself, there is a ring`)
+      }
+      if (!(await ringOn(ownSlide))) return fail(`back on slide ${ownSlide + 1}, the ring at the arm's tool is gone`)
+      // the camera at rest (a press on the ring stops a flight where it is, so the view would differ)
+      if (!(await waitFor(() => inPanel((w) => !w.__lysark.cameraCtl.active), 30, 200))) return fail(`the camera never came to rest on slide ${ownSlide + 1}`)
+      Object.assign(ringFrom, await ring())
+      const armJoints = () => inPanel((w) => ['joint1', 'joint2', 'joint3'].map((k) => w.__lysark.sceneManager.active.channels[k].setpoint))
+      const qBefore = await armJoints()
+      // grabbed off its centre: the ring keeps that offset to the pointer
+      const grab = { x: ringFrom.x + 6, y: ringFrom.y }
+      const ringTo = { x: ringFrom.x + 70, y: ringFrom.y - 40 }
+      await drag(grab, { x: grab.x + 70, y: grab.y - 40 })
+      const qAfter = await armJoints()
+      const ringAt = await ring()
+      if (screenshot) await page.screenshot({ path: screenshot.replace(/(\.png)?$/i, '-drag.png') })
+      const ringGap = (p) => Math.hypot(p.x - ringTo.x, p.y - ringTo.y)
+      const turned = qAfter.map((q, k) => Math.abs(q - qBefore[k]) > 0.01)
+      if (!ringAt || !turned.some(Boolean) || ringGap(ringAt) > 3) {
+        return fail(`dragging the ring at the arm's tool toward ${JSON.stringify(ringTo)} from ${JSON.stringify(ringFrom)}: joints ${JSON.stringify(qBefore)} → ${JSON.stringify(qAfter)}, the ring now at ${JSON.stringify(ringAt)}`)
+      }
+      const dragMarks = await markedRows()
+      const turnedNames = ['joint1', 'joint2', 'joint3'].filter((_, k) => turned[k])
+      if (!turnedNames.every((n) => dragMarks.includes(n))) return fail(`after the drag, the joints moved (${turnedNames}) are not all marked: ${JSON.stringify(dragMarks)}`)
+      const named = frontmatters()[ownSlide].joints
+      editsHere = host.edits.length
+      await key('p')
+      const dragEdit = await waitFor(async () => host.edits[editsHere], 20, 300)
+      if (!dragEdit?.result.ok) return fail(`P after the drag did not save: ${JSON.stringify(dragEdit ?? null)} (the panel says: ${await banner()})`)
+      const dragged = typeof named === 'string' ? parseYaml(host.docs.get('scenes/arm.yaml').text).poses[named] : frontmatters()[ownSlide].joints
+      const want = qAfter.map((q) => Number(q.toFixed(2)))
+      const got = Array.isArray(dragged) ? dragged : ['joint1', 'joint2', 'joint3'].map((n) => dragged?.[n])
+      if (!want.every((q, k) => !turned[k] || Math.abs(got[k] - q) < 0.006)) {
+        return fail(`P after the drag wrote ${JSON.stringify(dragged)}, the robot is at ${JSON.stringify(qAfter)}`)
+      }
+      const dragInPlace = await source(host.doc.text)
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: dragInPlace }, 10000))) return fail('the pose saved after the drag was not put into the running deck')
+      lines.push(
+        `the ring at the arm's tool, dragged ${Math.round(ringGap(ringFrom))} px, came within ${Math.round(ringGap(ringAt))} px of the pointer; ` +
+          `joints ${JSON.stringify(qBefore)} → ${JSON.stringify(want)}, marked, saved by P`,
+      )
+
       // Space on the panel's × presses the button, not "next slide"
       const stepNow = await deckStep()
       await inPanel((w) => {
@@ -1027,6 +1175,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       await inPanel((w) => w.document.querySelector('[aria-label="Close the joint sliders"]').click())
       if (!(await inPanel((w) => w.document.querySelector('[aria-label="Joint sliders"]').style.display === 'none'))) {
         return fail("the joint sliders' × did not close them")
+      }
+      if (!(await inPanel((w) => w.document.querySelector('.lysark-tool-handle')?.style.display === 'none'))) {
+        return fail("the ring at the robot's tool stayed after the joint sliders closed")
       }
     } else {
       lines.push('(the lecture has no arm slide that names a pose, or none without joints, so saving poses was not checked)')

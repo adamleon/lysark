@@ -491,6 +491,10 @@ HTTPS server.
   or a new pose (a list of every joint), creating `scenes/<scene>.yaml` when the lecture has none.
   The slide keeps the pose it shows. Engine v2.9.0, no extension change.
   [scene-files.md](scene-files.md).
+- Scene files, step 5c (2026-11-07, built, not yet released): with the joint sliders open, a ring
+  at the robot's tool (arm, KUKA) drags the tool; inverse kinematics moves the joints, which P and
+  Shift+P save. The arm's scene gains the position IK the KUKA's has (a small engine change).
+  Engine v2.10.0, no extension change. [scene-files.md](scene-files.md).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).

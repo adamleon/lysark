@@ -4,8 +4,12 @@ import { SCENE_NAMES } from '../scenes/registry'
 import { viewNameProblem, type CameraView } from './camera-edit'
 import { compileForEditor, updateTargets } from './editor-compile'
 import { createHost, type HostChange } from './host'
+import type * as THREE from 'three'
+import type { IkSolver } from '../scene/ik'
+import type { JointInfo } from '../scenes/joints'
 import { createJointPanel, type PanelState } from './joint-panel'
 import { loadImages } from './panel-images'
+import { createToolHandle, stepToward } from './tool-handle'
 import { EDITOR_PROTOCOL } from './panel-page.js'
 import {
   motionOf,
@@ -71,6 +75,7 @@ interface Vec3Like {
   y: number
   z: number
   clone(): Vec3Like
+  copy(v: Vec3Like): Vec3Like
   sub(v: Vec3Like): Vec3Like
   distanceTo(v: Vec3Like): number
 }
@@ -82,9 +87,10 @@ interface JointChannel {
   pid: { reset(): void }
 }
 interface LysarkHandle {
-  sceneLayer: { camera: { position: Vec3Like } }
-  controls: { target: Vec3Like }
-  cameraCtl: { active: boolean; lookTarget: Vec3Like }
+  sceneLayer: { camera: { position: Vec3Like }; renderer: { domElement: HTMLElement } }
+  controls: { target: Vec3Like; enabled: boolean }
+  cameraCtl: { active: boolean; lookTarget: Vec3Like; cancel(): void }
+  presenter: { modalOpen: boolean }
   engine: {
     currentIndex: number
     slideCount: number
@@ -238,7 +244,8 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
       const value = nextJoints![joint]
       if (!channel || !info) continue
       const was = nowJoints?.[joint] ?? active?.defaults.joints?.[joint]
-      if (poseValue(channel.setpoint, info) === value || was === undefined || Math.abs(channel.setpoint - was) < 1e-9) channel.setpoint = value
+      const carried = i !== pose.slide && (was === undefined || Math.abs(channel.setpoint - was) < 1e-9)
+      if (poseValue(channel.setpoint, info) === value || carried) channel.setpoint = value
     }
     lysark()?.ensureTicking()
   }
@@ -770,6 +777,25 @@ function jointMoved(slide: LysarkHandle['engine']['current'], active: NonNullabl
   return false
 }
 
+/**
+ * Move a joint at once, as a teach pendant jogs it, whatever gains the slide
+ * teaches with (inside the sliders' limits), and remember the move.
+ */
+function jog(scene: string, active: NonNullable<LysarkHandle['sceneManager']['active']>, joint: JointInfo, value: number): void {
+  const channel = active.channels[joint.name]
+  if (!channel) return
+  const v = Math.min(Math.max(value, Math.ceil(joint.min * 100 - 1e-6) / 100), Math.floor(joint.max * 100 + 1e-6) / 100)
+  channel.setpoint = v
+  channel.x = v
+  channel.v = 0
+  channel.pid.reset()
+  if (!jogged.has(scene)) jogged.set(scene, new Map())
+  jogged.get(scene)!.set(joint.name, v)
+}
+
+/** the scene's inverse kinematics, if it has some (the arm's and the KUKA's) */
+const ikOf = (active: NonNullable<LysarkHandle['sceneManager']['active']>) => (active as { ik?: IkSolver }).ik ?? null
+
 /** the joint sliders: one per joint of the robot shown, which move it at once */
 const jointPanel = createJointPanel((): PanelState => {
   const L = lysark()
@@ -792,21 +818,86 @@ const jointPanel = createJointPanel((): PanelState => {
         max: Math.floor(j.max * 100 + 1e-6) / 100,
         get: () => channel.setpoint,
         set: (value: number) => {
-          // at once, as a teach pendant jogs it, whatever gains the slide teaches with
-          channel.setpoint = value
-          channel.x = value
-          channel.v = 0
-          channel.pid.reset()
-          if (!jogged.has(slide.scene!)) jogged.set(slide.scene!, new Map())
-          jogged.get(slide.scene!)!.set(j.name, value)
+          jog(slide.scene!, active, j, value)
+          dragRest = null // the pose set by hand is the one to lean back to
           L.ensureTicking()
         },
         moved: () => jointMoved(slide, active, j.name),
       }
     })
   // (text put in place changes no row: what would reloads the panel)
-  return { key: `${index}:${slide.scene}`, joints, ...(why ? { note: `${why[0].toUpperCase()}${why.slice(1)}, so it can't be posed here.` } : {}) }
-}, () => (hint.isConnected ? Math.max(44, hint.getBoundingClientRect().bottom + 6) : 44))
+  return {
+    key: `${index}:${slide.scene}`,
+    joints,
+    ...(why ? { note: `${why[0].toUpperCase()}${why.slice(1)}, so it can't be posed here.` } : {}),
+    ...(ikOf(active) ? { tip: "Or drag the ring at the robot's tool." } : {}),
+  }
+}, () => (hint.isConnected ? Math.max(44, hint.getBoundingClientRect().bottom + 6) : 44), (open) => toolHandle.setActive(open))
+
+/**
+ * The ring at the robot's tool, while the joint sliders are open: dragging it
+ * moves the tool, the scene's inverse kinematics the joints (tool-handle.ts)
+ */
+const toolHandle = createToolHandle(() => {
+  const L = lysark()
+  const slide = L?.engine.current
+  const active = L?.sceneManager.active
+  if (!L || !slide?.scene || !active || L.sceneManager.busy || L.sceneManager.activeSceneId !== slide.scene || movesItself(slide)) return null
+  // not under the slides' overview or the keys' card
+  if (L.presenter.modalOpen) return null
+  const ik = ikOf(active)
+  if (!ik) return null
+  const scene = slide.scene
+  return {
+    key: `${L.engine.currentIndex}:${scene}`,
+    camera: L.sceneLayer.camera as unknown as THREE.Camera,
+    canvas: L.sceneLayer.renderer.domElement,
+    tool: () => ik.eePosition(),
+    begin: () => {
+      // the joints the tool doesn't need lean back to where they were before the dragging began
+      // (kept across drags until a slider, a save or another slide sets the pose)
+      dragRest ??= ik.getJoints()
+      // a camera flight that follows the tool would move the view under the
+      // drag: it stops, as a click on the scene stops it (src/main.ts)
+      if (!L.cameraCtl.active) return
+      L.cameraCtl.cancel()
+      L.controls.target.copy(L.cameraCtl.lookTarget)
+      L.controls.enabled = true
+    },
+    moveTo: (target) => moveTool(L, scene, active, ik, target),
+  }
+})
+
+/**
+ * the joints before the robot's tool was first dragged, which the spare joints
+ * lean back to: kept across drags, until a slider moves a joint, a pose is
+ * saved or the slide changes
+ */
+let dragRest: Record<string, number> | null = null
+
+/**
+ * Move the robot's tool toward `target` (one step, tool-handle.ts
+ * stepToward); how far from the target the tool is then (m). Only the joints
+ * the step turned are moved (a joint whose axis runs through the tool, as the
+ * KUKA's joint_6, stays as it is).
+ */
+function moveTool(
+  L: LysarkHandle,
+  scene: string,
+  active: NonNullable<LysarkHandle['sceneManager']['active']>,
+  ik: IkSolver,
+  target: THREE.Vector3,
+): number {
+  const before = ik.getJoints()
+  const step = stepToward(ik, target, dragRest ?? undefined)
+  if (!step) return ik.eePosition().distanceTo(target)
+  for (const joint of sceneJoints(scene)) {
+    const value = step.joints[joint.name]
+    if (value !== undefined && Math.abs(value - before[joint.name]) > 1e-6) jog(scene, active, joint, value)
+  }
+  L.ensureTicking()
+  return step.left
+}
 
 /**
  * What a slide shows of the robot, to tell whether a save changes it: the
@@ -958,6 +1049,7 @@ async function saveSlidePose(now: NonNullable<ReturnType<typeof currentPose>>): 
     return
   }
   if (savedPose) savedPose.at = performance.now() // its text comes after VS Code's answer
+  dragRest = null
   showSaved(`Pose saved to slide ${now.index + 1}`)
 }
 
@@ -1003,6 +1095,7 @@ async function saveNamedPose(target: PoseTarget, now: NonNullable<ReturnType<typ
     return
   }
   if (savedPose) savedPose.at = performance.now() // its text comes after VS Code's answer
+  dragRest = null
   showSaved(
     `Pose '${target.pose}' changed in ${target.path}, not saved yet (File > Save All)` +
       (changed.length > 0 ? `: slide${changed.length > 1 ? 's' : ''} ${listSlides(changed)} now take${changed.length > 1 ? '' : 's'} it` : ''),
@@ -1115,6 +1208,7 @@ async function savePoseAs(choice: SavePoseAs, choices: PoseAsChoices): Promise<v
       return
     }
     if (savedPose) savedPose.at = performance.now() // its text comes after VS Code's answer
+    dragRest = null
     const n = pose.index + 1
     showSaved(
       (choice.kind === 'slide'
@@ -1256,7 +1350,7 @@ function openChoiceDialog<C>(spec: {
   box.setAttribute('role', 'dialog')
   box.setAttribute('aria-label', spec.title)
   box.style.cssText =
-    'position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:1002;width:min(520px,calc(100vw - 24px));' +
+    'position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:1003;width:min(520px,calc(100vw - 24px));' +
     'max-height:calc(100vh - 56px);overflow:auto;box-sizing:border-box;' +
     'background:rgba(var(--surface-rgb),0.97);color:var(--text);border:1px solid var(--border-soft);border-radius:10px;' +
     'box-shadow:var(--shadow-text);font:14px/1.35 system-ui,sans-serif;padding:10px 10px 8px;outline:none'
@@ -1481,6 +1575,7 @@ window.addEventListener('keydown', (e) => {
 })
 
 window.addEventListener('hashchange', () => {
+  dragRest = null // another slide: its own pose
   // after the deck has moved: its own listener (src/main.ts) runs after this one
   window.setTimeout(() => {
     const engine = lysark()?.engine

@@ -27,6 +27,8 @@ export interface PanelState {
   key: string
   joints: PanelJoint[]
   note?: string
+  /** a line under the title where the robot can be posed (dragging its tool, say) */
+  tip?: string
 }
 
 export interface JointPanel {
@@ -40,9 +42,9 @@ const format = (v: number) => `${v.toFixed(2)} rad · ${Math.round((v * 180) / M
 
 /**
  * `read` gives what to show (asked every 150 ms while open); `top` where the
- * panel's top goes, below the panel's hint line.
+ * panel's top goes, below the panel's hint line; `onToggle` hears it open and close.
  */
-export function createJointPanel(read: () => PanelState, top: () => number): JointPanel {
+export function createJointPanel(read: () => PanelState, top: () => number, onToggle?: (open: boolean) => void): JointPanel {
   const box = document.createElement('div')
   box.setAttribute('role', 'group')
   box.setAttribute('aria-label', 'Joint sliders')
@@ -88,8 +90,8 @@ export function createJointPanel(read: () => PanelState, top: () => number): Joi
 
   function build(state: PanelState): void {
     key = state.key
-    note.textContent = state.note ?? ''
-    note.style.display = state.note ? 'block' : 'none'
+    note.textContent = state.note ?? state.tip ?? ''
+    note.style.display = state.note || state.tip ? 'block' : 'none'
     // where P writes, only where it can
     posable = state.note === undefined
     footer.style.display = posable ? 'block' : 'none'
@@ -150,6 +152,7 @@ export function createJointPanel(read: () => PanelState, top: () => number): Joi
   function toggle(): void {
     const opening = box.style.display === 'none'
     box.style.display = opening ? 'block' : 'none'
+    onToggle?.(opening)
     window.clearInterval(timer)
     if (opening) {
       key = null
