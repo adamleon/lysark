@@ -139,7 +139,9 @@ function build(): SceneInstance & { ik: IkSolver } {
     },
     channels,
     // exposed for the Lin/MoveL slide: task-space straight-line IK on tool0
-    ik: createIkSolver(robot, jointNames, 'tool0'),
+    // and the elbow (joint_3, between the shoulder joint_2 and the wrist joint_5),
+    // which the editor's tool drag keeps bent the way it is
+    ik: createIkSolver(robot, jointNames, 'tool0', { joint: 'joint_3', shoulder: 'joint_2', wrist: 'joint_5' }),
     defaults: {
       joints: { joint_2: -1.25, joint_3: 0.9, joint_5: 0.9 },
       camera: { lookAt: [0.2, 0.55, 0], offset: [1.7, 0.35, 2.3] },

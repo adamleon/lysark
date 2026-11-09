@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import URDFLoader from 'urdf-loader'
 import urdfSrc from '../assets/arm.urdf?raw'
 import { PID } from '../engine/pid'
+import { createIkSolver, type IkSolver } from '../scene/ik'
 import { PidChannel } from '../engine/motion-system'
 import type { GainDefaults, SceneInstance, SceneModule } from '../engine/scene-types'
 import { buildStage, disposeSceneGraph } from './stage'
@@ -18,7 +19,7 @@ export interface ArmSceneState {
   joints: Record<string, JointState>
 }
 
-function build(): SceneInstance {
+function build(): SceneInstance & { ik: IkSolver } {
   // parse(), never load() — the load() path fetches and dies under file:// (spec §9b)
   const robot = new URDFLoader().parse(urdfSrc)
 
@@ -61,6 +62,9 @@ function build(): SceneInstance {
       end_effector: robot.links['end_effector'],
     },
     channels,
+    // position IK on the end effector: the editor drags the tool with it
+    // (docs/scene-files.md), and a task-space trajectory could use it
+    ik: createIkSolver(robot, jointNames, 'end_effector', { joint: 'joint3', shoulder: 'joint2', wrist: 'end_effector' }),
     defaults: {
       joints: { joint1: 0, joint2: 0.6, joint3: -1.0 },
       camera: { lookAt: [0, 0.45, 0], offset: [1.4, 0.65, 1.4] },
