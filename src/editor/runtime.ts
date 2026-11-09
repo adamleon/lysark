@@ -1,6 +1,9 @@
 import { compileLecture } from '../compiler/compile-slides'
 import { lectureObjects, readSceneFiles } from '../compiler/scene-files'
+import type { Deck } from '../engine/deck'
+import type { SceneObject } from '../engine/object-types'
 import type { CameraTargetSpec } from '../engine/slide-types'
+import { placeNode } from '../scene/objects'
 import { SCENE_NAMES } from '../scenes/registry'
 import { viewNameProblem, type CameraView } from './camera-edit'
 import { compileForEditor, updateTargets } from './editor-compile'
@@ -9,6 +12,8 @@ import type * as THREE from 'three'
 import type { IkSolver } from '../scene/ik'
 import type { JointInfo } from '../scenes/joints'
 import { createJointPanel, type PanelState } from './joint-panel'
+import { objectEdit, objectsFile, placementChanges, type ObjectPlace } from './object-edit'
+import { createObjectHandles, type ObjectsState } from './object-handles'
 import { loadImages } from './panel-images'
 import { createToolHandle, stepToward } from './tool-handle'
 import { EDITOR_PROTOCOL } from './panel-page.js'
@@ -48,7 +53,8 @@ import {
  * page's `include` patterns); this page checks that they compile, reads the
  * lecture's images through the extension, then starts the deck. New text that
  * only changes cameras (a saved view, say) is put into the running deck at
- * once and 'shown', as is text that only changes joints (a saved pose). Other
+ * once and 'shown', as is text that only changes joints (a saved pose), or
+ * where the scene's objects are (a moved object). Other
  * new text that compiles is 'accepted', and the
  * extension then loads the panel afresh and sends that text again on 'ready'.
  * Text that doesn't compile leaves the last good version running and shows
@@ -58,7 +64,8 @@ import {
  * names the one it shows in 'shown' and 'slide', so the extension knows which
  * text a slide number counts in. Saving a view is computed here and written
  * through the extension's edit request (host.ts, save-view.ts), as is
- * saving the robot's pose (P; pose-edit.ts, joint-panel.ts).
+ * saving the robot's pose (P; pose-edit.ts, joint-panel.ts) and moving an
+ * object (M; object-edit.ts, object-handles.ts).
  *
  * Messages version 3, all { type: 'lysark:…' } (docs/editor-host.md):
  *   page → extension  ready { protocol, render, include } · shown { seq, index } · accepted { seq }
@@ -89,7 +96,7 @@ interface JointChannel {
 }
 interface LysarkHandle {
   sceneLayer: { camera: { position: Vec3Like }; renderer: { domElement: HTMLElement } }
-  controls: { target: Vec3Like; enabled: boolean }
+  controls: { target: Vec3Like; enabled: boolean; enableDamping: boolean; update(): void }
   cameraCtl: { active: boolean; lookTarget: Vec3Like; cancel(): void }
   presenter: { modalOpen: boolean }
   engine: {
@@ -183,6 +190,23 @@ const jogged = new Map<string, Map<string, number>>()
 /** a pose is being read and written (between P and VS Code's answer) */
 let savingPose = false
 
+/**
+ * objects moved in the panel whose text hasn't come back yet, by scene and
+ * name: where each was put, its node, the file text its edit makes (once
+ * known), and when VS Code took the edit (`written`). Until that text comes,
+ * or OBJECT_PENDING_MS after VS Code took it, text arriving leaves the
+ * object where it was put, and the panel lists it there.
+ */
+const placedObjects = new Map<
+  string,
+  { place: ObjectPlace; node: THREE.Object3D; expect?: { path: string; text: string }; written?: number }
+>()
+const OBJECT_PENDING_MS = 10_000
+const objectKey = (scene: string, name: string) => `${scene}\n${name}`
+
+/** the deck the panel runs (deck-from-source.ts), once it has started */
+let runningDeck: Deck | null = null
+
 const round2 = (n: number) => Number(n.toFixed(2))
 
 /** the joints whose values differ between `a` and `b` (set in one only, too) */
@@ -193,20 +217,36 @@ function changedJoints(a: Record<string, number> | undefined, b: Record<string, 
 
 /**
  * Put new text into the running deck without loading the page afresh, if
- * only cameras and joints changed. The slide on screen may only change to the
- * view or the pose just saved from it (the camera, the robot, is already
- * there); any other change to it needs the fresh page, where the camera flies
- * to it.
+ * only cameras, joints and where objects are changed. The slide on screen may
+ * only change to the view or the pose just saved from it (the camera, the
+ * robot, is already there); any other change to it needs the fresh page,
+ * where the camera flies to it.
  */
 async function updateInPlace(files: Record<string, string>): Promise<boolean> {
   const engine = lysark()?.engine
   if (!engine) return false
   // the same module instance the deck was built from (it stands in for virtual:lysark-deck)
   const { default: deck } = await import('./deck-from-source')
-  // objects are built into their scene once, when it is first shown: changed ones need the fresh page
-  if (JSON.stringify(lectureObjects(readSceneFiles(files))) !== JSON.stringify(deck.objects ?? {})) return false
-  const fresh = compileForEditor(files['slides.md'], images, files)
+  // objects are built into their scene once, when it is first shown: a new
+  // place for objects of the scene shown (moved in the panel, or typed) is put
+  // in at once; any other change to them needs the fresh page
+  const placing = placementChanges(deck.objects ?? {}, lectureObjects(readSceneFiles(files)))
+  if (placing === null) return false
+  const manager = lysark()?.sceneManager
+  if (placing.length > 0 && (!manager || manager.busy || placing.some((c) => c.scene !== manager.activeSceneId))) return false
   const i = engine.currentIndex
+  // a typed new place for the object the slide shown looks at (or one it hangs
+  // on): the camera would stay on the old place, so the fresh page flies there.
+  // A drag in the panel leaves the view where it is, as it was dragged under it
+  const lookAt = deck.slides[i]?.effective.camera?.lookAt
+  const typed = new Set(placing.filter((c) => !placedObjects.has(objectKey(c.scene, c.object.name))).map((c) => c.object.name))
+  if (typeof lookAt === 'string' && typed.size > 0) {
+    const objects = deck.objects?.[manager!.activeSceneId!] ?? []
+    for (let o = objects.find((x) => x.name === lookAt); o; o = objects.find((x) => x.name === o!.parent)) {
+      if (typed.has(o.name)) return false
+    }
+  }
+  const fresh = compileForEditor(files['slides.md'], images, files)
   const next: CameraTargetSpec | undefined = fresh[i]?.effective.camera
   const isSavedView =
     savedView !== null &&
@@ -264,7 +304,35 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
     }
     savedPose = null
   }
+  if (placing.length > 0) placeObjects(deck, placing, files)
   return true
+}
+
+/**
+ * The objects' new places into the running deck and its scene (the scene
+ * shown: updateInPlace takes no others). An object moved in the panel stays
+ * where it was put until its own text comes, and one being dragged where the
+ * pointer has it.
+ */
+function placeObjects(deck: Deck, placing: Array<{ scene: string; index: number; object: SceneObject }>, files: Record<string, string>): void {
+  const active = lysark()?.sceneManager.active
+  const now = performance.now()
+  for (const { scene, index, object } of placing) {
+    deck.objects![scene][index] = object
+    const key = objectKey(scene, object.name)
+    const placed = placedObjects.get(key)
+    const arrived =
+      placed &&
+      ((placed.expect && files[placed.expect.path] === placed.expect.text) ||
+        JSON.stringify([object.at, object.rotate]) === JSON.stringify([placed.place.at, placed.place.rotate]))
+    // an older text on its way (the move's own may come with another's): the object stays where it was put
+    if (placed && !arrived && !(placed.written !== undefined && now - placed.written > OBJECT_PENDING_MS)) continue
+    placedObjects.delete(key)
+    if (objectHandles.dragging() === object.name) continue
+    const node = active && Object.hasOwn(active.anchors, object.name) ? active.anchors[object.name] : undefined
+    if (node) placeNode(node as unknown as THREE.Object3D, object)
+  }
+  lysark()?.ensureTicking()
 }
 
 function goTo(slide: number): void {
@@ -324,6 +392,9 @@ function updateHint(): void {
   const engine = lysark()?.engine
   const index = engine?.currentIndex
   const target = engine ? namedTarget(shownFiles, engine.currentIndex) : null
+  // M where the slide's scene has objects
+  const scene = engine?.current.scene
+  const objects = scene && objectsFileHere(scene) ? ' · M: move objects' : ''
   // saving is what updates the panel (github.dev's auto-save doesn't), so the hint says so
   const text = (users: number[]) =>
     'Ctrl+S in the text updates the preview · ' +
@@ -331,7 +402,8 @@ function updateHint(): void {
       ? `V or the camera button above: change the view '${target.view}' in ${target.path}` +
         (users.length > 1 ? ` (slides ${listSlides(users)} fly to it)` : '')
       : 'V or the camera button above: save this camera view into the slide') +
-    ' · Shift+V: save as… · J: pose the robot'
+    ' · Shift+V: save as… · J: pose the robot' +
+    objects
   hint.textContent = text([])
   // and the joint sliders say where P writes
   const pose = engine ? poseTarget(shownFiles, engine.currentIndex) : null
@@ -466,6 +538,7 @@ window.addEventListener('message', async (event) => {
     window.__LYSARK_IMAGES__ = images
     try {
       await import('../main')
+      runningDeck = (await import('./deck-from-source')).default
       clearLoading()
       updateHint()
       post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
@@ -645,6 +718,7 @@ function currentView(): { view: CameraView; rounded: NonNullable<typeof savedVie
 }
 
 async function saveView(): Promise<void> {
+  if (!(await afterObjectSaves('view'))) return
   if (saving) return
   const now = currentView()
   if (!now) return
@@ -835,7 +909,35 @@ const jointPanel = createJointPanel((): PanelState => {
     ...(why ? { note: `${why[0].toUpperCase()}${why.slice(1)}, so it can't be posed here.` } : {}),
     ...(ikOf(active) ? { tip: "Or drag the ring at the robot's tool." } : {}),
   }
-}, () => (hint.isConnected ? Math.max(44, hint.getBoundingClientRect().bottom + 6) : 44), (open) => toolHandle.setActive(open))
+}, panelTop, (open) => toolHandle.setActive(open))
+
+/** where the joint sliders' and the objects' panel tops go: below the hint line */
+function panelTop(): number {
+  return hint.isConnected ? Math.max(44, hint.getBoundingClientRect().bottom + 6) : 44
+}
+
+/**
+ * A drag begins: what would move the view under it stops. A camera flight
+ * stops, as a click on the scene stops it, and the orbit's coasting after
+ * the view was turned stops where the view is: the update without damping
+ * that ends it (as src/main.ts ends it before a flight) would also take the
+ * view on to where the coasting would have ended, so the view is put back
+ */
+function stopFlight(L: LysarkHandle): void {
+  if (L.cameraCtl.active) {
+    L.cameraCtl.cancel()
+    L.controls.target.copy(L.cameraCtl.lookTarget)
+    L.controls.enabled = true
+  }
+  const position = L.sceneLayer.camera.position.clone()
+  const target = L.controls.target.clone()
+  L.controls.enableDamping = false
+  L.controls.update()
+  L.controls.enableDamping = true
+  L.sceneLayer.camera.position.copy(position)
+  L.controls.target.copy(target)
+  L.controls.update() // nothing left to coast: it only looks at the target again
+}
 
 /**
  * The ring at the robot's tool, while the joint sliders are open: dragging it
@@ -860,12 +962,8 @@ const toolHandle = createToolHandle(() => {
       // the joints the tool doesn't need lean back to where they were before the dragging began
       // (kept across drags until a slider, a save or another slide sets the pose)
       dragRest ??= ik.getJoints()
-      // a camera flight that follows the tool would move the view under the
-      // drag: it stops, as a click on the scene stops it (src/main.ts)
-      if (!L.cameraCtl.active) return
-      L.cameraCtl.cancel()
-      L.controls.target.copy(L.cameraCtl.lookTarget)
-      L.controls.enabled = true
+      // a camera flight that follows the tool would move the view under the drag
+      stopFlight(L)
     },
     moveTo: (target) => moveTool(L, scene, active, ik, target),
   }
@@ -1005,6 +1103,7 @@ function posePending(): boolean {
 }
 
 async function savePose(): Promise<void> {
+  if (!(await afterObjectSaves('pose'))) return
   if (posePending()) return
   if (saving) return // a view is being saved
   const now = currentPose()
@@ -1120,6 +1219,7 @@ async function poseChoicesHere(): Promise<PoseAsChoices | null> {
  * files, applied only if neither changed since it was read.
  */
 async function savePoseAs(choice: SavePoseAs, choices: PoseAsChoices): Promise<void> {
+  if (!(await afterObjectSaves('pose'))) return
   if (saving || posePending()) return
   const pose = robotPose()
   if (!pose) return
@@ -1230,6 +1330,179 @@ async function savePoseAs(choice: SavePoseAs, choices: PoseAsChoices): Promise<v
   }
 }
 
+// ---- move objects (M; docs/scene-files.md) ---------------------------------
+
+/** the scene file with the objects of `scene` in the files shown, worked out once per text */
+let objectsFileMemo: { seq: number | null; scene: string; file: ReturnType<typeof objectsFile> } | null = null
+function objectsFileHere(scene: string): ReturnType<typeof objectsFile> {
+  if (!objectsFileMemo || objectsFileMemo.seq !== shownSeq || objectsFileMemo.scene !== scene) {
+    objectsFileMemo = { seq: shownSeq, scene, file: objectsFile(shownFiles, scene) }
+  }
+  return objectsFileMemo.file
+}
+
+/** how far up its own y an object's ring sits: the middle of its shape */
+function middleOf(spec: SceneObject): number {
+  if (spec.shape === 'box' || spec.shape === 'cylinder') return spec.size[1] / 2
+  if (spec.shape === 'sphere') return spec.size[0] / 2
+  return 0
+}
+
+/**
+ * The rings on the objects of the scene shown (object-handles.ts): dragging
+ * one moves its object at once, and letting go writes its place into the
+ * scene file that has the scene's objects.
+ */
+const objectHandles = createObjectHandles((): ObjectsState => {
+  const L = lysark()
+  if (!L) return { key: 'loading', objects: [], note: 'The slides are starting.' }
+  const slide = L.engine.current
+  const index = L.engine.currentIndex
+  if (!slide.scene) return { key: `${index}`, objects: [], note: 'This slide has no 3D scene, so there are no objects to move.' }
+  const active = L.sceneManager.active
+  if (L.sceneManager.busy || L.sceneManager.activeSceneId !== slide.scene || !active) {
+    return { key: `${index}:loading`, objects: [], note: 'The scene is loading…' }
+  }
+  const scene = slide.scene
+  const specs = runningDeck?.objects?.[scene] ?? []
+  if (specs.length === 0) {
+    return {
+      key: `${index}:${scene}:none`,
+      objects: [],
+      note: `The scene '${scene}' has no objects. A scene file adds them, under objects: (docs/scene-files.md, "Objects").`,
+    }
+  }
+  // a point with an object on it can be turned (the object turns with it); one without has nothing to turn
+  const carrying = new Set(specs.flatMap((s) => (s.parent ? [s.parent] : [])))
+  const file = objectsFileHere(scene)
+  // listed in the file's order
+  const order = file?.names ?? []
+  const objects = [...specs].sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).flatMap((spec) => {
+    const node = Object.hasOwn(active.anchors, spec.name) ? (active.anchors[spec.name] as unknown as THREE.Object3D) : undefined
+    if (!node) return []
+    const key = objectKey(scene, spec.name)
+    let placed = placedObjects.get(key)
+    // a move VS Code took long ago whose text never came: the object goes back where the text shown has it
+    if (placed?.written !== undefined && performance.now() - placed.written > OBJECT_PENDING_MS && objectHandles.dragging() !== spec.name) {
+      placedObjects.delete(key)
+      placeNode(placed.node, spec)
+      placed = undefined
+    }
+    return [
+      {
+        name: spec.name,
+        node,
+        place: placed?.place ?? { at: spec.at, rotate: spec.rotate },
+        middle: middleOf(spec),
+        turnable: spec.shape !== 'point' || carrying.has(spec.name),
+      },
+    ]
+  })
+  return {
+    key: `${index}:${scene}:${specs.map((s) => s.name).join('\n')}`,
+    objects,
+    note: 'Drag a ring to move its object along the floor, with Shift held up and down; drag the dot beside it around the ring to turn it about the vertical. Esc while dragging puts it back.',
+    ...(file ? { footer: `Letting go writes the object's at and rotate into ${file.path}.` } : {}),
+    // not under the slides' overview or the keys' card
+    ...(L.presenter.modalOpen ? {} : { view: { camera: L.sceneLayer.camera as unknown as THREE.Camera, canvas: L.sceneLayer.renderer.domElement } }),
+    begin: () => stopFlight(L),
+    release: (name, place, from, node) => moveObject(scene, name, place, from, node),
+  }
+}, panelTop)
+
+/** object moves are written one after another, each on the text the last one left; how many are on their way */
+let objectSaves: Promise<void> = Promise.resolve()
+let objectSavesPending = 0
+
+/** an object (`node`) let go at `place` (it was at `from`): it stays there, and its place is written */
+function moveObject(scene: string, name: string, place: ObjectPlace, from: ObjectPlace, node: THREE.Object3D): void {
+  placedObjects.set(objectKey(scene, name), { place, node })
+  objectSavesPending++
+  objectSaves = objectSaves
+    .then(() => saveObjectPlace(scene, name, place, from))
+    .catch(() => undefined)
+    .then(() => {
+      objectSavesPending--
+    })
+}
+
+/** slide changes so far: a save that waited knows whether the slide changed meanwhile, even there and back */
+let slideChanges = 0
+
+/**
+ * V, P and Save … as wait for the object moves being written (they may be in
+ * the same file), those let go meanwhile too. false, saying so, if the slide
+ * changed meanwhile: what was pressed was meant for the slide, and the view,
+ * it was pressed on
+ */
+async function afterObjectSaves(what: string): Promise<boolean> {
+  if (objectSavesPending === 0) return true
+  const changes = slideChanges
+  while (objectSavesPending > 0) await objectSaves
+  if (slideChanges === changes) return true
+  showBanner(`The ${what} was not saved: the slide changed while an object was being written; try again.`)
+  // kept when the move's own text comes back and is put in place
+  savedShowing = true
+  return false
+}
+
+/**
+ * Write an object's new place into the scene file that has the scene's
+ * objects (object-edit.ts): read as it is now in VS Code, unsaved typing
+ * included, and only the numbers that changed. If it can't be written, the
+ * object goes back where the text shown has it, and the banner says why.
+ */
+async function saveObjectPlace(scene: string, name: string, place: ObjectPlace, from: ObjectPlace): Promise<void> {
+  const key = objectKey(scene, name)
+  /** this move is the latest of the object's (none came after it) */
+  const latest = () => placedObjects.get(key)?.place === place
+  const putBack = (why: string) => {
+    const entry = placedObjects.get(key)
+    if (entry && latest()) {
+      placedObjects.delete(key)
+      // its node, in the scene shown or one put away meanwhile (whose objects come back as they are)
+      const spec = runningDeck?.objects?.[scene]?.find((o) => o.name === name)
+      if (spec && objectHandles.dragging() !== name) placeNode(entry.node, spec)
+    }
+    showBanner(`'${name}' was not moved: ${why}`)
+  }
+  // a view or a pose being saved may edit the same file: after it
+  for (let i = 0; saving && i < 200; i++) await new Promise((done) => window.setTimeout(done, 50))
+  if (saving) return putBack('a view or a pose is still being saved; try again')
+  const target = objectsFileHere(scene)
+  if (!target) return putBack(`no scene file has the objects of '${scene}'`)
+  saving = true
+  try {
+    const file = (await host.read([target.path], 'text'))[target.path]
+    if (typeof file.text !== 'string' || typeof file.version !== 'number') {
+      return putBack(`${target.path} could not be read (${file.error ?? 'no text'}).`)
+    }
+    const change = objectEdit(file.text, name, place, from)
+    if (change && 'problem' in change) return putBack(change.problem)
+    if (!change) {
+      if (latest()) placedObjects.delete(key)
+      return showBanner(`'${name}' is there already in ${target.path}`, 'ok')
+    }
+    const next = file.text.slice(0, change.start) + change.text + file.text.slice(change.end)
+    const before = { ...shownFiles, [target.path]: file.text }
+    const after = { ...shownFiles, [target.path]: next }
+    const broken = problemWith(after)
+    if (broken && !problemWith(before)) return putBack(`the slides would have an error:\n${broken}`)
+    const entry = placedObjects.get(key)
+    if (entry && latest()) entry.expect = { path: target.path, text: next }
+    const result = await host.edit(`Move object '${name}'`, [{ path: target.path, version: file.version, ...change }])
+    if (!result.ok) return putBack(result.message ?? 'VS Code refused the edit')
+    if (entry) entry.written = performance.now() // its text comes after VS Code's answer
+    const turned = JSON.stringify(place.rotate) !== JSON.stringify(from.rotate)
+    const moved = JSON.stringify(place.at) !== JSON.stringify(from.at)
+    const what = moved && turned ? 'moved and turned' : turned ? 'turned' : 'moved'
+    // the scene file is changed in VS Code, usually with no editor open on it: say it isn't saved
+    showSaved(`Object '${name}' ${what} in ${target.path}, not saved yet (File > Save All)`)
+  } finally {
+    saving = false
+  }
+}
+
 // ---- Save view as… (Shift+V, Scene Actions…; docs/scene-files.md) ----------------
 
 /** the slides' cameras as the panel shows them (the running deck) */
@@ -1251,6 +1524,7 @@ async function choicesHere(): Promise<SaveAsChoices | null> {
  * files, applied only if neither changed since it was read.
  */
 async function saveAs(choice: SaveAs, choices: SaveAsChoices): Promise<void> {
+  if (!(await afterObjectSaves('view'))) return
   if (saving) return
   const now = currentView()
   if (!now) return
@@ -1466,6 +1740,7 @@ function openChoiceDialog<C>(spec: {
 
 /** Shift+V: Save view as…, in the panel's own dialog */
 async function openSaveAs(): Promise<void> {
+  if (!(await afterObjectSaves('view'))) return
   if (dialog || saving || !currentView()) return
   const choices = await choicesHere()
   if (!choices || dialog) return
@@ -1513,6 +1788,7 @@ async function openSaveAs(): Promise<void> {
 
 /** Shift+P: Save pose as…, in the panel's own dialog */
 async function openSavePoseAs(): Promise<void> {
+  if (!(await afterObjectSaves('pose'))) return
   if (dialog || saving || posePending() || !robotPose()) return
   const choices = await poseChoicesHere()
   if (!choices || dialog) return
@@ -1573,11 +1849,17 @@ window.addEventListener('keydown', (e) => {
     if (e.shiftKey) void openSavePoseAs()
     else void savePose()
   } else if (key === 'j' && !e.shiftKey) {
+    // the joint sliders or the objects, one at a time (the tool's ring and the objects' would mix)
+    if (objectHandles.open) objectHandles.toggle()
     jointPanel.toggle()
+  } else if (key === 'm' && !e.shiftKey) {
+    if (jointPanel.open) jointPanel.toggle()
+    objectHandles.toggle()
   }
 })
 
 window.addEventListener('hashchange', () => {
+  slideChanges++
   dragRest = null // another slide: its own pose
   // after the deck has moved: its own listener (src/main.ts) runs after this one
   window.setTimeout(() => {

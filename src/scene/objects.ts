@@ -48,13 +48,22 @@ export function addObjects(
   }
 }
 
+/**
+ * Put an object's node where `at` and `rotate` say, in its parent's frame:
+ * `rotate` in degrees about x, then the turned y, then the turned z. The
+ * editor moves objects with it too (src/editor/object-handles.ts).
+ */
+export function placeNode(node: THREE.Object3D, place: Pick<SceneObject, 'at' | 'rotate'>): void {
+  node.position.set(...place.at)
+  const [x, y, z] = place.rotate.map((degrees) => THREE.MathUtils.degToRad(degrees))
+  node.rotation.set(x, y, z, 'XYZ')
+}
+
 /** the object, its origin at `at`: a shape stands on it, a frame's axes start there */
 export function buildObject(spec: SceneObject, color: (token: string) => string = themeColor): THREE.Group {
   const node = new THREE.Group()
   node.name = `object:${spec.name}`
-  node.position.set(...spec.at)
-  const [x, y, z] = spec.rotate.map((degrees) => THREE.MathUtils.degToRad(degrees))
-  node.rotation.set(x, y, z, 'XYZ')
+  placeNode(node, spec)
   if (spec.shape === 'frame') {
     node.add(...frameAxes(spec.size[0], color))
     return node

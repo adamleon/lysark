@@ -28,6 +28,8 @@ const files = window.__LYSARK_FILES__ ?? { 'slides.md': WAITING }
 export default defineDeck({
   scenes: ALL_SCENES,
   slides: compileForEditor(files['slides.md'] ?? WAITING, window.__LYSARK_IMAGES__, files),
-  // the scene files' objects (runtime.ts loads the panel afresh when they change)
+  // the scene files' objects. The scene manager reads this same record when it first builds a
+  // scene; runtime.ts (placeObjects) writes a new at or rotate into it in place, and loads the
+  // panel afresh for any other change to them
   objects: lectureObjects(readSceneFiles(files)),
 })

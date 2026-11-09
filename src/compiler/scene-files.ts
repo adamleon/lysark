@@ -273,7 +273,7 @@ const OBJECT_KEY_ALIASES: Record<string, string> = {
   colour: 'material',
 }
 /** anything larger, or farther out, is metres written as millimetres (the floor grid is 5 m across) */
-const MAX_METRES = 10
+export const MAX_METRES = 10
 
 /** the file's `objects:`, checked, parents before the objects on them */
 function readObjects(objectsPair: Pair<Node, Node> | undefined, base: SceneName, fail: Fail): SceneObject[] {

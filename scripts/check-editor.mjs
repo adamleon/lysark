@@ -41,8 +41,9 @@
 // course-style build in Chromium and Firefox.
 //
 //   node scripts/check-editor.mjs <editor dir> <slides.md> [--browser firefox] [--screenshot file.png] [--headed]
-//   (--screenshot also saves file-joints.png, with the joint sliders open, and
-//   file-drag.png, after the arm's tool was dragged)
+//   (--screenshot also saves file-joints.png, with the joint sliders open,
+//   file-drag.png, after the arm's tool was dragged, and file-objects.png, after
+//   an object was dragged and turned, the objects' rings showing)
 import { createServer } from 'node:http'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -1194,16 +1195,34 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     if (!(await fromRuntime({ type: 'lysark:shown', seq: structural }))) return fail('the new text was not shown after loading afresh')
     lines.push('new text accepted, and shown after the panel loaded afresh')
 
-    // 3b. objects (scene-files-proposal.md step 6): the arm scene file's objects are
-    // anchors of the running scene, and a changed object loads the panel afresh (the
-    // scene is built once), where it stands where the file now says
+    // 3b. objects (scene-files-proposal.md steps 6 and 7): the arm scene file's objects
+    // are anchors of the running scene; a new place for one, typed or dragged with M,
+    // goes into the running scene in place, and any other change to one loads the
+    // panel afresh (the scene is built once)
     const armPath = [...host.docs.keys()].find((p) => /^scenes\/arm\.ya?ml$/.test(p))
     const armObjects = armPath ? parseYaml(host.docs.get(armPath).text)?.objects : undefined
     if (armObjects && typeof armObjects === 'object') {
       const names = Object.keys(armObjects)
-      const moving = names.find((n) => armObjects[n] && armObjects[n].parent === undefined)
+      // one standing in the scene, one that can be turned if there is one (a shape or a frame, or a point something hangs on)
+      const turnable = (n) => ['box', 'cylinder', 'sphere', 'frame'].some((s) => armObjects[n][s] !== undefined) || names.some((m) => armObjects[m]?.parent === n)
+      const standing = names.filter((n) => armObjects[n] && armObjects[n].parent === undefined)
+      // what a slide's camera looks at (its own, or its named view's), and the objects that carries
+      const views = parseYaml(host.docs.get(armPath).text)?.views ?? {}
+      const lookAtOf = (fm) => (typeof fm?.camera === 'string' ? views[fm.camera]?.lookAt : fm?.camera?.lookAt)
+      const carrying = (start) => {
+        const chain = []
+        for (let n = start; typeof n === 'string' && armObjects[n] && !chain.includes(n); n = armObjects[n].parent) chain.push(n)
+        return chain
+      }
+      // the typed step below runs on the arm's first slide: an object it doesn't look at, if there is one
+      const firstArm = fms.findIndex((fm) => fm.scene === 'arm')
+      const looked0 = carrying(lookAtOf(fms[firstArm]))
+      const moving =
+        standing.find((n) => turnable(n) && !looked0.includes(n)) ?? standing.find((n) => !looked0.includes(n)) ?? standing.find(turnable) ?? standing[0]
       if (!moving) return fail(`the check needs an object without a parent in ${armPath}`)
-      // the slide shown is the first (the arm's): every object, and where the one to move stands
+      await toRuntime({ type: 'lysark:goto', slide: firstArm })
+      if (!(await settledOn(firstArm))) return fail(`the panel never settled on slide ${firstArm + 1}`)
+      // every object, and where the one to move stands
       const placed = () =>
         inPanel(
           (w, [all, one]) => {
@@ -1219,22 +1238,276 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         )
       const was = await waitFor(placed)
       if (!was || was.missing) return fail(`the arm scene's objects are not anchors of the running scene: ${JSON.stringify(was)}`)
+      const reloaded = (n) => page.evaluate((n) => window.__toExtension.some((m) => m.type === 'lysark:accepted' && m.seq === n), n)
       const at = armObjects[moving].at ?? [0, 0, 0]
       const edited = parseDocument(host.docs.get(armPath).text)
       edited.setIn(['objects', moving, 'at'], edited.createNode([at[0] + 0.1, at[1], at[2]], { flow: true }))
+      // written as blocks from here on (one key a line: the file, its objects, the object) and its
+      // rotate on one line, so the drags below can be checked line by line
+      for (const node of [edited.contents, edited.get('objects', true), edited.getIn(['objects', moving], true)]) if (node && 'flow' in node) node.flow = false
+      const rotateNode = edited.getIn(['objects', moving, 'rotate'], true)
+      if (rotateNode && Array.isArray(rotateNode.items)) rotateNode.flow = true
       host.docs.set(armPath, { text: edited.toString(), version: host.docs.get(armPath).version + 1 })
-      // the same slides.md as shown: only the object differs
-      const objectMoved = await source(added)
-      if (!(await fromRuntime({ type: 'lysark:accepted', seq: objectMoved }))) {
-        return fail(`moving the object '${moving}' was not taken as new text that loads the panel afresh`)
+      // the same slides.md as shown: only where the object is differs. In place, unless the slide shown
+      // looks at the object (then it loads afresh, so the camera flies to its new place)
+      const typed = await source(added)
+      if (looked0.includes(moving)) {
+        if (!(await fromRuntime({ type: 'lysark:accepted', seq: typed }))) {
+          return fail(`a typed new place for '${moving}', which slide ${firstArm + 1} looks at, did not load the panel afresh`)
+        }
+        if (!(await render(32))) return fail('the runtime did not say ready after a typed new place')
+        await toRuntime({ type: 'lysark:source', files: host.files(added), seq: typed, slide: firstArm, protocol: EDITOR_PROTOCOL })
+        if (!(await fromRuntime({ type: 'lysark:shown', seq: typed }))) return fail('the typed new place was not shown after loading afresh')
+      } else if (!(await fromRuntime({ type: 'lysark:shown', seq: typed }, 10000)) || (await reloaded(typed))) {
+        return fail(`a typed new place for the object '${moving}' was not put into the running scene in place`)
       }
-      if (!(await render(3))) return fail('the runtime did not say ready after the object moved')
-      await toRuntime({ type: 'lysark:source', files: host.files(added), seq: objectMoved, slide: 0, protocol: EDITOR_PROTOCOL })
-      if (!(await fromRuntime({ type: 'lysark:shown', seq: objectMoved }))) return fail('the moved object was not shown after loading afresh')
       const now = await waitFor(placed)
       const off = now?.at ? Math.hypot(now.at[0] - was.at[0] - 0.1, now.at[1] - was.at[1], now.at[2] - was.at[2]) : Infinity
       if (off > 1e-6) return fail(`the object '${moving}' did not move 0.1 m along x: ${JSON.stringify(was)} → ${JSON.stringify(now)}`)
-      lines.push(`${names.length} objects from ${armPath} are anchors of the arm scene; moving '${moving}' loaded the panel afresh, and it moved`)
+      lines.push(
+        `${names.length} objects from ${armPath} are anchors of the arm scene; a typed new place for '${moving}' ` +
+          `${looked0.includes(moving) ? `loaded the panel afresh (slide ${firstArm + 1} looks at it)` : 'went in place'}, and it moved`,
+      )
+
+      // M (step 7), on the slide that looks at an object (or the first of the arm's)
+      const lookAtObject = fms.findIndex((fm) => fm.scene === 'arm' && names.includes(lookAtOf(fm)))
+      const objectSlide = lookAtObject >= 0 ? lookAtObject : fms.findIndex((fm) => fm.scene === 'arm')
+      await toRuntime({ type: 'lysark:goto', slide: objectSlide })
+      if (!(await settledOn(objectSlide))) return fail(`the panel never settled on slide ${objectSlide + 1}`)
+      await waitFor(() => inPanel((w) => !w.__lysark.cameraCtl.active || null), 20, 250)
+      await key('m')
+      const shownRings = () =>
+        inPanel((w) => {
+          const on = [...w.document.querySelectorAll('.lysark-object-handle')].filter((el) => el.style.display !== 'none').map((el) => el.dataset.object)
+          return on.length > 0 ? on : null
+        })
+      const rings = await waitFor(shownRings, 10, 200)
+      if (!rings?.includes(moving)) return fail(`M on slide ${objectSlide + 1} showed no ring on '${moving}': ${JSON.stringify(rings)}`)
+      const listed = await inPanel((w) => w.document.querySelector('[aria-label="Objects"]')?.textContent ?? '')
+      if (!listed.includes(moving) || !/at \[/.test(listed)) return fail(`the objects' panel does not list '${moving}' and where it is: ${listed}`)
+      const ringOf = `.lysark-object-handle[data-object="${moving}"]`
+      const dotOf = `.lysark-object-knob[data-object="${moving}"]`
+      const middle = (selector) =>
+        inPanel((w, sel) => {
+          const el = w.document.querySelector(sel)
+          if (!el || el.style.display === 'none') return null
+          const r = el.getBoundingClientRect()
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+        }, selector)
+      /** where the object is in its parent's frame: at, and rotate in degrees */
+      const local = () =>
+        inPanel((w, name) => {
+          const n = w.__lysark.sceneManager.active.anchors[name]
+          const deg = (r) => Math.round((r * 180) / Math.PI * 1e6) / 1e6
+          const q = n.getWorldQuaternion(n.quaternion.clone())
+          return { at: [n.position.x, n.position.y, n.position.z], rotate: [deg(n.rotation.x), deg(n.rotation.y), deg(n.rotation.z)], turn: [q.x, q.y, q.z, q.w] }
+        }, moving)
+      /** press the handle at its middle, move through `path` as a mouse does, then let go (or press Esc) */
+      const dragHandle = async (selector, path, { shift = false, escape = false } = {}) => {
+        const from = await middle(selector)
+        if (!from) return false
+        await inPanel(
+          (w, [sel, p, shift]) =>
+            w.document
+              .querySelector(sel)
+              .dispatchEvent(new w.PointerEvent('pointerdown', { button: 0, buttons: 1, pointerType: 'mouse', pointerId: 9, clientX: p.x, clientY: p.y, shiftKey: shift, bubbles: true })),
+          [selector, from, shift],
+        )
+        for (const p of path(from)) {
+          await inPanel(
+            (w, [p, shift]) => w.dispatchEvent(new w.PointerEvent('pointermove', { buttons: 1, pointerType: 'mouse', pointerId: 9, clientX: p.x, clientY: p.y, shiftKey: shift, bubbles: true })),
+            [p, shift],
+          )
+          await page.waitForTimeout(40)
+        }
+        const last = path(from).at(-1)
+        if (escape) await inPanel((w) => w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+        else {
+          await inPanel(
+            (w, [p, shift]) => w.dispatchEvent(new w.PointerEvent('pointerup', { button: 0, buttons: 0, pointerType: 'mouse', pointerId: 9, clientX: p.x, clientY: p.y, shiftKey: shift, bubbles: true })),
+            [last, shift],
+          )
+        }
+        return true
+      }
+      const line = (from, dx, dy) => Array.from({ length: 6 }, (_, k) => ({ x: from.x + (dx * (k + 1)) / 6, y: from.y + (dy * (k + 1)) / 6 }))
+      /** the lines of the scene file an edit changed or added, as they are after it */
+      const changedLines = (a, b) => {
+        const x = a.split(/\r?\n/)
+        const y = b.split(/\r?\n/)
+        let head = 0
+        while (head < x.length && head < y.length && x[head] === y[head]) head++
+        let tail = 0
+        while (tail < x.length - head && tail < y.length - head && x[x.length - 1 - tail] === y[y.length - 1 - tail]) tail++
+        return y.slice(head, y.length - tail)
+      }
+      /** one move from the panel: its edit, written into the scene file, and its text put into the running scene in place */
+      const moveBy = async (what, selector, path, options) => {
+        const editsBefore = host.edits.length
+        const text = host.docs.get(armPath).text
+        if (!(await dragHandle(selector, path, options))) return { problem: `${what}: the handle ${selector} is not shown` }
+        const edit = await waitFor(async () => host.edits[editsBefore], 20, 300)
+        if (!edit?.result.ok || edit.message.changes.length !== 1 || edit.message.changes[0].path !== armPath) {
+          return { problem: `${what} did not write one edit into ${armPath}: ${JSON.stringify(edit ?? null)} (the panel says: ${await banner()})` }
+        }
+        const after = host.docs.get(armPath).text
+        const shownSeq = await source(added)
+        if (!(await fromRuntime({ type: 'lysark:shown', seq: shownSeq }, 10000)) || (await reloaded(shownSeq))) {
+          return { problem: `${what}: its text was not put into the running scene in place` }
+        }
+        await page.waitForTimeout(300)
+        return { lines: changedLines(text, after), before: text, after, written: parseYaml(after).objects[moving], node: await local() }
+      }
+      const same = (a, b) => a.length === b.length && a.every((v, k) => Math.abs(v - b[k]) < 1e-6)
+      /** one line changed, and in the file as read only `key` of the object moved (written however the file writes it) */
+      const onlyChanged = (step, key) => {
+        const strip = (text) => {
+          const doc = parseYaml(text)
+          return JSON.stringify({ ...doc, objects: { ...doc.objects, [moving]: { ...doc.objects[moving], [key]: undefined } } })
+        }
+        return (
+          step.lines?.length === 1 &&
+          strip(step.before) === strip(step.after) &&
+          JSON.stringify(parseYaml(step.before).objects[moving][key]) !== JSON.stringify(step.written[key])
+        )
+      }
+      const asVec = (rotate) => (typeof rotate === 'number' ? [0, rotate, 0] : (rotate ?? [0, 0, 0]))
+
+      // along the floor: x and z change, the height stays; only the at line changes
+      const start = await local()
+      const moved = await moveBy('dragging the ring', ringOf, (from) => line(from, 40, 16))
+      if (moved.problem) return fail(moved.problem)
+      if (!onlyChanged(moved, 'at')) return fail(`dragging '${moving}' changed more than its at, in one line: ${JSON.stringify(moved.lines)}`)
+      if (!same(moved.written.at, moved.node.at) || moved.written.at[1] !== start.at[1] || same(moved.written.at, start.at)) {
+        return fail(`dragging '${moving}' along the floor: written at ${JSON.stringify(moved.written.at)}, shown ${JSON.stringify(moved.node.at)}, was ${JSON.stringify(start.at)}`)
+      }
+      // the dot: a sixth of a turn round the ring, the clock's way back on screen; rotate stays as written, a number if it was one
+      let turnedBy = null
+      if (turnable(moving)) {
+        // round the turn's axis on screen, at the ring's height, where the handles measure the turn from
+        // (the ring itself, for an object that stands; off it, for one laid down)
+        const o = armObjects[moving]
+        const middleOf = Array.isArray(o.box) ? o.box[1] / 2 : Array.isArray(o.cylinder) ? o.cylinder[1] / 2 : typeof o.sphere === 'number' ? o.sphere / 2 : 0
+        const axis = await inPanel(
+          (w, [name, up]) => {
+            const L = w.__lysark
+            const n = L.sceneManager.active.anchors[name]
+            const origin = n.getWorldPosition(n.position.clone())
+            const ring = n.localToWorld(n.position.clone().set(0, up, 0))
+            const p = origin.clone().set(origin.x, ring.y, origin.z).project(L.sceneLayer.camera)
+            const rect = L.sceneLayer.renderer.domElement.getBoundingClientRect()
+            return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height }
+          },
+          [moving, middleOf],
+        )
+        const before = await local()
+        turnedBy = await moveBy('turning with the dot', dotOf, (from) => {
+          const r = Math.max(Math.hypot(from.x - axis.x, from.y - axis.y), 30)
+          const a = Math.atan2(from.y - axis.y, from.x - axis.x)
+          return Array.from({ length: 6 }, (_, k) => ({ x: axis.x + r * Math.cos(a - ((k + 1) * Math.PI) / 18), y: axis.y + r * Math.sin(a - ((k + 1) * Math.PI) / 18) }))
+        })
+        if (turnedBy.problem) return fail(turnedBy.problem)
+        if (!onlyChanged(turnedBy, 'rotate') || typeof turnedBy.written.rotate !== typeof (armObjects[moving].rotate ?? 0)) {
+          return fail(`turning '${moving}' changed other than its rotate, or how it is written: ${JSON.stringify(turnedBy.lines)}`)
+        }
+        // the turn in the scene, from the object's turn before to after: about the vertical only,
+        // counter-clockwise seen from above (+y), about a sixth of a turn
+        const [ax, ay, az, aw] = before.turn
+        const [bx, by, bz, bw] = turnedBy.node.turn
+        // b · a⁻¹ (a⁻¹ = (-ax, -ay, -az, aw))
+        // (q and -q are the same turn: the one with w ≥ 0)
+        const sign = bw * aw + bx * ax + by * ay + bz * az < 0 ? -1 : 1
+        const dw = sign * (bw * aw + bx * ax + by * ay + bz * az)
+        const dx = sign * (bx * aw - bw * ax - by * az + bz * ay)
+        const dy = sign * (by * aw - bw * ay - bz * ax + bx * az)
+        const dz = sign * (bz * aw - bw * az - bx * ay + by * ax)
+        const about = (2 * Math.atan2(dy, dw) * 180) / Math.PI
+        // about the vertical, up to the whole degrees a tilted object's angles are written in
+        if (Math.hypot(dx, dz) > 0.02 || !(about > 30 && about < 90) || !same(asVec(turnedBy.written.rotate), turnedBy.node.rotate)) {
+          return fail(
+            `turning '${moving}' a sixth of a turn: rotate ${JSON.stringify(armObjects[moving].rotate ?? 0)} → ${JSON.stringify(turnedBy.written.rotate)}, ` +
+              `shown ${JSON.stringify(turnedBy.node.rotate)}, ${about.toFixed(1)} degrees about the vertical`,
+          )
+        }
+      }
+      if (screenshot) await page.screenshot({ path: screenshot.replace(/(\.png)?$/i, '-objects.png') })
+      // with Shift: up only
+      const lifted = await moveBy('dragging the ring with Shift', ringOf, (from) => line(from, 0, -30), { shift: true })
+      if (lifted.problem) return fail(lifted.problem)
+      if (!onlyChanged(lifted, 'at') || !(lifted.written.at[1] > moved.written.at[1]) || lifted.written.at[0] !== moved.written.at[0] || lifted.written.at[2] !== moved.written.at[2]) {
+        return fail(`dragging '${moving}' up with Shift: at ${JSON.stringify(moved.written.at)} → ${JSON.stringify(lifted.written.at)}`)
+      }
+      // Esc puts it back and writes nothing
+      const editsNow = host.edits.length
+      await dragHandle(ringOf, (from) => line(from, -50, 0), { escape: true })
+      await page.waitForTimeout(600)
+      const back = await local()
+      if (host.edits.length !== editsNow || !same(back.at, lifted.written.at)) {
+        return fail(`Esc while dragging '${moving}' did not put it back without writing: ${JSON.stringify(back.at)}, ${host.edits.length - editsNow} edits`)
+      }
+      // a click (a press, a pixel's wobble, a release) writes nothing, however the view lies
+      await dragHandle(ringOf, (from) => [{ x: from.x + 1, y: from.y + 1 }])
+      await page.waitForTimeout(600)
+      const clicked = await local()
+      if (host.edits.length !== editsNow || !same(clicked.at, lifted.written.at)) {
+        return fail(`a click on the ring of '${moving}' moved it, or wrote: ${JSON.stringify(clicked.at)}, ${host.edits.length - editsNow} edits`)
+      }
+      // J closes the objects (their rings), and M the joint sliders
+      await key('j')
+      const swapped = await waitFor(
+        () => inPanel((w) => (w.document.querySelector('[aria-label="Objects"]').style.display === 'none' && w.document.querySelector('[aria-label="Joint sliders"]').style.display !== 'none') || null),
+        10,
+        200,
+      )
+      await key('m')
+      const swappedBack = await waitFor(
+        () => inPanel((w) => (w.document.querySelector('[aria-label="Joint sliders"]').style.display === 'none' && w.document.querySelector('[aria-label="Objects"]').style.display !== 'none') || null),
+        10,
+        200,
+      )
+      if (!swapped || !swappedBack) return fail('J and M did not take turns: the joint sliders and the objects showed together')
+      await key('m')
+      if (await waitFor(shownRings, 2, 200)) return fail('M again did not hide the rings')
+      lines.push(
+        `M showed rings on ${rings.length} objects; dragging '${moving}' wrote only its at (${JSON.stringify(moved.written.at)}), ` +
+          (turnedBy ? `the dot only its rotate (${JSON.stringify(armObjects[moving].rotate ?? 0)} → ${JSON.stringify(turnedBy.written.rotate)}), ` : '(it has no dot) ') +
+          'Shift only its height; each put in place; Esc and a click wrote nothing',
+      )
+
+      // a typed new place for the object the slide shown looks at (or one it hangs on) loads the
+      // panel afresh, where the camera flies to it (in place, the camera would stay on the old place)
+      const looked = lookAtOf(fms[objectSlide])
+      if (carrying(looked).includes(moving)) {
+        const shifted = parseDocument(host.docs.get(armPath).text)
+        const now = shifted.getIn(['objects', moving, 'at'])?.toJSON?.() ?? [0, 0, 0]
+        shifted.setIn(['objects', moving, 'at'], shifted.createNode([Number((now[0] + 0.05).toFixed(2)), now[1], now[2]], { flow: true }))
+        host.docs.set(armPath, { text: shifted.toString(), version: host.docs.get(armPath).version + 1 })
+        const typedHere = await source(added)
+        if (!(await fromRuntime({ type: 'lysark:accepted', seq: typedHere }))) {
+          return fail(`a typed new place for '${moving}', which slide ${objectSlide + 1} looks at (${looked}), did not load the panel afresh`)
+        }
+        if (!(await render(33))) return fail('the runtime did not say ready after a typed new place for the object looked at')
+        await toRuntime({ type: 'lysark:source', files: host.files(added), seq: typedHere, slide: objectSlide, protocol: EDITOR_PROTOCOL })
+        if (!(await fromRuntime({ type: 'lysark:shown', seq: typedHere }))) return fail('the typed new place was not shown after loading afresh')
+        lines.push(`a typed new place for '${moving}', which slide ${objectSlide + 1} looks at through '${looked}', loaded the panel afresh`)
+      }
+
+      // any other change to an object needs the scene built afresh
+      const recoloured = parseDocument(host.docs.get(armPath).text)
+      const shaped = ['box', 'cylinder', 'sphere'].some((s) => armObjects[moving][s] !== undefined)
+      // a value it hasn't already
+      const other = shaped ? (armObjects[moving].material === 'red' ? 'blue' : 'red') : armObjects[moving].frame === 0.1 ? 0.2 : 0.1
+      recoloured.setIn(['objects', moving, shaped ? 'material' : 'frame'], other)
+      host.docs.set(armPath, { text: recoloured.toString(), version: host.docs.get(armPath).version + 1 })
+      const objectChanged = await source(added)
+      if (!(await fromRuntime({ type: 'lysark:accepted', seq: objectChanged }))) {
+        return fail(`changing the object '${moving}' (not its place) was not taken as new text that loads the panel afresh`)
+      }
+      if (!(await render(3))) return fail('the runtime did not say ready after the object changed')
+      await toRuntime({ type: 'lysark:source', files: host.files(added), seq: objectChanged, slide: 0, protocol: EDITOR_PROTOCOL })
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: objectChanged }))) return fail('the changed object was not shown after loading afresh')
+      if (!(await waitFor(placed))) return fail(`after loading afresh, the objects are not anchors of the arm scene`)
+      lines.push(`changing '${moving}' otherwise (${shaped ? 'its material' : 'a shape'}) loaded the panel afresh`)
     } else {
       lines.push('(the lecture has no objects in scenes/arm.yaml, so objects were not checked)')
     }

@@ -2,9 +2,9 @@
 
 How to give a lecture its own named camera views (from engine v2.5.0) and robot poses (from
 v2.7.0), to pose the robot in the editor (from v2.8.0; Save pose as… from v2.9.0, dragging
-the tool from v2.10.0), and to add objects to a scene (from v2.11.0): steps 2 to 6 of
-[scene-files-proposal.md](scene-files-proposal.md). Written for the author; no engine knowledge
-needed.
+the tool from v2.10.0), to add objects to a scene (from v2.11.0) and to move them in the editor
+(from v2.12.0): steps 2 to 7 of [scene-files-proposal.md](scene-files-proposal.md). Written for
+the author; no engine knowledge needed.
 
 ## In short
 
@@ -207,8 +207,13 @@ a robot's anchor takes the robot's own frame (see `parent` below).
   the scene and don't come and go per slide. Scene files with the same base are one running
   scene (see [Which scene](#which-scene)), so only one of them can have objects, and they are
   on every slide of that scene's run, slides that name the engine scene included.
-- **In the editor**, a change to an object loads the panel afresh, a moment, instead of updating
-  it in place. Dragging objects is step 7.
+- **In the editor**, M moves objects by dragging them (from v2.12.0: see
+  [Moving objects in the editor](#moving-objects-in-the-editor)). A new `at` or `rotate` for an
+  object of the scene on screen, dragged or typed, goes into the panel at once. Anything else
+  loads the panel afresh, a moment: a new place typed for an object of another scene (or on a
+  slide without a scene), or for the object the slide on screen looks at (so the camera flies
+  to it), and any other change to an object (its shape, size, material or parent, or an object
+  added, removed or renamed).
 
 ## Saving views in the editor
 
@@ -321,6 +326,54 @@ From engine v2.8.0.
   the pose included. P saves one pose at a time: pressed again before the last one is back in the
   text (a moment), it says so.
 
+## Moving objects in the editor
+
+From engine v2.12.0.
+
+- **M** shows a ring on each object of the slide's scene, with its name, and a list at the top
+  right of the objects and where each is (`at` and `rotate`). M again, or ×, hides them. M and J
+  take turns: opening one closes the other. The hint at the top of the panel offers M where the
+  slide's scene has objects.
+- **Drag a ring** to move its object along the floor: it keeps its height. Hold **Shift** while
+  dragging to move it up and down instead (not when looking from straight above: look from
+  lower down for that). A press that goes no farther than a few pixels is a click, and moves
+  nothing. The ring sits in the middle of a shape (on a frame or a
+  point, at its origin), and the object follows the pointer from where you pressed it. Seen from
+  about the ring's height, the floor is edge-on: the object then moves only sideways; look from
+  higher up to move it nearer or farther. What is written is `at` in the object's parent's frame
+  (see `parent` above): for an object standing in the scene, along the floor changes x and z; on
+  a robot's base, whose z is up, x and y. An object on a robot's tool moves with the tool, and a
+  drag goes from where the tool was when you pressed the ring.
+- **Drag the dot** beside a ring around the ring to turn the object about the vertical. A sweep
+  the clock's way on screen, seen from above, turns it the clock's way, and once round on screen
+  is once round. At rest the dot shows which way the object faces: its own x along the floor,
+  or, if x points more up or down than along the floor, the flatter of its z and y. While you
+  turn, it stays under the pointer. An invisible point has no dot, unless another object hangs on
+  it (which turns with it).
+- The object moves at once, to the centimetre and the whole degree, as the file will have it.
+  **Letting go writes** into the scene file with the scene's objects what the drag changed, `at`
+  for a move and `rotate` for a turn: only the numbers that changed, each where it stands;
+  comments and everything else stay as they were. If the scene file has the object elsewhere
+  than the panel shows (typing the panel hasn't had yet: the panel updates on Ctrl+S), the move
+  is refused, and the panel says to save the file first. `rotate: 48` stays a number while the object turns only about its parent's y (an object
+  standing in the scene does), and becomes `[x, y, z]` when it doesn't: on a robot's base,
+  turning changes the angle about z (a frame there turned 30 degrees is `rotate: [0, 0, 30]`).
+  An `at` or `rotate` the object didn't have is added after its other keys. An angle the turn
+  changed is written between -180 and 180: `rotate: 170` turned 20 degrees is `-170`.
+- **Esc** while dragging puts the object back, and nothing is written. Dragged farther than a
+  scene file allows (10 m), the object stops at the last place it could go.
+- As with views and poses, the change is unsaved until you save it (File > Save All), Ctrl+Z in
+  the scene file undoes it, and the panel shows it without loading afresh. Pressing a ring stops
+  a camera flight where it is, as a click in the scene does, and stops the view coasting after
+  you turned it; the view then stays put while you drag, even on a slide that looks at the
+  object. Moves are written one after another, and while one is on its way into the file the
+  object stays where you put it. V or P pressed meanwhile waits for it, and saves nothing if you
+  went to another slide in the meantime (and back, too).
+- A move that can't be written is refused, the object goes back, and the panel says why: for
+  example a move of an object whose `at` is written with a YAML anchor or tag (`&p`, `!!float`),
+  which the panel won't write over (a turn leaves such an `at` alone). Change such a place by
+  hand.
+
 ## When something is wrong
 
 The build (and the panel) names the file, the line and what to do. For example:
@@ -388,6 +441,18 @@ changed). New text that changes only cameras and joints goes into the running de
 loading the panel afresh (`src/editor/editor-compile.ts`, `updateTargets`); the slide shown may
 only change to the view or pose just saved from it.
 
+M is built the same way. Its rings are drawn over the canvas, as the tool's ring is
+(`src/editor/object-handles.ts`). A drag moves the object's three.js object at once, in a plane
+through its ring (the floor's, or with Shift the upright one that faces you), worked out in its
+parent's frame and rounded as the file will have it. Letting go computes the edit on the scene
+file as VS Code has it (`src/editor/object-edit.ts`, only the numbers that changed) and asks the
+extension to apply it. New text whose objects differ only in `at` and `rotate`, for objects of
+the scene on screen, goes into the running scene: the runtime moves those objects and keeps the
+deck's list of objects in step
+(`src/editor/runtime.ts`, `placeObjects`). Any other change to the objects still loads the panel
+afresh, since the scene manager builds them into a scene only once. No extension update was
+needed.
+
 Objects take the same road as views and poses: the compiler checks them
 (`src/compiler/scene-files.ts`) and hands them on as data, by the scene they are in, with the
 slides (the student file's deck, from `vite-plugin-lecture.ts`; the panel's, from
@@ -400,5 +465,7 @@ own `anchors:`.
 
 ## Not yet
 
-- Dragging objects in the panel, step 7; models from `assets/`, steps 8 and 9.
+- Models from `assets/`, steps 8 and 9.
+- Changing an object's size, or turning it about other axes than the vertical, in the panel: type
+  those in the scene file.
 - Showing, hiding or moving objects per slide, and objects in `agilus-duo` hanging on a robot.

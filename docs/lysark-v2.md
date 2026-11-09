@@ -501,6 +501,12 @@ HTTPS server.
   object or a robot anchor with `parent`. Each object is an anchor slides look at and label. The
   editor panel loads afresh when an object changes. Engine v2.11.0, no extension change.
   [scene-files.md](scene-files.md#objects).
+- Scene files, step 7 (2026-11-09, built, not yet released): M in the panel shows a ring on each
+  object; dragging it moves the object along the floor (with Shift, up and down), and a dot beside
+  it turns the object about the vertical. Letting go writes only the numbers of `at` or `rotate`
+  that changed into the scene file, and a new place for an object of the scene on screen,
+  dragged or typed, goes into the running scene in place. Engine v2.12.0, no extension change.
+  [scene-files.md](scene-files.md#moving-objects-in-the-editor).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).

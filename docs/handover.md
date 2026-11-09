@@ -95,15 +95,25 @@ degrees, colours as named presets, each a `--object-*` token). The compiler chec
 (src/compiler/scene-files.ts, with src/scenes/anchors.ts, each scene's anchors, kept in step by
 a test) and they travel with the deck as data (`Deck.objects`); the scene manager adds them when
 a scene is first built (src/scene/objects.ts), each an anchor. In the panel, a change to an
-object loads it afresh. Next in docs/scene-files-proposal.md is step 7, drag handles for objects.
+object loads it afresh (from step 7, a new place goes in at once).
+
+Step 7 is built and checked (2026-11-09), not yet released: engine v2.12.0, no extension change.
+M in the panel (src/editor/object-handles.ts) shows a ring on each object of the scene: dragging
+it moves the object along the floor (with Shift, up and down), and a dot beside it turns the
+object about the vertical, to the centimetre and the whole degree. Letting go writes only the
+numbers of `at` or `rotate` that changed into the scene file (src/editor/object-edit.ts),
+refused if the file has the object elsewhere than the panel shows (unsaved typing). New text
+whose objects of the scene on screen differ only in where they are, dragged or typed, goes into
+the running scene in place (runtime.ts, `placeObjects`); any other change to an object still
+loads the panel afresh. Next in docs/scene-files-proposal.md is step 8, models from `assets/`.
 
 **Releases wait (2026-11-06):** GitHub Actions don't start on the author's account (the
 education plan expired; renewal pending), so Update engine and Publish lectures can't run, and
 engine CI doesn't run on pushes. Until then every push is checked locally first (vitest, the
 student-file check, check-editor in Chromium and Firefox, check-extension). v2.6.0 is not tagged
 yet: tag it on the step-3 commit (20675c8), v2.7.0 on step 4's (6bf9cf9), v2.8.0 on step 5a's
-(defeca7), v2.9.0 on step 5b's (defbfbd), v2.10.0 on step 5c's (59c2cf9) and v2.11.0 on
-step 6's, once Actions run again.
+(defeca7), v2.9.0 on step 5b's (defbfbd), v2.10.0 on step 5c's (59c2cf9), v2.11.0 on
+step 6's (74d13a1) and v2.12.0 on step 7's, once Actions run again.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -233,7 +243,8 @@ keep it green.
   panel), `deck-from-source.ts` (stands in for `virtual:lysark-deck`, compiles the
   text in the browser), `camera-edit.ts` (writes a view into a slide, byte for byte),
   `panel-page.js` (the panel's page and the runtime's file list, shared with the
-  extension and the CI check). `editor.html` is its build entry.
+  extension and the CI check), `joint-panel.ts` and `tool-handle.ts` (J), `pose-edit.ts` (P),
+  `object-handles.ts` and `object-edit.ts` (M, moving objects). `editor.html` is its build entry.
   `src/compiler/slide-ranges.ts` — where each slide sits, shared by the compiler
   and the extension. `src/scenes/all.ts` — every scene, for the editor.
 - `extension/` — the VS Code extension: own `package.json`, esbuild bundle, `.vsix`
@@ -251,7 +262,9 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**306**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**329**) · `npm run typecheck`
+  (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
+  out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
   file:// acceptance (0 fetch / 0 errors / KaTeX fonts intact). Needs Chromium:
   `npx playwright-core install chromium`.

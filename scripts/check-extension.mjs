@@ -14,7 +14,9 @@
 //      Shift+V makes a new view and scene file, and one Ctrl+Z undoes both;
 //      with the joint sliders (v2.8.0), J and P change the pose a slide
 //      names in the scene file, in place; with Save pose as… (v2.9.0),
-//      Shift+P adds a new pose to a scene file and names it on the slide
+//      Shift+P adds a new pose to a scene file and names it on the slide;
+//      with the object handles (v2.12.0), dragging an object with M writes
+//      its at into the scene file, in place
 //   2  (engine v2.3.x) V writes the view; Scene Actions… says to update the engine
 //
 //   node scripts/check-extension.mjs <editor dir> [<editor dir> …]
@@ -81,6 +83,11 @@ function knowsPosePanel(editorDir) {
 /** true if the editor build has Save pose as… (engine v2.9.0): its dialog's title is in its files */
 function knowsSavePoseAs(editorDir) {
   return buildSays(editorDir, "Save the robot's pose")
+}
+
+/** true if the editor build moves objects (engine v2.12.0): the objects' panel line is in its files */
+function knowsObjectHandles(editorDir) {
+  return buildSays(editorDir, 'Letting go writes the object')
 }
 
 /** true if the editor build has Save view as… (engine v2.6.0): its dialog's title is in its files */
@@ -192,7 +199,7 @@ process.on('SIGINT', () => {
 })
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, lines) {
+async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, lines) {
   let ok = true
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
@@ -484,6 +491,60 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
         gripped.inPlace && /\n {2}grip: \[/.test(gripped.agilus) && /"joint_6"/.test(gripped.joints),
         `Shift+P saved a new pose 'grip' in scenes/agilus.yaml, in place; slide ${kuka + 1}'s joints ${gripped.joints}`,
       )
+
+      // M on the demo's slide 'objects': dragging the table's ring writes its
+      // new at into scenes/arm.yaml, and the panel takes it in place
+      if (!objectHandles) {
+        lines.push('(moving objects not checked: this editor has no M)')
+        return ok
+      }
+      const objects = demoSlide('objects')
+      await frame.evaluate((n) => {
+        window.__received = []
+        location.hash = `#${n + 1}`
+      }, objects)
+      const onObjects = await frame
+        .waitForFunction((n) => {
+          const L = window.__lysark
+          return L.engine.currentIndex === n && !L.sceneManager.busy && L.sceneManager.activeSceneId === 'arm' && !L.cameraCtl.active
+        }, objects, { timeout: 30_000 })
+        .then(() => true, () => false)
+      await frame.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true })))
+      const ring = await frame
+        .waitForFunction(() => {
+          const el = document.querySelector('.lysark-object-handle[data-object="table"]')
+          if (!el || el.style.display === 'none') return null
+          const r = el.getBoundingClientRect()
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+        }, null, { timeout: 10_000 })
+        .then((handle) => handle.jsonValue(), () => null)
+      check(onObjects && ring !== null, `on slide ${objects + 1}, M showed a ring on the table`)
+      if (ring) {
+        // as a mouse drags it (the page can't capture a pointer it made up: the window hears the moves)
+        await frame.evaluate((p) => {
+          const event = (type, x, y) =>
+            new PointerEvent(type, { button: 0, buttons: type === 'pointerup' ? 0 : 1, pointerType: 'mouse', pointerId: 5, clientX: x, clientY: y, bubbles: true })
+          document.querySelector('.lysark-object-handle[data-object="table"]').dispatchEvent(event('pointerdown', p.x, p.y))
+          for (let k = 1; k <= 6; k++) window.dispatchEvent(event('pointermove', p.x - 7 * k, p.y + 2 * k))
+          window.dispatchEvent(event('pointerup', p.x - 42, p.y + 12))
+        }, ring)
+        await page.waitForTimeout(3500)
+      }
+      const moved = await frame
+        .evaluate(() => {
+          const table = window.__lysark.sceneManager.active.anchors.table.position
+          return {
+            inPlace: Array.isArray(window.__received),
+            node: [table.x, table.y, table.z],
+            arm: (window.__received ?? []).filter((m) => m?.type === 'lysark:source').map((m) => m.files['scenes/arm.yaml']).pop() ?? '',
+          }
+        })
+        .catch(() => ({ inPlace: false, node: [], arm: '' }))
+      const written = moved.arm ? parseYaml(moved.arm).objects?.table?.at : undefined
+      check(
+        moved.inPlace && Array.isArray(written) && written.every((v, k) => Math.abs(v - moved.node[k]) < 1e-9) && !/at: \[0\.62, 0, -0\.69\]/.test(moved.arm),
+        `dragging the table wrote at ${JSON.stringify(written)} into scenes/arm.yaml, and the panel took it in place`,
+      )
     }
   } else {
     await tab('Lysark').click()
@@ -514,7 +575,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), lines)
+    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {
