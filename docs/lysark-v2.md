@@ -322,7 +322,9 @@ These keep the editor buildable in the browser. The first one already matters in
   you to authorize GitHub once in each browser.
 - **Keyboard.** VS Code intercepts some shortcuts inside the panel, among them Ctrl+Z, Ctrl+S,
   Ctrl+F, and Ctrl+P. Ctrl+Z pressed in the panel does not undo the panel's edit; click in that
-  file's text and press Ctrl+Z there.
+  file's text and press Ctrl+Z there. The panel's own keys (V, J, P, M) reach it only after a
+  click in it: the panel follows the cursor in `slides.md`, but keys typed while the cursor is
+  there go into the text.
 - **Unsaved edits.** An edit the panel writes into a file that isn't open becomes an unsaved change
   you can't see. Save all files before committing.
 
@@ -468,45 +470,49 @@ HTTPS server.
   `scenes/<name>.yaml`, used as `camera: <name>`; V on such a slide updates the view in the scene
   file. Unknown slide keys are now build errors (decision 8). Engine v2.5.0, no extension change.
   How to write them: [scene-files.md](scene-files.md).
-- Scene files, step 3 (2026-11-05, built, not yet released): Shift+V, "Save view as…", in the
+- Scene files, step 3 (built 2026-11-05, released 2026-11-09): Shift+V, "Save view as…", in the
   panel's own dialog and in Scene Actions…: only this slide, an existing view, or a new view,
   creating `scenes/<scene>.yaml` when the lecture has no scene file for that slide's scene. One edit across slides.md and the scene
   file; one Ctrl+Z undoes both (checked with the real extension in VS Code for the web). Engine
   v2.6.0, no extension change. [scene-files.md](scene-files.md).
-- Scene files, step 4 (2026-11-06, built, not yet released): named poses in the scene file
+- Scene files, step 4 (built 2026-11-06, released 2026-11-09): named poses in the scene file
   (`poses:`, a q list in joint order or a mapping of some joints), used as `joints: <name>` and
   as a trajectory's `from:`/`to:`. The build checks a list's length and the robot's joint limits
   (a table of each scene's joints, src/scenes/joints.ts, checked against the URDF files and the
   pendulum scene's constants). Engine
   v2.7.0, no extension change. [scene-files.md](scene-files.md).
-- Scene files, step 5a (2026-11-06, built, not yet released): joint sliders in the panel (J),
+- Scene files, step 5a (built 2026-11-06, released 2026-11-09): joint sliders in the panel (J),
   which move the robot at once, and P, which saves the joints moved where the slide's joints come
   from: the pose it names in the scene file, or its own `joints:` block. Saved poses go into the
   running deck in place. One engine change with it: a slide's own slider follows its joint when
   something else moves it (the joint sliders, the debug panel), so grabbing it never jumps.
   Shift+P (step 5b) and dragging the tool with IK (step 5c) follow. Engine v2.8.0, no extension
   change. [scene-files.md](scene-files.md).
-- Scene files, step 5b (2026-11-07, built, not yet released): Shift+P, "Save pose as…", in the
+- Scene files, step 5b (built 2026-11-07, released 2026-11-09): Shift+P, "Save pose as…", in the
   panel's dialog (shared with Shift+V) and in Scene Actions…: only this slide, an existing pose,
   or a new pose (a list of every joint), creating `scenes/<scene>.yaml` when the lecture has none.
   The slide keeps the pose it shows. Engine v2.9.0, no extension change.
   [scene-files.md](scene-files.md).
-- Scene files, step 5c (2026-11-07, built, not yet released): with the joint sliders open, a ring
+- Scene files, step 5c (built 2026-11-07, released 2026-11-09): with the joint sliders open, a ring
   at the robot's tool (arm, KUKA) drags the tool; inverse kinematics moves the joints, which P and
   Shift+P save. The arm's scene gains the position IK the KUKA's has (a small engine change).
   Engine v2.10.0, no extension change. [scene-files.md](scene-files.md).
-- Scene files, step 6 (2026-11-09, built, not yet released): `objects:` in a scene file, written
+- Scene files, step 6 (built 2026-11-09, released 2026-11-09): `objects:` in a scene file, written
   by hand: boxes, cylinders, spheres, coordinate frames and invisible points, placed with `at`
   and `rotate`, coloured with a `material` preset (a theme token each), and hung on another
   object or a robot anchor with `parent`. Each object is an anchor slides look at and label. The
   editor panel loads afresh when an object changes. Engine v2.11.0, no extension change.
   [scene-files.md](scene-files.md#objects).
-- Scene files, step 7 (2026-11-09, built, not yet released): M in the panel shows a ring on each
+- Scene files, step 7 (built 2026-11-09, released 2026-11-09): M in the panel shows a ring on each
   object; dragging it moves the object along the floor (with Shift, up and down), and a dot beside
   it turns the object about the vertical. Letting go writes only the numbers of `at` or `rotate`
   that changed into the scene file, and a new place for an object of the scene on screen,
   dragged or typed, goes into the running scene in place. Engine v2.12.0, no extension change.
   [scene-files.md](scene-files.md#moving-objects-in-the-editor).
+- Scene-file steps 3 to 7 released (2026-11-09): engine v2.6.0 to v2.12.0 tagged, the course
+  moved to v2.12.0, and the author tried them in github.dev on Baneplanlegging the same day: they
+  work. A preview opened before Publish lectures had finished kept the old engine until the page
+  was reloaded. Next: step 8, models from `assets/`.
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).
@@ -537,6 +543,39 @@ where noted.
   GLB meshes to shrink the offline file.
 - **From the archived `ideas.md`:** plots with static data on scene-less slides; an overlay-only ticker so
   animated widgets keep running on scene-less slides; curves whose parameters sliders change.
+- **Editor panel aids** (asked for by the author on 2026-11-09, after trying scene-file steps 3
+  to 7 in github.dev). They help while working in the panel, write no file, and never reach the
+  student file. They wait until the scene-file steps are done, not for a lecture to need them,
+  and each is its own small change. Like V, J and M, their keys work after a click in the panel,
+  and each has a Scene Actions… entry too. The panel should remember them across its reloads
+  (VS Code keeps a panel's state; untested here).
+  - *Hide the slide text* (H): hides the slide's text, math, images, widgets and plots in the
+    panel, so the whole 3D view shows. The labels in the scene, the slide counter and the
+    editor's own panels stay. The text is made invisible rather than removed, so it keeps its
+    place and the view can be turned over it. The hint says while the text is hidden, since a
+    view saved then can put the robot where the text will be. Panel runtime only
+    (`src/editor/runtime.ts`); hours of work.
+  - *Classroom shape* (C): the deck on a fixed 16:9 stage, scaled to fit the panel with bars
+    around it, so the text wraps and the view frames as on the projector. Off by default. It
+    replaces the always-on 16:9 proposal in step-3-editor-test.md. The deck has no stage today
+    (it fills the window), so a small engine change comes first: the 3D view and the anchored
+    labels size from their container instead of the window, the sizes in `src/styles.css` given
+    in `vw` follow the stage, and plots follow size changes. That ships to students, so the
+    student file must look the same afterwards (check the PDF export and phone browsers). The
+    panel then scales the deck with a CSS transform and corrects the orbit speed for the scale.
+    The stage is 1600×900, the PDF export's size, until the classroom is measured: the docs
+    assume the projector is 16:9, and its size in CSS pixels (`innerWidth × innerHeight` of the
+    student file fullscreen on the classroom PC) is recorded nowhere. About one step.
+  - Suggested with them, not asked for: *every reveal step at once* (A), since each save that
+    reloads the panel starts the slide at its first step again (the engine's `showAllFragments`,
+    which the PDF export uses); and the engine version in the panel's hint, so a preview still on
+    an older engine (as on 2026-11-09) is easy to spot.
+- **Slide editing in the panel** (2026-11-09, after the author asked how much of PowerPoint the
+  panel could do): [slide-editing-proposal.md](slide-editing-proposal.md). Its future proposals
+  fit the confirmed intent (slide text stays text): slide text updated in place, a click in the
+  panel jumping to the text, preview as you type, undo from the panel. Visual editing of slides
+  (a slide sorter, a layout picker, editing on the slide) goes against section 8's "No full visual
+  slide editor" and is at minimum priority.
 
 ## 8. Decisions
 

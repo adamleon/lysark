@@ -205,7 +205,9 @@ Reintroducing the first version's `window.parent` check makes it fail, as it sho
 - Show the deck at the projector's shape inside the panel: a 16:9 stage, scaled to fit, with bars
   around it. Then a saved view, and the text size, look in the panel as they will in the
   classroom. The deck has no fixed stage today; it fills the window. So this is its own small
-  engine change, made before the editor relies on it.
+  engine change, made before the editor relies on it. (2026-11-09: now planned as a toggle, off
+  by default, with a toggle that hides the slide text; lysark-v2.md section 7, "Editor panel
+  aids".)
 - In the panel, change slides without adding browser history: an engine option for the slide
   engine to replace the address's `#n` instead of adding one, with the runtime told about slide
   changes directly instead of through the address. A small player-API change for step 3.

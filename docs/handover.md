@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-10-19)
+## Where the project is (2026-11-09)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -60,35 +60,35 @@ returning after another scene ran) didn't say what to do. Engine v2.5.1 (2026-11
 panel's hint starts "Ctrl+S in the text updates the preview", and those two errors name the
 slides, the line in slides.md and the fix.
 
-Step 3, Save view as… (Shift+V), is built and checked (2026-11-05), not yet released: engine
+Step 3, Save view as… (Shift+V), is built and checked (2026-11-05), released 2026-11-09: engine
 v2.6.0, no extension change. The panel opens its own dialog (VS Code's lists may only open right
 after a click on the panel's buttons); Scene Actions… offers the same in VS Code's list. The
-proposal asks for it to be tried in github.dev before release (a two-file edit and its undo);
-the real-extension check already does that in VS Code for the web. Then tag v2.6.0 and Update
-engine.
+proposal asked for it to be tried in github.dev before release (a two-file edit and its undo);
+the real-extension check does that in VS Code for the web, and the author tried it on
+2026-11-09 with steps 4 to 7 (see "Released" below).
 
-Step 4, named poses, is built and checked (2026-11-06), not yet released: engine v2.7.0, no
+Step 4, named poses, is built and checked (2026-11-06), released 2026-11-09: engine v2.7.0, no
 extension change. `poses:` in a scene file (a q list in joint order, or a mapping of some
 joints), used as `joints: <name>` and a trajectory's `from:`/`to:`; the build checks a list's
 length and the joint limits against src/scenes/joints.ts, a table of each scene's joints that a
 test keeps in step with the URDF files and the pendulum scene's constants.
 
-Step 5 lands in three parts. 5a is built and checked (2026-11-06), not yet released: engine
+Step 5 lands in three parts. 5a is built and checked (2026-11-06), released 2026-11-09: engine
 v2.8.0, no extension change. J opens joint sliders in the panel (src/editor/joint-panel.ts), which
 move the robot at once; P saves the joints moved into the pose the slide names or into its own
 `joints:` block (src/editor/pose-edit.ts), put into the running deck in place. A slide's own
 slider now follows its joint (src/main.ts), its own small engine change.
 
-5b is built and checked (2026-11-07), not yet released: engine v2.9.0, no extension change.
+5b is built and checked (2026-11-07), released 2026-11-09: engine v2.9.0, no extension change.
 Shift+P, "Save pose as…" (only this slide, an existing pose, a new pose, creating the scene file
 if needed), in the dialog Shift+V uses (runtime.ts, openChoiceDialog) and in Scene Actions….
 
-5c is built and checked (2026-11-07), not yet released: engine v2.10.0, no extension change. A
+5c is built and checked (2026-11-07), released 2026-11-09: engine v2.10.0, no extension change. A
 ring at the robot's tool while the joint sliders are open (src/editor/tool-handle.ts); dragging it
 solves the scene's position IK (src/scene/ik.ts) and jogs the joints as the sliders do. The arm
 scene now exposes `ik` too. That finishes step 5.
 
-Step 6 is built and checked (2026-11-09), not yet released: engine v2.11.0, no extension change.
+Step 6 is built and checked (2026-11-09), released the same day: engine v2.11.0, no extension change.
 `objects:` in a scene file (box, cylinder, sphere, frame, or an invisible point; `at`, `rotate`,
 `material`, `parent`), by decision 7 (y up, `at` at the middle of the underside, turns in
 degrees, colours as named presets, each a `--object-*` token). The compiler checks them
@@ -97,7 +97,7 @@ a test) and they travel with the deck as data (`Deck.objects`); the scene manage
 a scene is first built (src/scene/objects.ts), each an anchor. In the panel, a change to an
 object loads it afresh (from step 7, a new place goes in at once).
 
-Step 7 is built and checked (2026-11-09), not yet released: engine v2.12.0, no extension change.
+Step 7 is built and checked (2026-11-09), released the same day: engine v2.12.0, no extension change.
 M in the panel (src/editor/object-handles.ts) shows a ring on each object of the scene: dragging
 it moves the object along the floor (with Shift, up and down), and a dot beside it turns the
 object about the vertical, to the centimetre and the whole degree. Letting go writes only the
@@ -107,21 +107,32 @@ whose objects of the scene on screen differ only in where they are, dragged or t
 the running scene in place (runtime.ts, `placeObjects`); any other change to an object still
 loads the panel afresh. Next in docs/scene-files-proposal.md is step 8, models from `assets/`.
 
-**Tagged (2026-11-09):** GitHub Actions were off on the author's account from 2026-11-06 (the
+**Released (2026-11-09):** GitHub Actions were off on the author's account from 2026-11-06 (the
 education plan had expired), so steps 3 to 7 were checked locally before each push. The plan is
 back: engine CI passed on step 7's push (9a63463), and v2.6.0 to v2.12.0 are tagged on their
-steps' commits (20675c8, 6bf9cf9, defeca7, defbfbd, 59c2cf9, 74d13a1, 9a63463). The course
-still runs v2.5.1. Next: Update engine with v2.12.0, then try steps 3 to 7 in github.dev on the
-course lecture (the proposal asks for Save view as… there: a new view in a new scene file, and
-one Ctrl+Z in slides.md undoing both).
+steps' commits (20675c8, 6bf9cf9, defeca7, defbfbd, 59c2cf9, 74d13a1, 9a63463). The course runs
+v2.12.0 (Update engine, then Publish lectures, live 16:34 UTC). The author tried steps 3 to 7 in
+github.dev on Baneplanlegging the same day: they work. Two things looked like failures first: a
+preview opened before the site was republished still ran v2.5.1 until the page was reloaded (the
+panel's hint shows which: from v2.8.0 it ends "J: pose the robot"), and the panel's keys work only
+after a click in it (it follows the cursor in slides.md, but keys typed there go into the text;
+now in scene-files.md and lysark-v2.md section 5). Next: step 8, models from `assets/`.
+
+**After step 8, raise with the author** (asked for on 2026-11-09, not to be worked on before):
+`slides.md` is getting large and hard to navigate. Every slide starts with a long frontmatter
+block before its content, and the content holds syntax such as `<!-- pause -->`. Discuss how
+to make the lecture file easier to find one's way in.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
   HTML job could skip the install, and the offline check, when `lysark site` has
   nothing to build.
-- From step 3: show the deck in the editor panel at the projector's 16:9 shape
-  (letterboxed), so saved views and text size look as in the classroom. The deck has
-  no fixed stage today; see step-3-editor-test.md.
+- Editor panel aids (the author, 2026-11-09), after the scene-file steps: hide the slide
+  text (H), and the classroom 16:9 shape as a toggle (C), which replaces step 3's always-on
+  16:9 proposal. In lysark-v2.md section 7, with what each touches.
+- Slide editing in the panel (2026-11-09): what of PowerPoint fits, in
+  slide-editing-proposal.md. Future proposals fit "slide text stays text"; visual editing
+  of slides is at minimum priority.
 - From step 3: in the panel, change slides with history.replaceState instead of a new
   `#n` entry, so browser Back in github.dev doesn't step through preview slides.
 

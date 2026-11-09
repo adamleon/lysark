@@ -217,6 +217,9 @@ a robot's anchor takes the robot's own frame (see `parent` below).
 
 ## Saving views in the editor
 
+The panel hears its keys (V, J, P, M) only after a click in it. It follows the cursor in
+`slides.md`, but keys typed while the cursor is there go into the text.
+
 - **V on a slide that names a view** (or the camera button, or Scene Actions…) changes that view in
   the scene file. The panel says which slides now fly to it, those that carry it on included. The
   hint at the top of the panel says where V will write, and which slides fly to that view, before

@@ -4,13 +4,12 @@ Step 3 of [lysark-v2.md](lysark-v2.md) designs the scene file format before the 
 named views and poses. **Decided 2026-10-16: all eight decisions as recommended** (recorded in lysark-v2.md section 8).
 It is built in the steps below. Step 1 is released (2026-11-03: extension 0.3.0, engine v2.4.0;
 [editor-host.md](editor-host.md)). Step 2, named views, is released (2026-11-04, engine v2.5.0); the
-format reference is [scene-files.md](scene-files.md). Step 3, Save view as…, is built (2026-11-05,
-engine v2.6.0), to be tried in github.dev before release. Step 4, named poses, is built
-(2026-11-06, engine v2.7.0). Step 5 lands in three parts, as V did across steps 2 and 3: 5a, the
-joint sliders (J) and P, is built (2026-11-06, engine v2.8.0); 5b, Shift+P, "Save pose as…", is
-built (2026-11-07, engine v2.9.0); 5c, dragging the tool with inverse kinematics, is built
-(2026-11-07, engine v2.10.0). Step 6, objects written by hand, is built (2026-11-09, engine
-v2.11.0). Step 7, drag handles for objects, is built (2026-11-09, engine v2.12.0).
+format reference is [scene-files.md](scene-files.md). Steps 3 to 7 are released (2026-11-09) and
+were tried in github.dev on the course lecture the same day: step 3, Save view as… (engine
+v2.6.0); step 4, named poses (v2.7.0); step 5 in three parts, as V did across steps 2 and 3: 5a,
+the joint sliders (J) and P (v2.8.0), 5b, Shift+P, "Save pose as…" (v2.9.0), and 5c, dragging the
+tool with inverse kinematics (v2.10.0); step 6, objects written by hand (v2.11.0); step 7, drag
+handles for objects (v2.12.0). Step 8 is next.
 It came from four independent designs (smallest change, editor-first, lecturer-first,
 engine-first), scored by three reviewers and combined; the claims about today's code were
 checked against the code.
