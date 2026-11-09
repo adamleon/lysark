@@ -4,7 +4,9 @@ import { isMap, isScalar, LineCounter, parseDocument, parse as parseYaml, type P
 import { mergeCameraSpec } from '../engine/camera-merge'
 import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
-import { readSceneFiles, type SceneFile } from './scene-files'
+import type { SceneObject } from '../engine/object-types'
+import { closest } from './closest'
+import { lectureObjects, readSceneFiles, type SceneFile } from './scene-files'
 import { slideRanges, splitLines } from './slide-ranges'
 import { PROFILES, type ProfileName } from '../engine/time-scaling'
 import type {
@@ -85,29 +87,6 @@ function splitSlides(source: string): RawSlide[] {
 
 /** the keys a slide's frontmatter may have; any other is a typo the build reports (decision 8) */
 export const SLIDE_KEYS = ['id', 'scene', 'layout', 'joints', 'camera', 'widgets', 'anchored', 'idle', 'trajectory']
-
-/** the known word closest to `word`, if it is close enough to be a typo of it */
-function closest(word: string, known: readonly string[]): string | undefined {
-  // edits to turn a into b, two letters swapped counting as one (optimal string alignment)
-  const distance = (a: string, b: string) => {
-    const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)))
-    for (let i = 1; i <= a.length; i++) {
-      for (let j = 1; j <= b.length; j++) {
-        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
-        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
-      }
-    }
-    return d[a.length][b.length]
-  }
-  let best: string | undefined
-  let bestDistance = Infinity
-  for (const k of known) {
-    const d = distance(word.toLowerCase(), k.toLowerCase())
-    if (d < bestDistance) [best, bestDistance] = [k, d]
-  }
-  // close enough to be a typo, and not a guess at a word of one letter
-  return bestDistance <= Math.max(1, Math.floor(word.length / 3)) && bestDistance < word.length ? best : undefined
-}
 
 /**
  * Plaintext title from the slide's first markdown heading, for the presenter
@@ -706,6 +685,8 @@ export interface CompiledLecture {
   slides: CompiledSlide[]
   /** images[n] fills every `${IMAGE_TOKEN}n` in the slides' HTML */
   images: ImageRef[]
+  /** the scene files' objects, by the base scene they are in (docs/scene-files.md) */
+  objects: Record<string, SceneObject[]>
 }
 
 export const IMAGE_TOKEN = 'lysark-image:'
@@ -963,5 +944,5 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
     out.push(slide)
   })
 
-  return { slides: out, images }
+  return { slides: out, images, objects: lectureObjects(scenes) }
 }

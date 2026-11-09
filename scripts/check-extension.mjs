@@ -51,6 +51,22 @@ function knowsPoses(editorDir) {
   return buildSays(editorDir, 'outside its limits')
 }
 
+/** true if the editor build knows objects in scene files (engine v2.11.0): the compiler's message for a ring of parents is in its files */
+function knowsObjects(editorDir) {
+  return buildSays(editorDir, 'hang on each other in a ring')
+}
+
+/**
+ * Where a slide of the demo lecture is (0-based), by its id, so the checks
+ * below go to the slide they mean when slides are added to the demo
+ */
+function demoSlide(id) {
+  const ids = [...readFileSync(join(ROOT, 'lectures/demo/slides.md'), 'utf8').matchAll(/^id: *(\S+?) *\r?$/gm)].map((m) => m[1])
+  const index = ids.indexOf(id)
+  if (index < 0) throw new Error(`the demo lecture has no slide '${id}' (its slides: ${ids.join(', ')})`)
+  return index
+}
+
 /** true if one of the editor build's scripts holds `text` */
 function buildSays(editorDir, text) {
   const assets = join(editorDir, 'assets')
@@ -94,14 +110,16 @@ function inlinePoses(slides, sceneText) {
 }
 
 /** a course folder whose workspace settings point the extension at `editorUrl` */
-function makeCourse(editorUrl, namedViews, poses) {
+function makeCourse(editorUrl, namedViews, poses, objects) {
   const dir = mkdtempSync(join(tmpdir(), 'lysark-course-'))
   const lecture = join(dir, 'lectures', 'demo')
   mkdirSync(join(lecture, 'scenes'), { recursive: true })
   mkdirSync(join(dir, 'assets'))
   mkdirSync(join(dir, '.vscode'))
   cpSync(join(ROOT, 'lectures/demo/images'), join(lecture, 'images'), { recursive: true })
-  const arm = readFileSync(join(ROOT, 'lectures/demo/scenes/arm.yaml'), 'utf8')
+  let arm = readFileSync(join(ROOT, 'lectures/demo/scenes/arm.yaml'), 'utf8')
+  // objects come last in the file (their slide's anchors then warn, and the camera stays)
+  if (!objects) arm = arm.replace(/\r?\nobjects:[\s\S]*$/, '\n')
   let slides = readFileSync(join(ROOT, 'lectures/demo/slides.md'), 'utf8')
   // what an older editor doesn't know is written out as numbers
   if (!poses) slides = inlinePoses(slides, arm)
@@ -294,18 +312,24 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
 
     if (!namedViews) lines.push('(named views not checked: this editor has none)')
     else {
-      // slides 2 and 3 of the demo name the view 'overview' (lectures/demo/scenes/arm.yaml)
-      await frame.evaluate(() => {
-        location.hash = '#2'
-      })
+      // the demo's slides 'pid-control' and 'control-loop', one after the other, name the
+      // view 'overview' and the first the pose 'reach' (lectures/demo/scenes/arm.yaml); the
+      // first pendulum slide's scene has no scene file; the KUKA slide's scene file has no poses
+      const overview = demoSlide('pid-control')
+      const pendulum = demoSlide('pendulum-cut')
+      const kuka = demoSlide('agilus-joint')
+      await frame.evaluate((n) => {
+        location.hash = `#${n + 1}`
+      }, overview)
       const settled = await frame
-        .waitForFunction(() => {
+        .waitForFunction((n) => {
           const L = window.__lysark
-          return L.engine.currentIndex === 1 && !L.sceneManager.busy && !L.cameraCtl.active
-        }, null, { timeout: 20_000 })
+          return L.engine.currentIndex === n && !L.sceneManager.busy && !L.cameraCtl.active
+        }, overview, { timeout: 20_000 })
         .then(() => true, () => false)
-      check(settled, 'the panel went to slide 2, which names a view')
-      const cameras = () => frame.evaluate(() => window.__lysark.engine.opts.slides.slice(1, 3).map((s) => JSON.stringify(s.effective.camera)))
+      check(settled, `the panel went to slide ${overview + 1}, which names a view`)
+      const cameras = () =>
+        frame.evaluate((n) => window.__lysark.engine.opts.slides.slice(n, n + 2).map((s) => JSON.stringify(s.effective.camera)), overview)
       const old = await cameras()
       await saveView(frame, 'V')
       frame = (await panelFrame()) ?? frame
@@ -315,25 +339,25 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
         `V on a slide that names a view saved it in scenes/arm.yaml, and both slides that name it took it: ${now[0]}`,
       )
 
-      // Shift+V, Save view as… a new view on the demo's first pendulum slide (7),
+      // Shift+V, Save view as… a new view on the demo's first pendulum slide,
       // whose scene has no scene file: one edit to slides.md that also creates
       // scenes/pendulum.yaml; undoing it takes both back
       if (!saveAs) {
         lines.push('(Save view as… not checked: this editor has none)')
         return ok
       }
-      await frame.evaluate(() => {
+      await frame.evaluate((n) => {
         window.__received = []
         window.addEventListener('message', (e) => window.__received.push(e.data))
-        location.hash = '#7'
-      })
+        location.hash = `#${n + 1}`
+      }, pendulum)
       const onPendulum = await frame
-        .waitForFunction(() => {
+        .waitForFunction((n) => {
           const L = window.__lysark
-          return L.engine.currentIndex === 6 && !L.sceneManager.busy && !L.cameraCtl.active && L.sceneManager.activeSceneId === 'pendulum'
-        }, null, { timeout: 20_000 })
+          return L.engine.currentIndex === n && !L.sceneManager.busy && !L.cameraCtl.active && L.sceneManager.activeSceneId === 'pendulum'
+        }, pendulum, { timeout: 20_000 })
         .then(() => true, () => false)
-      check(onPendulum, 'the panel went to slide 7, whose scene has no scene file')
+      check(onPendulum, `the panel went to slide ${pendulum + 1}, whose scene has no scene file`)
       await frame.evaluate(() => {
         window.__lysark.sceneLayer.camera.position.x += 0.3
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'V', shiftKey: true }))
@@ -349,15 +373,15 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
       })
       await page.waitForTimeout(3500)
       frame = (await panelFrame()) ?? frame
-      const saved = await frame.evaluate(() => ({
-        camera: JSON.stringify(window.__lysark.engine.opts.slides[6].effective.camera),
+      const saved = await frame.evaluate((n) => ({
+        camera: JSON.stringify(window.__lysark.engine.opts.slides[n].effective.camera),
         files: (window.__received ?? []).filter((m) => m?.type === 'lysark:source').map((m) => Object.keys(m.files)),
-      }))
+      }), pendulum)
       // the new file in the Explorer (its scenes/ folder is open from the step above)
       const pendulumFile = () => page.locator('.explorer-folders-view .monaco-list-row', { hasText: 'pendulum.yaml' }).count()
       check(
         saved.files.some((keys) => keys.includes('scenes/pendulum.yaml')) && saved.camera !== undefined && (await pendulumFile()) > 0,
-        `a new view saved by Shift+V created scenes/pendulum.yaml with slides.md, updating the panel in place; slide 7 flies to it: ${saved.camera}`,
+        `a new view saved by Shift+V created scenes/pendulum.yaml with slides.md, updating the panel in place; slide ${pendulum + 1} flies to it: ${saved.camera}`,
       )
 
       // undo it in slides.md: VS Code may ask whether to undo in both files
@@ -370,31 +394,31 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
       if (asked) await page.locator('.monaco-dialog-box .monaco-button').first().click()
       await page.waitForTimeout(4000)
       frame = (await panelFrame()) ?? frame
-      const undoneCamera = await frame.evaluate(() => JSON.stringify(window.__lysark.engine.opts.slides[6].effective.camera))
+      const undoneCamera = await frame.evaluate((n) => JSON.stringify(window.__lysark.engine.opts.slides[n].effective.camera), pendulum)
       const fileLeft = await pendulumFile()
       check(
         undoneCamera !== saved.camera && fileLeft === 0,
-        `undoing it in slides.md took both back: slide 7's camera ${undoneCamera}, scenes/pendulum.yaml ${fileLeft === 0 ? 'gone' : 'still there'}` +
+        `undoing it in slides.md took both back: slide ${pendulum + 1}'s camera ${undoneCamera}, scenes/pendulum.yaml ${fileLeft === 0 ? 'gone' : 'still there'}` +
           (asked ? `; VS Code asked "${question.slice(0, 160)}" (first button taken)` : '; VS Code asked nothing'),
       )
 
-      // J and P on the demo's slide 2, which names the pose 'reach'
+      // J and P on the demo's slide 'pid-control', which names the pose 'reach'
       // (lectures/demo/scenes/arm.yaml): the slider moves the arm at once, and P
       // changes the pose in the scene file, which the panel takes in place
       if (!posePanel) {
         lines.push('(the joint sliders and P not checked: this editor has none)')
         return ok
       }
-      await frame.evaluate(() => {
+      await frame.evaluate((n) => {
         window.__received = []
         window.addEventListener('message', (e) => window.__received.push(e.data))
-        location.hash = '#2'
-      })
+        location.hash = `#${n + 1}`
+      }, overview)
       const onArm = await frame
-        .waitForFunction(() => {
+        .waitForFunction((n) => {
           const L = window.__lysark
-          return L.engine.currentIndex === 1 && !L.sceneManager.busy && L.sceneManager.activeSceneId === 'arm'
-        }, null, { timeout: 20_000 })
+          return L.engine.currentIndex === n && !L.sceneManager.busy && L.sceneManager.activeSceneId === 'arm'
+        }, overview, { timeout: 20_000 })
         .then(() => true, () => false)
       const jogged = await frame.evaluate(() => {
         document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))
@@ -405,43 +429,43 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
         input.dispatchEvent(new Event('input', { bubbles: true }))
         return window.__lysark.sceneManager.active.channels.joint2.x
       })
-      check(onArm && jogged === 0.5, `on slide 2, J showed the joint sliders and joint2's moved the arm at once: ${jogged}`)
+      check(onArm && jogged === 0.5, `on slide ${overview + 1}, J showed the joint sliders and joint2's moved the arm at once: ${jogged}`)
       await frame.evaluate(() => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true })))
       await page.waitForTimeout(3500)
       const posed = await frame
-        .evaluate(() => ({
+        .evaluate((n) => ({
           // a panel loaded afresh would have lost what this page recorded
           inPlace: Array.isArray(window.__received),
-          joints: window.__lysark.engine.opts.slides.slice(1, 3).map((s) => s.effective.joints.joint2),
+          joints: window.__lysark.engine.opts.slides.slice(n, n + 2).map((s) => s.effective.joints.joint2),
           arm: (window.__received ?? []).filter((m) => m?.type === 'lysark:source').map((m) => m.files['scenes/arm.yaml']).pop() ?? '',
-        }))
+        }), overview)
         .catch(() => ({ inPlace: false, joints: [], arm: '' }))
       check(
         posed.inPlace && /reach: \[0\.9, 0\.5, -1\.5\]/.test(posed.arm) && posed.joints.every((q) => q === 0.5),
-        `P changed the pose 'reach' in scenes/arm.yaml, in place; slides 2 and 3 take joint2 ${JSON.stringify(posed.joints)}`,
+        `P changed the pose 'reach' in scenes/arm.yaml, in place; slides ${overview + 1} and ${overview + 2} take joint2 ${JSON.stringify(posed.joints)}`,
       )
 
-      // Shift+P on the demo's KUKA slide (10): a new pose in scenes/agilus.yaml,
+      // Shift+P on the demo's KUKA slide 'agilus-joint': a new pose in scenes/agilus.yaml,
       // which has no poses yet, named on the slide; one edit to both files
       if (!savePoseAs) {
         lines.push('(Save pose as… not checked: this editor has none)')
         return ok
       }
-      await frame.evaluate(() => {
+      await frame.evaluate((n) => {
         window.__received = []
-        location.hash = '#10'
-      })
+        location.hash = `#${n + 1}`
+      }, kuka)
       const onKuka = await frame
-        .waitForFunction(() => {
+        .waitForFunction((n) => {
           const L = window.__lysark
-          return L.engine.currentIndex === 9 && !L.sceneManager.busy && L.sceneManager.activeSceneId === 'agilus'
-        }, null, { timeout: 30_000 })
+          return L.engine.currentIndex === n && !L.sceneManager.busy && L.sceneManager.activeSceneId === 'agilus'
+        }, kuka, { timeout: 30_000 })
         .then(() => true, () => false)
       await frame.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', shiftKey: true, bubbles: true })))
       const poseDialog = await frame
         .waitForSelector('[role="dialog"] input', { timeout: 10_000 })
         .then(() => true, () => false)
-      check(onKuka && poseDialog, 'on slide 10, Shift+P opened the Save pose as… dialog')
+      check(onKuka && poseDialog, `on slide ${kuka + 1}, Shift+P opened the Save pose as… dialog`)
       await frame.evaluate(() => {
         const input = document.querySelector('[role="dialog"] input')
         input.focus()
@@ -450,15 +474,15 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
       })
       await page.waitForTimeout(3500)
       const gripped = await frame
-        .evaluate(() => ({
+        .evaluate((n) => ({
           inPlace: Array.isArray(window.__received),
-          joints: JSON.stringify(window.__lysark.engine.opts.slides[9].effective.joints),
+          joints: JSON.stringify(window.__lysark.engine.opts.slides[n].effective.joints),
           agilus: (window.__received ?? []).filter((m) => m?.type === 'lysark:source').map((m) => m.files['scenes/agilus.yaml']).pop() ?? '',
-        }))
+        }), kuka)
         .catch(() => ({ inPlace: false, joints: '', agilus: '' }))
       check(
         gripped.inPlace && /\n {2}grip: \[/.test(gripped.agilus) && /"joint_6"/.test(gripped.joints),
-        `Shift+P saved a new pose 'grip' in scenes/agilus.yaml, in place; slide 10's joints ${gripped.joints}`,
+        `Shift+P saved a new pose 'grip' in scenes/agilus.yaml, in place; slide ${kuka + 1}'s joints ${gripped.joints}`,
       )
     }
   } else {
@@ -479,7 +503,8 @@ async function checkExtension(editorDir) {
   const site = await serveEditor(editorDir)
   const namedViews = knowsNamedViews(editorDir)
   const poses = knowsPoses(editorDir)
-  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews, poses)
+  const objects = knowsObjects(editorDir)
+  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews, poses, objects)
   let stopTestWeb
   let browser
   let ok = false

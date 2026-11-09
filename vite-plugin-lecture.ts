@@ -1,7 +1,7 @@
 import { normalizePath, type Plugin, type ViteDevServer } from 'vite'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { compileSlides } from './src/compiler/compile-slides'
+import { compileLecture } from './src/compiler/compile-slides'
 import { SCENE_NAMES } from './src/scenes/registry'
 import { lectureSceneFiles } from './vite-plugin-slides'
 
@@ -76,7 +76,7 @@ function escapeHtml(s: string): string {
 function deckModuleCode(engineRoot: string, lectureDir: string): string {
   const slidesPath = join(lectureDir, 'slides.md')
   // a scene file names the engine scene it builds on: the slides then name that one
-  const slides = compileSlides(readFileSync(slidesPath, 'utf8'), lectureSceneFiles(lectureDir))
+  const { slides, objects } = compileLecture(readFileSync(slidesPath, 'utf8'), lectureSceneFiles(lectureDir))
   const known = new Set<string>(SCENE_NAMES)
   const used: string[] = []
   for (const slide of slides) {
@@ -92,11 +92,13 @@ function deckModuleCode(engineRoot: string, lectureDir: string): string {
   const engine = (rel: string) => JSON.stringify(normalizePath(join(engineRoot, rel)))
   const imports = used.map((name, i) => `import scene${i} from ${engine(`src/scenes/${name}.ts`)}`)
   const entries = used.map((name, i) => `${JSON.stringify(name)}: scene${i}`)
+  // the scene files' objects, as data, for the scenes the slides run
+  const placed = Object.fromEntries(Object.entries(objects).filter(([scene]) => used.includes(scene)))
   return [
     `import { defineDeck } from ${engine('src/engine/deck.ts')}`,
     ...imports,
     `import slides from ${JSON.stringify(normalizePath(slidesPath))}`,
-    `export default defineDeck({ scenes: { ${entries.join(', ')} }, slides })`,
+    `export default defineDeck({ scenes: { ${entries.join(', ')} }, slides, objects: ${JSON.stringify(placed)} })`,
   ].join('\n')
 }
 

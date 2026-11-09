@@ -15,3 +15,24 @@ views:
 poses:                       # radians
   reach: [0.9, 1.1, -1.5]    # every joint, in order: joint1, joint2, joint3
   low: { joint2: 0.3 }       # only the joints it names
+
+objects:                     # things in the scene (from v2.11.0), in metres and degrees
+  table:                     # a work table beside the arm, out of its reach (0.65 m)
+    box: [0.4, 0.3, 0.4]     # width, height, depth
+    at: [0.62, 0, -0.69]     # the middle of its underside, on the floor (y is up)
+    rotate: 48               # turned 48 degrees about the vertical, to face the arm
+    material: wood
+  part:                      # a workpiece on the table: at is in the table's frame
+    cylinder: [0.07, 0.1]    # diameter, height
+    at: [0, 0.3, 0]          # on the table's top
+    parent: table
+    material: blue
+  grip:                      # no shape: an invisible point, on top of the part
+    at: [0, 0.1, 0]
+    parent: part
+  base frame:                # the robot's base frame: on its anchor, z is up
+    frame: 0.3               # the length of the axes
+    parent: base
+  tool frame:                # moves with the end effector
+    frame: 0.1
+    parent: end_effector

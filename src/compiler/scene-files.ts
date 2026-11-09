@@ -1,12 +1,15 @@
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, visit, type Node, type Pair } from 'yaml'
 import type { CameraTargetSpec } from '../engine/slide-types'
+import { OBJECT_MATERIALS, OBJECT_SHAPES, type ObjectMaterial, type ObjectShape, type SceneObject } from '../engine/object-types'
+import { SCENE_ANCHORS } from '../scenes/anchors'
 import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
+import { closest } from './closest'
 
 /**
  * A lecture's scene files (scene-files-proposal.md, docs/scene-files.md):
  * `scenes/<name>.yaml` next to slides.md, building on one of the engine's
- * scenes and adding named camera views. The compiler never reads files: the
+ * scenes and adding named camera views, robot poses and objects. The compiler never reads files: the
  * caller passes their text in, keyed by path (`scenes/agilus.yaml`), and this
  * checks them, with the file and line in every error.
  */
@@ -27,6 +30,8 @@ export interface SceneFile {
   base: string
   views: Map<string, NamedView>
   poses: Map<string, NamedPose>
+  /** the objects it adds to its base scene, parents before the objects on them */
+  objects: SceneObject[]
 }
 
 /** a named pose: the joints it sets, by name; a list in the file sets them all, in order */
@@ -53,7 +58,8 @@ function suggestName(name: string): string {
     .replace(/^[^a-z]+|-+$/g, '')
   return plain || 'scene'
 }
-const TOP_KEYS = ['base', 'views', 'poses']
+type SceneName = (typeof SCENE_NAMES)[number]
+const TOP_KEYS = ['base', 'views', 'poses', 'objects']
 const VIEW_KEYS = ['lookAt', 'offset', 'spring']
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -80,6 +86,26 @@ export function readSceneFiles(files: Record<string, string>): Map<string, Scene
     if (twin) throw new Error(`${twin.path} and ${path} are both scene '${file.name}'; keep one of them`)
     out.set(file.name, file)
   }
+  // scene files with the same base are one running scene, with one set of objects
+  const withObjects = new Map<string, SceneFile>()
+  for (const file of out.values()) {
+    if (file.objects.length === 0) continue
+    const other = withObjects.get(file.base)
+    if (other) {
+      throw new Error(
+        `${other.path} and ${file.path} both have objects, and both build on '${file.base}'. Slides with either scene ` +
+          `are one running scene, with one set of objects: keep the objects in one of the files`,
+      )
+    }
+    withObjects.set(file.base, file)
+  }
+  return out
+}
+
+/** the objects of each running scene, by its base (`arm`, `agilus`), from the lecture's scene files */
+export function lectureObjects(scenes: Map<string, SceneFile>): Record<string, SceneObject[]> {
+  const out: Record<string, SceneObject[]> = {}
+  for (const file of scenes.values()) if (file.objects.length > 0) out[file.base] = file.objects
   return out
 }
 
@@ -115,7 +141,8 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
   for (const p of root.items as Pair<Node, Node>[]) {
     const key = isScalar(p.key) ? p.key.value : undefined
     if (typeof key !== 'string' || !TOP_KEYS.includes(key)) {
-      fail(p.key, `unknown key '${String(key)}'. A scene file has 'base', 'views' and 'poses'`)
+      const guess = typeof key === 'string' ? closest(key, TOP_KEYS) : undefined
+      fail(p.key, `unknown key '${String(key)}'.${guess ? ` Did you mean '${guess}'?` : ''} A scene file has 'base', 'views', 'poses' and 'objects'`)
     }
   }
 
@@ -174,7 +201,7 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
   if (posesPair && posesPair.value !== null && !(isScalar(posesPair.value) && posesPair.value.value === null)) {
     const map = posesPair.value
     if (!isMap(map)) fail(map, "'poses' is a mapping of names to poses")
-    const joints = SCENE_JOINTS[base as (typeof SCENE_NAMES)[number]]
+    const joints = SCENE_JOINTS[base as SceneName]
     const names = joints.map((j) => j.name)
     // limits are shown to 3 decimals, rounded inward, so every value the message allows is
     // allowed (the 1e-6 slack is the check's own 1e-9 rad, and keeps 0.785 from showing as 0.784)
@@ -221,5 +248,207 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
       poses.set(poseName as string, { joints: set, line: lineOf(p.key) })
     }
   }
-  return { path, name, base: base as string, views, poses }
+  const objects = readObjects(pair(root, 'objects'), base as SceneName, fail)
+  return { path, name, base: base as string, views, poses, objects }
+}
+
+type Fail = (node: unknown, message: string) => never
+
+/** what each shape's size is, for its error */
+const SIZE_OF: Record<(typeof OBJECT_SHAPES)[number], string> = {
+  box: 'box must be [width, height, depth], in metres (positive numbers)',
+  cylinder: 'cylinder must be [diameter, height], in metres (positive numbers)',
+  sphere: 'sphere must be its diameter, in metres (a positive number)',
+  frame: 'frame must be the length of its axes, in metres (a positive number)',
+}
+const OBJECT_KEYS = [...OBJECT_SHAPES, 'at', 'rotate', 'material', 'parent']
+/** words from other tools for an object's keys */
+const OBJECT_KEY_ALIASES: Record<string, string> = {
+  position: 'at',
+  pos: 'at',
+  location: 'at',
+  rotation: 'rotate',
+  orientation: 'rotate',
+  color: 'material',
+  colour: 'material',
+}
+/** anything larger, or farther out, is metres written as millimetres (the floor grid is 5 m across) */
+const MAX_METRES = 10
+
+/** the file's `objects:`, checked, parents before the objects on them */
+function readObjects(objectsPair: Pair<Node, Node> | undefined, base: SceneName, fail: Fail): SceneObject[] {
+  if (!objectsPair || objectsPair.value === null || (isScalar(objectsPair.value) && objectsPair.value.value === null)) return []
+  const map = objectsPair.value
+  if (!isMap(map)) fail(map, "'objects' is a mapping of names to objects")
+  const { anchors, parents } = SCENE_ANCHORS[base]
+  const read: Array<{ object: SceneObject; node: Node }> = []
+  const pairs = (map as { items: Pair<Node, Node>[] }).items
+  const names = pairs.map((p) => (isScalar(p.key) ? p.key.value : undefined))
+  for (const p of pairs) {
+    const objectName = isScalar(p.key) ? p.key.value : undefined
+    if (typeof objectName !== 'string' || objectName.trim() === '' || objectName !== objectName.trim()) {
+      fail(p.key, `an object's name is a word or two, such as 'table' (got ${JSON.stringify(objectName)})`)
+    }
+    const name = objectName as string
+    const where = `object '${name}'`
+    if (anchors.includes(name)) {
+      fail(p.key, `${where} has the name of an anchor of '${base}' (${anchors.join(', ')}): slides look at and label both by name, so give the object another`)
+    }
+    // the scene keeps its anchors by name in a plain object, where these names are taken
+    if (name in Object.prototype) fail(p.key, `${where} has a name JavaScript keeps for itself: give the object another`)
+    const v = p.value
+    const empty = v === null || (isScalar(v) && v.value === null) || (isMap(v) && v.items.length === 0)
+    if (empty) {
+      fail(v ?? p.key, `${where} has nothing in it: give it a shape (box, cylinder, sphere or frame) and where it is, at: [x, y, z]. With only at, it is an invisible point`)
+    }
+    if (!isMap(v)) fail(v, `${where} is a mapping: a shape (box, cylinder, sphere or frame) and where it is, at: [x, y, z]`)
+    const entries = (v as { items: Pair<Node, Node>[] }).items
+    const valueOf = (key: string) => entries.find((q) => isScalar(q.key) && q.key.value === key)
+    for (const q of entries) {
+      const key = isScalar(q.key) ? q.key.value : undefined
+      if (typeof key === 'string' && OBJECT_KEYS.includes(key)) continue
+      const known = 'An object has a shape (box, cylinder, sphere or frame), at, rotate, material and parent'
+      const alias = typeof key === 'string' && Object.hasOwn(OBJECT_KEY_ALIASES, key.toLowerCase()) ? OBJECT_KEY_ALIASES[key.toLowerCase()] : undefined
+      const guess = typeof key === 'string' ? (alias ?? closest(key, OBJECT_KEYS)) : undefined
+      if (key === 'size') fail(q.key, `${where} has 'size': write the size with the shape, such as box: [0.4, 0.2, 0.4]. ${known}`)
+      fail(q.key, `${where} has unknown key '${String(key)}'.${guess ? ` Did you mean '${guess}'?` : ''} ${known}`)
+    }
+    const shapes = OBJECT_SHAPES.filter((shape) => valueOf(shape))
+    if (shapes.length > 1) fail(valueOf(shapes[1])!.key, `${where} has both ${shapes[0]} and ${shapes[1]}: one shape per object`)
+    const shape: ObjectShape = shapes.length > 0 ? shapes[0] : 'point'
+    const metres = (value: number, node: unknown, what: string) => {
+      if (Math.abs(value) > MAX_METRES) {
+        fail(node, `${where} ${what} has ${value}, which is ${value} m: sizes and places are in metres (${value} mm is ${value / 1000})`)
+      }
+    }
+
+    let size: number[] = []
+    if (shape !== 'point') {
+      const node = valueOf(shape)!.value
+      const count = shape === 'box' ? 3 : shape === 'cylinder' ? 2 : 1
+      // each number with its own node, so an error names the line of the one that is wrong
+      const items: Array<{ value: unknown; node: unknown }> =
+        count === 1
+          ? [{ value: isScalar(node) ? node.value : undefined, node }]
+          : isSeq(node) && node.items.length === count
+            ? node.items.map((item) => ({ value: isScalar(item) ? item.value : undefined, node: item }))
+            : fail(node ?? p.key, `${where} ${SIZE_OF[shape]}`)
+      for (const item of items) {
+        if (!isFiniteNumber(item.value) || item.value <= 0) fail(item.node ?? node ?? p.key, `${where} ${SIZE_OF[shape]}`)
+        metres(item.value as number, item.node, shape)
+      }
+      size = items.map((item) => item.value as number)
+    }
+
+    /** in a list of three, the first item that isn't a number, whose line an error names; otherwise the node */
+    const wrongIn = (node: unknown): unknown => {
+      if (!isSeq(node) || node.items.length !== 3) return node
+      const k = node.items.findIndex((item) => !isScalar(item) || !isFiniteNumber(item.value))
+      return k < 0 ? node : (node.items[k] ?? node)
+    }
+
+    let at: [number, number, number] = [0, 0, 0]
+    const atPair = valueOf('at')
+    if (atPair) {
+      const raw = (atPair.value as { toJSON?(): unknown } | null)?.toJSON?.()
+      const what = shape === 'point' ? 'the point' : shape === 'frame' ? 'its origin' : 'the middle of its underside'
+      if (!isVec3(raw)) fail(wrongIn(atPair.value) ?? atPair.key, `${where} at must be [x, y, z], in metres: ${what}`)
+      at = raw as [number, number, number]
+      const items = isSeq(atPair.value) ? atPair.value.items : []
+      at.forEach((n, k) => metres(n, items[k] ?? atPair.value, 'at'))
+    }
+
+    let rotate: [number, number, number] = [0, 0, 0]
+    const rotatePair = valueOf('rotate')
+    if (rotatePair) {
+      const node = rotatePair.value
+      const raw = isScalar(node) ? node.value : (node as { toJSON?(): unknown } | null)?.toJSON?.()
+      if (isFiniteNumber(raw)) rotate = [0, raw, 0]
+      else if (isVec3(raw)) rotate = raw
+      else {
+        fail(
+          wrongIn(node) ?? rotatePair.key,
+          `${where} rotate must be degrees about y (a number, such as 90: about the vertical, or the parent's y), or about x, y and z ([0, 90, 0])`,
+        )
+      }
+    }
+
+    let material: ObjectMaterial | undefined
+    const materialPair = valueOf('material')
+    if (materialPair) {
+      if (shape === 'frame') fail(materialPair.key, `${where} is a frame, drawn in the axis colours (x red, y green, z blue): it has no material`)
+      if (shape === 'point') {
+        fail(materialPair.key, `${where} has no shape, so it is an invisible point: it has no material. Give it a shape, such as box: [0.1, 0.1, 0.1]`)
+      }
+      const value = isScalar(materialPair.value) ? materialPair.value.value : undefined
+      if (typeof value !== 'string' || !(OBJECT_MATERIALS as readonly string[]).includes(value)) {
+        const guess = typeof value === 'string' ? closest(value, OBJECT_MATERIALS) : undefined
+        fail(
+          materialPair.value ?? materialPair.key,
+          `${where} material '${String(value)}' isn't one of the colours.${guess ? ` Did you mean '${guess}'?` : ''} The colours: ${OBJECT_MATERIALS.join(', ')}`,
+        )
+      }
+      material = value as ObjectMaterial
+    }
+
+    let parent: string | undefined
+    const parentPair = valueOf('parent')
+    if (parentPair) {
+      const value = isScalar(parentPair.value) ? parentPair.value.value : undefined
+      const node = parentPair.value ?? parentPair.key
+      const others = names.filter((n): n is string => typeof n === 'string' && n !== name)
+      // in agilus-duo no anchor can be a parent: say so, rather than offer them
+      const what =
+        parents.length > 0
+          ? `another object in this file, or an anchor of '${base}' (${parents.join(', ')})`
+          : `another object in this file (in '${base}' objects can't hang on the robots)`
+      if (typeof value !== 'string' || value === '') fail(node, `${where} parent must be the name of ${what}`)
+      if (value === name) fail(node, `${where} can't be its own parent`)
+      if (anchors.includes(value as string) && !parents.includes(value as string)) {
+        fail(node, `${where} has the parent '${value as string}', but in '${base}' objects can't hang on the robots (a slide can draw robot 0 as the ghost). Leave out parent, and the object stands in the scene`)
+      }
+      if (!others.includes(value as string) && !parents.includes(value as string)) {
+        const guess = closest(value as string, [...others, ...parents])
+        fail(
+          node,
+          `${where} has the parent '${value as string}', which is ${parents.length > 0 ? `neither an object in this file nor an anchor of '${base}'` : 'not an object in this file'}.` +
+            `${guess ? ` Did you mean '${guess}'?` : ''} The parent is ${what}`,
+        )
+      }
+      parent = value as string
+    }
+    const object: SceneObject = { name, shape, size, at, rotate }
+    if (shape !== 'point' && shape !== 'frame') object.material = material ?? 'grey'
+    if (parent !== undefined) object.parent = parent
+    read.push({ object, node: p.key })
+  }
+
+  // parents first, each object after the one it hangs on, otherwise in the file's order
+  const out: SceneObject[] = []
+  const placed = new Set<string>()
+  let left = read
+  while (left.length > 0) {
+    const ready = left.filter(({ object }) => object.parent === undefined || parents.includes(object.parent) || placed.has(object.parent))
+    if (ready.length === 0) {
+      // every object left hangs on another one left: follow the parents until one comes round
+      // again, and name only the ring (not the objects that merely hang on it), in the file's order
+      const byName = new Map(left.map((entry) => [entry.object.name, entry]))
+      const path: string[] = []
+      let step = left[0]
+      while (!path.includes(step.object.name)) {
+        path.push(step.object.name)
+        step = byName.get(step.object.parent!)!
+      }
+      const ring = path.slice(path.indexOf(step.object.name))
+      const members = left.filter(({ object }) => ring.includes(object.name))
+      const names = members.map(({ object }) => `'${object.name}'`).join(', ')
+      fail(members[0].node, `the objects ${names} hang on each other in a ring: one of them must stand in the scene (no parent), or on an anchor`)
+    }
+    for (const { object } of ready) {
+      out.push(object)
+      placed.add(object.name)
+    }
+    left = left.filter((entry) => !ready.includes(entry))
+  }
+  return out
 }

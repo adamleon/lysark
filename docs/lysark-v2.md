@@ -495,6 +495,12 @@ HTTPS server.
   at the robot's tool (arm, KUKA) drags the tool; inverse kinematics moves the joints, which P and
   Shift+P save. The arm's scene gains the position IK the KUKA's has (a small engine change).
   Engine v2.10.0, no extension change. [scene-files.md](scene-files.md).
+- Scene files, step 6 (2026-11-09, built, not yet released): `objects:` in a scene file, written
+  by hand: boxes, cylinders, spheres, coordinate frames and invisible points, placed with `at`
+  and `rotate`, coloured with a `material` preset (a theme token each), and hung on another
+  object or a robot anchor with `parent`. Each object is an anchor slides look at and label. The
+  editor panel loads afresh when an object changes. Engine v2.11.0, no extension change.
+  [scene-files.md](scene-files.md#objects).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).

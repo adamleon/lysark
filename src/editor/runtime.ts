@@ -1,4 +1,5 @@
 import { compileLecture } from '../compiler/compile-slides'
+import { lectureObjects, readSceneFiles } from '../compiler/scene-files'
 import type { CameraTargetSpec } from '../engine/slide-types'
 import { SCENE_NAMES } from '../scenes/registry'
 import { viewNameProblem, type CameraView } from './camera-edit'
@@ -202,6 +203,8 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
   if (!engine) return false
   // the same module instance the deck was built from (it stands in for virtual:lysark-deck)
   const { default: deck } = await import('./deck-from-source')
+  // objects are built into their scene once, when it is first shown: changed ones need the fresh page
+  if (JSON.stringify(lectureObjects(readSceneFiles(files))) !== JSON.stringify(deck.objects ?? {})) return false
   const fresh = compileForEditor(files['slides.md'], images, files)
   const i = engine.currentIndex
   const next: CameraTargetSpec | undefined = fresh[i]?.effective.camera

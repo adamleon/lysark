@@ -1,3 +1,4 @@
+import { lectureObjects, readSceneFiles } from '../compiler/scene-files'
 import { defineDeck } from '../engine/deck'
 import { ALL_SCENES } from '../scenes/all'
 import { compileForEditor } from './editor-compile'
@@ -24,4 +25,9 @@ const WAITING = '---\nlayout: center\n---\n## Waiting for the lecture text from 
 
 const files = window.__LYSARK_FILES__ ?? { 'slides.md': WAITING }
 
-export default defineDeck({ scenes: ALL_SCENES, slides: compileForEditor(files['slides.md'] ?? WAITING, window.__LYSARK_IMAGES__, files) })
+export default defineDeck({
+  scenes: ALL_SCENES,
+  slides: compileForEditor(files['slides.md'] ?? WAITING, window.__LYSARK_IMAGES__, files),
+  // the scene files' objects (runtime.ts loads the panel afresh when they change)
+  objects: lectureObjects(readSceneFiles(files)),
+})

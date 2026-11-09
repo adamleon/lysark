@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { themeColor } from '../theme'
 import type { SceneLayer } from '../scene/scene-layer'
 import { disposeSceneGraph } from '../scene/dispose'
+import { addObjects } from '../scene/objects'
+import type { SceneObject } from './object-types'
 import type { MotionSystem } from './motion-system'
 import type { SceneInstance, SceneModule } from './scene-types'
 
@@ -37,6 +39,8 @@ export class SceneManager {
     private readonly motion: MotionSystem,
     private readonly modules: Record<string, SceneModule>,
     private readonly container: HTMLElement,
+    /** the lecture's objects, by scene: added to each scene when it is first built */
+    private readonly objects: Record<string, SceneObject[]> = {},
   ) {}
 
   get active(): SceneInstance | null {
@@ -125,6 +129,9 @@ export class SceneManager {
     let instance = this.instances.get(sceneId)
     if (!instance) {
       instance = await module.build()
+      // the lecture's objects (scene files) are part of the scene from now on,
+      // kept and swept with it, and its anchors by their names
+      addObjects(instance, this.objects[sceneId] ?? [])
       this.instances.set(sceneId, instance)
       if (!instance.defaults.camera?.lookAt || !instance.defaults.camera.offset) {
         console.warn(

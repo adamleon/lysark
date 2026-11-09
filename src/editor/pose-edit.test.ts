@@ -353,6 +353,20 @@ describe('pose text edits for save pose as', () => {
     expect(() => addNamedPose('base: arm\nposes:\n  q0: [1, 1, 1]\n', 'q0', [0, 0, 0], ARM)).toThrow("already has a pose 'q0'")
   })
 
+  it('adds a pose to a file with objects, which stay as they are', () => {
+    const objects = 'objects:\n  table:\n    box: [0.4, 0.3, 0.4]\n    at: [0.4, 0, -0.45]\n  tool frame: { frame: 0.1, parent: end_effector }\n'
+    const before = readSceneFiles({ 'scenes/arm.yaml': `base: arm\nposes:\n  a: [1, 1, 1]\n${objects}` }).get('arm')!.objects
+    const among = addNamedPose(`base: arm\nposes:\n  a: [1, 1, 1]\n${objects}`, 'q0', [0, 0.6, -1], ARM)
+    expect(among).toBe(`base: arm\nposes:\n  a: [1, 1, 1]\n  q0: [0, 0.6, -1]\n${objects}`)
+    const after = addNamedPose(`base: arm\n${objects}`, 'q0', [0, 0.6, -1], ARM)
+    expect(after.startsWith(`base: arm\n${objects}`)).toBe(true)
+    for (const text of [among, after]) {
+      const scene = readSceneFiles({ 'scenes/arm.yaml': text }).get('arm')!
+      expect(scene.poses.get('q0')!.joints).toEqual({ joint1: 0, joint2: 0.6, joint3: -1 })
+      expect(scene.objects).toEqual(before)
+    }
+  })
+
   it('writes a new scene file the compiler reads', () => {
     const text = newPoseSceneFile('agilus', 'grip', [0, -1.25, 0.9, 0, 0.9, 0], sceneJoints('agilus').map((j) => j.name))
     expect(readSceneFiles({ 'scenes/agilus.yaml': text }).get('agilus')!.poses.get('grip')!.joints).toMatchObject({ joint_2: -1.25, joint_6: 0 })

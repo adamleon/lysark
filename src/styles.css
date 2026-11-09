@@ -38,6 +38,19 @@
   --plot-joint-4: #ffd43b;
   --plot-joint-5: #cc5de8;
   --plot-joint-6: #ff922b;
+  /* objects in scene files (docs/scene-files.md): their colours, and a frame's axes */
+  --object-grey: #8d8a92;
+  --object-white: #e8e4dc;
+  --object-black: #2b2930;
+  --object-red: #d64545;
+  --object-yellow: #e8b931;
+  --object-green: #3fa860;
+  --object-blue: #3d7fd9;
+  --object-wood: #b07a46;
+  --object-metal: #a9adb3;
+  --frame-x: #ff5c5c;
+  --frame-y: #4cd07a;
+  --frame-z: #4d9bff;
 }
 
 /* Print theme, used only by the PDF build (lysark-v2.md step 2): white page and
@@ -77,6 +90,10 @@
   --plot-joint-4: #a66f00;
   --plot-joint-5: #9c36b5;
   --plot-joint-6: #d9480f;
+  --object-white: #dcd9e0; /* a little grey, so its lit top doesn't vanish into the page */
+  --frame-x: #c92a2a;
+  --frame-y: #2b8a3e;
+  --frame-z: #1864ab;
 }
 
 html,

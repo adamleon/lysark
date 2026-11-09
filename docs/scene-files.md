@@ -1,10 +1,10 @@
 # Scene files
 
 How to give a lecture its own named camera views (from engine v2.5.0) and robot poses (from
-v2.7.0), and to pose the robot in the editor (from v2.8.0; Save pose as… from v2.9.0, dragging
-the tool from v2.10.0): steps 2 to 5 of
+v2.7.0), to pose the robot in the editor (from v2.8.0; Save pose as… from v2.9.0, dragging
+the tool from v2.10.0), and to add objects to a scene (from v2.11.0): steps 2 to 6 of
 [scene-files-proposal.md](scene-files-proposal.md). Written for the author; no engine knowledge
-needed. Objects come in a later step.
+needed.
 
 ## In short
 
@@ -56,7 +56,8 @@ poses:                       # q in radians
 ```
 
 - **`base`** (required): the engine scene, one of `arm`, `pendulum`, `agilus`, `agilus-duo`. A file
-  with only `base: agilus` is exactly the engine scene.
+  with only `base: agilus` is exactly the engine scene, but for the objects another of the
+  lecture's files with that base may add (see [Objects](#objects)).
 - **`views`**: names, each a whole camera:
   - `lookAt`: the point the camera looks at, `[x, y, z]`, or the name of an anchor of the scene
     (such as `tool0`), which the camera then follows.
@@ -76,14 +77,16 @@ poses:                       # q in radians
   | `arm` | joint1, joint2, joint3 |
   | `pendulum` | swing |
   | `agilus`, `agilus-duo` | joint_1, joint_2, joint_3, joint_4, joint_5, joint_6 |
+- **`objects`** (from v2.11.0): boxes, cylinders, spheres, coordinate frames and invisible points
+  in the scene; see [Objects](#objects).
 - **View and pose names** can be any word, Norwegian letters included. Comments (`#`) are fine
   anywhere, and the editor keeps them.
 - **The file's name** is lower-case letters, digits and dashes, starting with a letter, and ends in
   `.yaml` or `.yml` (`agilus.yaml`, `robot-celle.yaml`): it is the name slides use in `scene:`, and
   the editor can save only into such files. The build says so, with a name to use, for any other.
 - `.yml` works as well as `.yaml`, but one scene can have only one file.
-- **Values are written out in each view.** YAML's shortcuts for sharing values (`*name`, `<<:`)
-  aren't allowed: saving one view must change only that view. (A bare `&name` shares nothing and is
+- **Values are written out in each view, pose and object.** YAML's shortcuts for sharing values
+  (`*name`, `<<:`) aren't allowed: saving one view must change only that view. (A bare `&name` shares nothing and is
   kept as written.)
 
 ## Using a view in a slide
@@ -117,7 +120,95 @@ The file's name is the name slides use, and its `base` is the scene that runs. S
 file's views. Usually the file is simply named after its base, as `scenes/agilus.yaml` is.
 Scene files with the same base are the same running scene: slides with `scene: celle-a` and then
 `scene: celle-b`, both built on `agilus`, are one run of the KUKA, and joints and camera carry
-across, as within one scene.
+across, as within one scene. So do slides that name the engine scene `agilus` itself: the
+objects of whichever of the lecture's files built on `agilus` has them are on all of them.
+
+## Objects
+
+From engine v2.11.0. A scene file can add simple things to its scene under `objects:`: tables,
+workpieces, coordinate frames, and invisible points to look at or label. From the demo lecture's
+`scenes/arm.yaml`:
+
+```yaml
+objects:                     # in metres and degrees; y is up, as in camera:
+  table:
+    box: [0.4, 0.3, 0.4]     # width, height, depth
+    at: [0.62, 0, -0.69]     # the middle of its underside: on the floor
+    rotate: 48               # degrees about the vertical
+    material: wood
+  part:                      # on the table: at is in the table's frame
+    cylinder: [0.07, 0.1]    # diameter, height
+    at: [0, 0.3, 0]
+    parent: table
+    material: blue
+  grip:                      # no shape: an invisible point, on top of the part
+    at: [0, 0.1, 0]
+    parent: part
+  base frame:
+    frame: 0.3               # the length of its axes
+    parent: base             # the robot's base frame: z is up
+  tool frame:
+    frame: 0.1
+    parent: end_effector     # moves with the arm
+```
+
+Here, as in `camera:`, y is up and x and z run along the floor. That holds for an object in the
+scene itself. An object on another object takes that object's frame, turned as it is, and one on
+a robot's anchor takes the robot's own frame (see `parent` below).
+
+- **A shape**, one per object, its size in metres:
+  - `box: [width, height, depth]`, along x, y and z;
+  - `cylinder: [diameter, height]`, its height along y, so it stands upright;
+  - `sphere: diameter`;
+  - `frame: length`: a coordinate frame, its axes arrows that long, x red, y green, z blue;
+  - no shape: an invisible point. Nothing is drawn; it is there to look at and to label.
+- **`at`**: where it is, `[x, y, z]` in metres. For a box, cylinder or sphere it is the middle of
+  its underside, so a y of 0 stands it on the floor; for a frame, its origin; for a point, the
+  point. Without `at`, `[0, 0, 0]`.
+- **`rotate`**: a number turns the object about y, the vertical, in degrees (`rotate: 40`).
+  `[x, y, z]` turns it about x, then about y, then about z, each axis as the turn before left it:
+  `rotate: [90, 0, 0]` lays a cylinder on its side along z, and `[0, 30, 90]` lays it along x
+  turned 30 degrees about the vertical. It turns about `at`, so an object laid on its side needs
+  `at` raised by half its thickness to rest on the floor. Without `rotate`, none.
+- **`material`**: the colour of a box, cylinder or sphere: `grey` (without one), `white`,
+  `black`, `red`, `yellow`, `green`, `blue`, `wood` or `metal`. They follow the theme: in the
+  PDF, `white` is a little greyer, so it shows on the white page, and a frame's axes are darker.
+  A frame has its axis colours, and a point none.
+- **`parent`**: another object in the file, or one of the scene's anchors below. The object then
+  sits on its parent and moves with it, and `at` and `rotate` are in the parent's frame. An
+  object's own frame has its origin at its `at`, turned by its `rotate`, y up as built: `at: [0,
+  0.3, 0]` on a table 0.3 high stands an object on the table. A robot's anchors have the robot's
+  own frames, as robotics draws them: `base` has z up, and `tool0` and `end_effector` have z
+  pointing out of the tool. So a frame on one of them shows the robot's own axes. A shape, though,
+  is built along its parent's y, and a number in `rotate` turns it about that y: on `base` the
+  shape would lie along the floor, and on the tool it would point sideways. `rotate: [90, 0, 0]`
+  turns its height onto the anchor's z, so it stands up on `base` and points out of the tool, and
+  `[90, a, 0]` then turns it `a` degrees about that z (about the vertical on `base`, about the
+  tool's axis on the tool):
+
+  ```yaml
+    gripper:
+      box: [0.04, 0.06, 0.04]
+      parent: end_effector
+      rotate: [90, 0, 0]       # its height along the tool's z, out of the tool
+  ```
+
+  | Scene | Its anchors | Anchors an object can hang on |
+  | --- | --- | --- |
+  | `arm` | `base`, `end_effector` | both |
+  | `pendulum` | `pivot`, `bob` | both |
+  | `agilus` | `base`, `tool0` | both |
+  | `agilus-duo` | `base`, `tool0` (robot 0's) | none: a slide can draw either robot as the ghost, and an object on it would turn ghost too |
+- **Names** are a word or two, as for views. Each object is an anchor of the scene by its name,
+  as the scene's own anchors in the table above are: `lookAt: grip` in a slide's `camera:` or a
+  named view, and `anchored:` with `anchor: grip`. A name can't be one of the scene's own anchors,
+  nor a word JavaScript keeps for itself (`constructor`, `toString`, …).
+- **Every slide of the scene shows them**, from its first slide to its last: objects are part of
+  the scene and don't come and go per slide. Scene files with the same base are one running
+  scene (see [Which scene](#which-scene)), so only one of them can have objects, and they are
+  on every slide of that scene's run, slides that name the engine scene included.
+- **In the editor**, a change to an object loads the panel afresh, a moment, instead of updating
+  it in place. Dragging objects is step 7.
 
 ## Saving views in the editor
 
@@ -252,7 +343,13 @@ The build (and the panel) names the file, the line and what to do. For example:
 - `slides.md, line 14: slide 5 trajectory 'from' (the pose 'q0') sets joint_1, joint_2, joint_3,
   joint_4, joint_5, joint_6, but 'to' (the pose 'vri') sets joint_4, joint_6. Both ends must set
   the same joints: two list poses always do.`
-- `scenes/agilus.yaml, line 2: unknown key 'objects'. A scene file has 'base', 'views' and 'poses'`
+- `scenes/arm.yaml, line 21: object 'table' box has 400, which is 400 m: sizes and places are in
+  metres (400 mm is 0.4)`
+- `scenes/arm.yaml, line 28: object 'part' has the parent 'tabel', which is neither an object in
+  this file nor an anchor of 'arm'. Did you mean 'table'? The parent is another object in this
+  file, or an anchor of 'arm' (base, end_effector)`
+- `scenes/agilus.yaml, line 2: unknown key 'object'. Did you mean 'objects'? A scene file has
+  'base', 'views', 'poses' and 'objects'`
 
 **Slide keys are checked too** (from v2.5.0). A misspelled key used to be ignored without a word;
 now `camrea:` stops the build: `slides.md, line 9: slide 3 has the key 'camrea', which a slide
@@ -291,6 +388,17 @@ changed). New text that changes only cameras and joints goes into the running de
 loading the panel afresh (`src/editor/editor-compile.ts`, `updateTargets`); the slide shown may
 only change to the view or pose just saved from it.
 
+Objects take the same road as views and poses: the compiler checks them
+(`src/compiler/scene-files.ts`) and hands them on as data, by the scene they are in, with the
+slides (the student file's deck, from `vite-plugin-lecture.ts`; the panel's, from
+`src/editor/deck-from-source.ts`). When a scene is first shown, the scene manager adds them to it
+(`src/scene/objects.ts`): each a three.js object on its parent, with its colour read from the
+theme (`--object-*` and `--frame-*` in `src/styles.css`), and each an anchor of the scene. To
+check names and parents, the compiler needs each scene's anchors, and like the joints it can't
+load the scenes: `src/scenes/anchors.ts` holds them, and a test checks it against the scenes'
+own `anchors:`.
+
 ## Not yet
 
-- Objects (tables, workpieces, frames), steps 6 and 7; models from `assets/`, steps 8 and 9.
+- Dragging objects in the panel, step 7; models from `assets/`, steps 8 and 9.
+- Showing, hiding or moving objects per slide, and objects in `agilus-duo` hanging on a robot.

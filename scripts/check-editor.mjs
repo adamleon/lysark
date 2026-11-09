@@ -46,7 +46,7 @@
 import { createServer } from 'node:http'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
-import { parse as parseYaml } from 'yaml'
+import { parse as parseYaml, parseDocument } from 'yaml'
 import { fileURLToPath } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 import { EDITOR_PREFIX, serveEditor, stopServer } from './editor-server.mjs'
@@ -1194,6 +1194,51 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     if (!(await fromRuntime({ type: 'lysark:shown', seq: structural }))) return fail('the new text was not shown after loading afresh')
     lines.push('new text accepted, and shown after the panel loaded afresh')
 
+    // 3b. objects (scene-files-proposal.md step 6): the arm scene file's objects are
+    // anchors of the running scene, and a changed object loads the panel afresh (the
+    // scene is built once), where it stands where the file now says
+    const armPath = [...host.docs.keys()].find((p) => /^scenes\/arm\.ya?ml$/.test(p))
+    const armObjects = armPath ? parseYaml(host.docs.get(armPath).text)?.objects : undefined
+    if (armObjects && typeof armObjects === 'object') {
+      const names = Object.keys(armObjects)
+      const moving = names.find((n) => armObjects[n] && armObjects[n].parent === undefined)
+      if (!moving) return fail(`the check needs an object without a parent in ${armPath}`)
+      // the slide shown is the first (the arm's): every object, and where the one to move stands
+      const placed = () =>
+        inPanel(
+          (w, [all, one]) => {
+            const L = w.__lysark
+            if (!L || L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm') return null
+            const anchors = L.sceneManager.active.anchors
+            const missing = all.filter((n) => !anchors[n])
+            if (missing.length > 0) return { missing }
+            const p = anchors[one].getWorldPosition(anchors[one].position.clone())
+            return { at: [p.x, p.y, p.z] }
+          },
+          [names, moving],
+        )
+      const was = await waitFor(placed)
+      if (!was || was.missing) return fail(`the arm scene's objects are not anchors of the running scene: ${JSON.stringify(was)}`)
+      const at = armObjects[moving].at ?? [0, 0, 0]
+      const edited = parseDocument(host.docs.get(armPath).text)
+      edited.setIn(['objects', moving, 'at'], edited.createNode([at[0] + 0.1, at[1], at[2]], { flow: true }))
+      host.docs.set(armPath, { text: edited.toString(), version: host.docs.get(armPath).version + 1 })
+      // the same slides.md as shown: only the object differs
+      const objectMoved = await source(added)
+      if (!(await fromRuntime({ type: 'lysark:accepted', seq: objectMoved }))) {
+        return fail(`moving the object '${moving}' was not taken as new text that loads the panel afresh`)
+      }
+      if (!(await render(3))) return fail('the runtime did not say ready after the object moved')
+      await toRuntime({ type: 'lysark:source', files: host.files(added), seq: objectMoved, slide: 0, protocol: EDITOR_PROTOCOL })
+      if (!(await fromRuntime({ type: 'lysark:shown', seq: objectMoved }))) return fail('the moved object was not shown after loading afresh')
+      const now = await waitFor(placed)
+      const off = now?.at ? Math.hypot(now.at[0] - was.at[0] - 0.1, now.at[1] - was.at[1], now.at[2] - was.at[2]) : Infinity
+      if (off > 1e-6) return fail(`the object '${moving}' did not move 0.1 m along x: ${JSON.stringify(was)} → ${JSON.stringify(now)}`)
+      lines.push(`${names.length} objects from ${armPath} are anchors of the arm scene; moving '${moving}' loaded the panel afresh, and it moved`)
+    } else {
+      lines.push('(the lecture has no objects in scenes/arm.yaml, so objects were not checked)')
+    }
+
     // 4. a broken text is refused, and the shown text stays
     const deck = () => inPanel((w) => ({ slides: w.__lysark?.engine.slideCount ?? null, overlay: w.document.getElementById('overlay-layer')?.children.length ?? 0 }))
     const before = await deck()
@@ -1210,7 +1255,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     allowCspReports = true
     const scripted = await source(SCRIPT_TEST)
     if (!(await fromRuntime({ type: 'lysark:accepted', seq: scripted }))) return fail('the script-test text was not accepted')
-    if (!(await render(3))) return fail('the runtime did not say ready for the script test')
+    if (!(await render(4))) return fail('the runtime did not say ready for the script test')
     await toRuntime({ type: 'lysark:source', files: { 'slides.md': SCRIPT_TEST }, seq: scripted, slide: 0, protocol: EDITOR_PROTOCOL })
     if (!(await fromRuntime({ type: 'lysark:shown', seq: scripted }))) return fail('the script-test text was not shown')
     // the ontoggle handler would run as soon as the slide shows; check before the clicks below

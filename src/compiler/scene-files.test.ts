@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileSlides } from './compile-slides'
+import { compileLecture, compileSlides } from './compile-slides'
 import { readSceneFiles } from './scene-files'
 
 const AGILUS = `base: agilus
@@ -47,7 +47,7 @@ describe('readSceneFiles', () => {
     }
     expect(problem('views:\n  a:\n    lookAt: [0, 0, 0]\n    offset: [1, 1, 1]\n')).toMatch(/^scenes\/agilus\.yaml, line 1: 'base:' is missing/)
     expect(problem('base: agilu\n')).toMatch(/^scenes\/agilus\.yaml, line 1: base 'agilu' is not one of the engine's scenes: arm, pendulum, agilus/)
-    expect(problem('base: agilus\nobjects:\n  table: {}\n')).toMatch(/line 2: unknown key 'objects'/)
+    expect(problem('base: agilus\nobjekts:\n  table: {}\n')).toMatch(/line 2: unknown key 'objekts'. Did you mean 'objects'\?/)
     expect(problem('base: agilus\nviews:\n  a:\n    lookAt: [0, 0, 0]\n')).toMatch(/line 3: view 'a' has no offset/)
     expect(problem('base: agilus\nviews:\n  a:\n    offset: [0, 0, 0]\n')).toMatch(/line 3: view 'a' has no lookAt/)
     expect(problem('base: agilus\nviews:\n  a:\n    lookAt: [0, 0, 0]\n    distance: 2\n')).toMatch(/line 5: view 'a' has 'distance'/)
@@ -292,5 +292,125 @@ poses:
       message = (err as Error).message
     }
     expect(message).toMatch(/names the pose 'rest', but the lecture has no scenes\/arm\.yaml[\s\S]*poses:\n  rest: \[0, 0, 0\]   # joint1, joint2, joint3/)
+  })
+})
+
+describe('objects (scene-files-proposal.md step 6)', () => {
+  const CELL = `base: agilus
+objects:
+  blokk:                     # on the table, written before it
+    box: [0.1, 0.1, 0.1]
+    at: [0, 0.2, 0]
+    parent: hentebord
+    material: red
+  hentebord:
+    box: [0.4, 0.2, 0.4]
+    at: [0.05, 0, -0.74]
+    rotate: 30
+    material: wood
+  søyle:
+    cylinder: [0.1, 0.5]
+    at: [-0.6, 0, 0.3]
+    rotate: [0, 0, 90]
+  ball: { sphere: 0.08, at: [0.3, 0, 0.4], material: metal }
+  verktøyramme:
+    frame: 0.1
+    parent: tool0
+  xA:
+    at: [0.29, 0.47, -0.76]
+`
+  const problem = (text: string, base = 'agilus') => {
+    try {
+      readSceneFiles({ [`scenes/${base}.yaml`]: text })
+      return 'no error'
+    } catch (err) {
+      return (err as Error).message
+    }
+  }
+
+  it('reads each shape, with at, rotate, material and parent, parents first', () => {
+    const objects = readSceneFiles({ 'scenes/agilus.yaml': CELL }).get('agilus')!.objects
+    expect(objects.map((o) => o.name)).toEqual(['hentebord', 'søyle', 'ball', 'verktøyramme', 'xA', 'blokk'])
+    expect(objects[0]).toEqual({ name: 'hentebord', shape: 'box', size: [0.4, 0.2, 0.4], at: [0.05, 0, -0.74], rotate: [0, 30, 0], material: 'wood' })
+    expect(objects[1]).toEqual({ name: 'søyle', shape: 'cylinder', size: [0.1, 0.5], at: [-0.6, 0, 0.3], rotate: [0, 0, 90], material: 'grey' })
+    expect(objects[2]).toEqual({ name: 'ball', shape: 'sphere', size: [0.08], at: [0.3, 0, 0.4], rotate: [0, 0, 0], material: 'metal' })
+    expect(objects[3]).toEqual({ name: 'verktøyramme', shape: 'frame', size: [0.1], at: [0, 0, 0], rotate: [0, 0, 0], parent: 'tool0' })
+    expect(objects[4]).toEqual({ name: 'xA', shape: 'point', size: [], at: [0.29, 0.47, -0.76], rotate: [0, 0, 0] })
+    expect(objects[5]).toMatchObject({ name: 'blokk', parent: 'hentebord', material: 'red' })
+  })
+
+  it('gives the lecture its objects by the scene they are in, and only one file per scene may have them', () => {
+    const files = { 'scenes/celle.yaml': CELL, 'scenes/agilus.yaml': 'base: agilus\nposes:\n  q0: { joint_1: 0 }\n' }
+    const lecture = compileLecture('---\nscene: celle\n---\n# A\n', files)
+    expect(Object.keys(lecture.objects)).toEqual(['agilus'])
+    expect(lecture.objects.agilus).toHaveLength(6)
+    expect(compileLecture('---\nlayout: center\n---\n# A\n', {}).objects).toEqual({})
+    expect(() => readSceneFiles({ ...files, 'scenes/agilus.yaml': 'base: agilus\nobjects:\n  p: { at: [0, 0, 0] }\n' })).toThrow(
+      /scenes\/agilus\.yaml and scenes\/celle\.yaml both have objects, and both build on 'agilus'/,
+    )
+    expect(readSceneFiles({ 'scenes/arm.yaml': 'base: arm\nobjects:\n' }).get('arm')!.objects).toEqual([])
+  })
+
+  it('names the line and what to do', () => {
+    const one = (body: string) => problem(`base: agilus\nobjects:\n  a:\n${body}`)
+    expect(one('    position: [0, 0, 0]\n')).toMatch(/^scenes\/agilus\.yaml, line 4: object 'a' has unknown key 'position'\. Did you mean 'at'\?/)
+    expect(one('    colour: red\n')).toMatch(/line 4: .*Did you mean 'material'\?/)
+    expect(one('    box: [1, 1, 1]\n    size: 2\n')).toMatch(/line 5: object 'a' has 'size': write the size with the shape/)
+    expect(one('    box: [1, 1, 1]\n    sphere: 1\n')).toMatch(/line 5: object 'a' has both box and sphere: one shape per object/)
+    expect(one('    box: [1, 1]\n')).toMatch(/line 4: object 'a' box must be \[width, height, depth\], in metres/)
+    expect(one('    cylinder: [0.1, -1]\n')).toMatch(/line 4: object 'a' cylinder must be \[diameter, height\]/)
+    expect(one('    sphere: [0.1]\n')).toMatch(/line 4: object 'a' sphere must be its diameter/)
+    expect(one('    frame: 0\n')).toMatch(/line 4: object 'a' frame must be the length of its axes/)
+    expect(one('    box: [400, 200, 400]\n')).toMatch(/line 4: object 'a' box has 400, which is 400 m: sizes and places are in metres \(400 mm is 0\.4\)/)
+    expect(one('    at: [0, 0]\n')).toMatch(/line 4: object 'a' at must be \[x, y, z\], in metres: the point/)
+    expect(one('    box: [1, 1, 1]\n    at: [0, 0, 740]\n')).toMatch(/line 5: object 'a' at has 740/)
+    expect(one('    rotate: ninety\n')).toMatch(/line 4: object 'a' rotate must be degrees about y/)
+    expect(one('    box: [1, 1, 1]\n    material: tre\n')).toMatch(/line 5: object 'a' material 'tre' isn't one of the colours\. The colours: grey, white/)
+    expect(one('    box: [1, 1, 1]\n    material: gray\n')).toMatch(/Did you mean 'grey'\?/)
+    expect(one('    frame: 0.1\n    material: red\n')).toMatch(/line 5: object 'a' is a frame, drawn in the axis colours/)
+    expect(one('    at: [0, 0, 0]\n    material: red\n')).toMatch(/line 5: object 'a' has no shape, so it is an invisible point/)
+    expect(one('    at: [0, 0, 0]\n    parent: a\n')).toMatch(/line 5: object 'a' can't be its own parent/)
+    expect(one('    at: [0, 0, 0]\n    parent: tol0\n')).toMatch(
+      /line 5: object 'a' has the parent 'tol0', which is neither an object in this file nor an anchor of 'agilus'\. Did you mean 'tool0'\?/,
+    )
+    expect(one('    at: [0, 0, 0]\n    parent: [b]\n')).toMatch(/line 5: object 'a' parent must be the name of another object/)
+    expect(one('')).toMatch(/line 3: object 'a' has nothing in it/)
+    expect(one('    {}\n')).toMatch(/object 'a' has nothing in it/)
+    expect(problem('base: agilus\nobjects:\n  tool0:\n    frame: 0.1\n')).toMatch(/line 3: object 'tool0' has the name of an anchor of 'agilus' \(base, tool0\)/)
+    expect(problem('base: agilus\nobjects:\n  a: { at: [0, 0, 0], parent: b }\n  b: { at: [0, 0, 0], parent: a }\n')).toMatch(
+      /line 3: the objects 'a', 'b' hang on each other in a ring/,
+    )
+    expect(problem('base: agilus\nobjects:\n  - box: [1, 1, 1]\n')).toMatch(/line 3: 'objects' is a mapping/)
+    // only the ring, not what hangs on it, and the line of its first object
+    expect(problem('base: agilus\nobjects:\n  c: { at: [0, 0, 0], parent: a }\n  a: { at: [0, 0, 0], parent: b }\n  b: { at: [0, 0, 0], parent: a }\n')).toMatch(
+      /line 4: the objects 'a', 'b' hang on each other in a ring/,
+    )
+    // a number in a list written one item per line: its own line
+    expect(one('    box:\n      - 0.4\n      - 300\n      - 0.4\n')).toMatch(/line 6: object 'a' box has 300/)
+    expect(one('    box:\n      - 0.4\n      - -1\n      - 0.4\n')).toMatch(/line 6: object 'a' box must be/)
+    expect(one('    at:\n      - 0\n      - 0\n      - -450\n')).toMatch(/line 7: object 'a' at has -450/)
+    expect(one('    at:\n      - 0\n      - 0\n      - abc\n')).toMatch(/line 7: object 'a' at must be \[x, y, z\]/)
+    expect(one('    at: [0,\n      0,\n      x]\n')).toMatch(/line 6: object 'a' at must be/)
+    expect(one('    rotate:\n      - 0\n      - 0\n      - x\n')).toMatch(/line 7: object 'a' rotate must be/)
+    // names and keys a plain JavaScript object already has
+    for (const name of ['constructor', '__proto__', 'toString']) {
+      expect(problem(`base: agilus\nobjects:\n  ${name}:\n    box: [0.1, 0.1, 0.1]\n`)).toMatch(new RegExp(`line 3: object '${name}' has a name JavaScript keeps for itself`))
+    }
+    expect(one('    constructor: 1\n')).toMatch(/line 4: object 'a' has unknown key 'constructor'\. An object has/)
+    expect(problem('base: agilus-duo\nobjects:\n  a:\n    frame: 0.1\n    parent: tool0\n', 'agilus-duo')).toMatch(
+      /line 5: object 'a' has the parent 'tool0', but in 'agilus-duo' objects can't hang on the robots/,
+    )
+    // where no anchor can be a parent, the message offers none
+    expect(problem('base: agilus-duo\nobjects:\n  table: { box: [1, 1, 1] }\n  a:\n    frame: 0.1\n    parent: tabel\n', 'agilus-duo')).toBe(
+      "scenes/agilus-duo.yaml, line 6: object 'a' has the parent 'tabel', which is not an object in this file. Did you mean 'table'? " +
+        "The parent is another object in this file (in 'agilus-duo' objects can't hang on the robots)",
+    )
+  })
+
+  it("hangs objects on the base scene's own anchors", () => {
+    const on = (base: string, parent: string) => readSceneFiles({ [`scenes/${base}.yaml`]: `base: ${base}\nobjects:\n  f: { frame: 0.1, parent: ${parent} }\n` }).get(base)!.objects
+    expect(on('arm', 'end_effector')[0].parent).toBe('end_effector')
+    expect(on('pendulum', 'bob')[0].parent).toBe('bob')
+    expect(on('agilus', 'base')[0].parent).toBe('base')
   })
 })
