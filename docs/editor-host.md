@@ -69,6 +69,16 @@ reads them through the extension, and builds them in as `data:` addresses, as th
 does for the student file (`src/editor/panel-images.ts`). New text that adds an image loads the
 panel afresh, which reads it, as does an image file added in VS Code.
 
+**Models** (from engine v2.13.0, [scene-files.md](scene-files.md#models)) take the same road with
+no change to the extension: once the images have come, the panel reads the model files the scene
+files name as bytes (`src/editor/panel-models.ts`) and checks them as the course build does. The
+host reads any file type, but not every path (see "What the panel may touch" below: no link, no
+hidden name, no `~` and a digit, no `:`); the engine refuses those paths for a model itself, so
+the build and the panel agree. Its limit, 32 MB per file, is far above the engine's own 5 MB per
+model, so a model that is too large gets the engine's advice; one over 32 MB, which VS Code won't
+send, gets the same. Creating, deleting or renaming a model file in VS Code loads the panel
+afresh, as for an image; a file overwritten in place outside VS Code doesn't, so press ▷.
+
 **What the panel may touch.** The panel runs code from the course's site, so the extension, not
 the panel, decides what it may do:
 
@@ -78,7 +88,8 @@ the panel, decides what it may do:
 - **Read and list** only inside the lecture folder and the course's `assets/` folder, never
   through a link (on desktop VS Code a link inside the lecture folder could lead anywhere), and
   never a hidden name such as `.git` or `.env` (nor a name with `~` and a digit, which on Windows
-  can be another name for a hidden file). Up to 32 MB per file and 64 files per request,
+  can be another name for a hidden file, nor a `:`, which can name a drive or a file's hidden
+  stream). Up to 32 MB per file and 64 files per request,
   one request at a time; files that would make one request larger than 64 MB are asked for in
   the next. The files sent with every update are only `<folder>/*.yaml` or `.yml`, up to 64
   files of 1 MB.
@@ -135,9 +146,11 @@ engine v2.3.x it works as 0.2.1 did (V works, Scene Actions… says to update th
 
 ## Limits
 
-- **Letter case of image names.** github.dev, like the Linux build, needs the exact case. Desktop
-  VS Code on Windows finds `Arm.png` for `arm.png`, so the panel shows an image the build will
-  refuse; the course build then reports it.
+- **Letter case of image and model names.** github.dev, like the Linux build, needs the exact
+  case. Desktop VS Code on Windows finds `Arm.png` for `arm.png`, so the panel shows an image
+  (or a model) the build will refuse; the build then reports it, on Windows too, for every
+  folder of the path. A path whose case is wrong in a folder after `..` (`../../Assets/arm.png`)
+  the panel calls outside the lecture folder, on any computer.
 - **Scene files** are used from engine v2.5.0: named camera views, which V saves into the scene
   file through the same edit request ([scene-files.md](scene-files.md)).
 - **The panel still loads afresh** for any change but a camera change, as before.

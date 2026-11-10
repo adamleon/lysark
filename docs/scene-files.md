@@ -2,9 +2,10 @@
 
 How to give a lecture its own named camera views (from engine v2.5.0) and robot poses (from
 v2.7.0), to pose the robot in the editor (from v2.8.0; Save pose as… from v2.9.0, dragging
-the tool from v2.10.0), to add objects to a scene (from v2.11.0) and to move them in the editor
-(from v2.12.0): steps 2 to 7 of [scene-files-proposal.md](scene-files-proposal.md). Written for
-the author; no engine knowledge needed.
+the tool from v2.10.0), to add objects to a scene (from v2.11.0), to move them in the editor
+(from v2.12.0) and to add models from STL and GLB files (from v2.13.0): steps 2 to 8 of
+[scene-files-proposal.md](scene-files-proposal.md). Written for the author; no engine knowledge
+needed.
 
 ## In short
 
@@ -78,7 +79,8 @@ poses:                       # q in radians
   | `pendulum` | swing |
   | `agilus`, `agilus-duo` | joint_1, joint_2, joint_3, joint_4, joint_5, joint_6 |
 - **`objects`** (from v2.11.0): boxes, cylinders, spheres, coordinate frames and invisible points
-  in the scene; see [Objects](#objects).
+  in the scene; see [Objects](#objects). From v2.13.0 also models from STL and GLB files; see
+  [Models](#models).
 - **View and pose names** can be any word, Norwegian letters included. Comments (`#`) are fine
   anywhere, and the editor keeps them.
 - **The file's name** is lower-case letters, digits and dashes, starting with a letter, and ends in
@@ -161,16 +163,17 @@ a robot's anchor takes the robot's own frame (see `parent` below).
   - `cylinder: [diameter, height]`, its height along y, so it stands upright;
   - `sphere: diameter`;
   - `frame: length`: a coordinate frame, its axes arrows that long, x red, y green, z blue;
+  - `model: path`: a part from a file, its size the file's (from v2.13.0; see [Models](#models));
   - no shape: an invisible point. Nothing is drawn; it is there to look at and to label.
-- **`at`**: where it is, `[x, y, z]` in metres. For a box, cylinder or sphere it is the middle of
-  its underside, so a y of 0 stands it on the floor; for a frame, its origin; for a point, the
-  point. Without `at`, `[0, 0, 0]`.
+- **`at`**: where it is, `[x, y, z]` in metres. For a box, cylinder, sphere or model it is the
+  middle of its underside, so a y of 0 stands it on the floor; for a frame, its origin; for a
+  point, the point. Without `at`, `[0, 0, 0]`.
 - **`rotate`**: a number turns the object about y, the vertical, in degrees (`rotate: 40`).
   `[x, y, z]` turns it about x, then about y, then about z, each axis as the turn before left it:
   `rotate: [90, 0, 0]` lays a cylinder on its side along z, and `[0, 30, 90]` lays it along x
   turned 30 degrees about the vertical. It turns about `at`, so an object laid on its side needs
   `at` raised by half its thickness to rest on the floor. Without `rotate`, none.
-- **`material`**: the colour of a box, cylinder or sphere: `grey` (without one), `white`,
+- **`material`**: the colour of a box, cylinder, sphere or model: `grey` (without one), `white`,
   `black`, `red`, `yellow`, `green`, `blue`, `wood` or `metal`. They follow the theme: in the
   PDF, `white` is a little greyer, so it shows on the white page, and a frame's axes are darker.
   A frame has its axis colours, and a point none.
@@ -212,8 +215,115 @@ a robot's anchor takes the robot's own frame (see `parent` below).
   object of the scene on screen, dragged or typed, goes into the panel at once. Anything else
   loads the panel afresh, a moment: a new place typed for an object of another scene (or on a
   slide without a scene), or for the object the slide on screen looks at (so the camera flies
-  to it), and any other change to an object (its shape, size, material or parent, or an object
-  added, removed or renamed).
+  to it), and any other change to an object (its shape, size, material or parent, a model's
+  file, `unit` or `up`, or an object added, removed or renamed).
+
+## Models
+
+From engine v2.13.0. An object can show a part from a file instead of a shape: an STL exported
+from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.yaml`:
+
+```yaml
+  bracket:                   # an STL from a CAD program: in millimetres, z up
+    model: models/bracket.stl
+    unit: mm
+    up: z
+    at: [0.1, 0.3, 0.1]      # the middle of its underside, on the table's top
+    rotate: 180
+    parent: table
+    material: metal
+  tray:                      # a GLB from Blender: in metres and y up, as glTF is
+    model: models/tray.glb
+    at: [-0.1, 0.3, -0.1]
+    parent: table
+```
+
+- **`model`** is a shape, written where a box writes `box:`, one per object. Everything in
+  [Objects](#objects) holds for it: `at`, `rotate`, `material`, `parent`, its name as an anchor,
+  and M in the editor.
+- **The path** is from the lecture folder, where `slides.md` is, as for images, even though the
+  scene file is in `scenes/`: `models/bracket.stl` for a file in the lecture folder,
+  `../../assets/bracket.stl` for one in the course's `assets/` folder, which several lectures can
+  share. The file must be in one of the two, in any folder with a plain name (below). Write it
+  with `/`, and it is read as written, so `%20` stays `%20`.
+- **Letter case** must match the names on disk exactly, all along the path, because the course
+  is built on Linux: each folder and the file, a folder the path comes back into after `..`
+  (`../Demo/models/` from the lecture folder `demo` is wrong), and the course's folder itself,
+  which must be named `assets`. This holds for images too.
+- **Names VS Code's panel can't read** are refused, so the panel and the build agree: a folder
+  or file whose name starts with `.` (`models/.export/`), has `~` and a digit (`bracket~1.stl`,
+  like a Windows short name) or has a `:`, and a file reached through a link (a symbolic link or
+  a junction). Rename the folder or file, or copy the file into place. Plain names are fine:
+  letters, digits, spaces, `-`, `_` and dots inside a name (`bracket.v2.stl`).
+- **The file** is `.stl` (binary or text) or `.glb` (binary glTF), in any letter case (`.STL`
+  works, written as on disk). Export anything else from the CAD program as STL, binary rather
+  than text (about five times smaller), and glTF as binary glTF, `.glb`.
+- **`unit`**: what the file is measured in, `mm`, `cm` or `m`; without it, `m`. An STL says
+  nothing about its unit, and CAD programs usually write millimetres: write `unit: mm`. ROS
+  meshes are in metres, and glTF always is.
+- **`up`**: the axis that is up in the file, `y` or `z`; without it, `y`, as in glTF (Blender's
+  export turns its z up into y). ROS meshes and many CAD programs have z up: write `up: z` for
+  those. If a part lies on its side, change `up`. `unit` and `up` are only for models: a shape is
+  built in metres with y up.
+- **Where it stands:** `at` is the middle of the underside of the model's bounding box (the
+  smallest box along x, y and z around it), measured after `unit` and `up` and before `rotate`. So a
+  y of 0 stands it on the floor, as for a box, and `rotate` turns it about `at`. The file's own
+  origin is not used: a part drawn around a hole, or from a corner (as the demo's tray is), still
+  stands on `at`. An object hung on a model is in the model object's frame, as on a box: its
+  origin at the model's `at`, y up whatever `up` says.
+- **On a robot's tool:** a model is built along its parent's y, as a shape is, and the tool's
+  anchors have z pointing out of the tool. For a part drawn in CAD with z up out of the flange,
+  write `up: z` and `rotate: [90, 0, 0]`: the two turns cancel, and the file's x, y and z are the
+  anchor's own. The part sits with its lowest z on the flange and its bounding box centred on the
+  tool's axis, so one that isn't symmetric about the axis is off it by that much: move it with
+  `at`.
+
+  ```yaml
+    gripper:
+      model: ../../assets/gripper.stl
+      unit: mm
+      up: z                    # with rotate [90, 0, 0], the file's axes are the tool's
+      rotate: [90, 0, 0]
+      parent: end_effector
+  ```
+- **Colour:** `material`, one preset for the whole model, as for a box (`grey` without one), so
+  models follow the theme and the print PDF. The file's own colours and materials are not used.
+- **Shading:** an STL's own normals are not used either (CAD programs write flat ones, or none):
+  the shading is worked out from the triangles, smooth across edges under 40 degrees and sharp
+  above, as for the KUKA, whatever the unit. The same goes for a GLB mesh without normals.
+- **Size:** a file may be at most 5 MB (5,000,000 bytes on disk), about 100,000 triangles as
+  binary STL. For a larger part, export it with fewer triangles (CAD programs have a coarser STL
+  setting) or as binary STL. The model's largest side, read in its `unit`, must be between 1 mm
+  and 10 m: anything else is a file read in the wrong unit, and the build says what to change.
+  Each file is built into the student file once, about a third larger than on disk, however
+  many objects show it. A lecture without models carries none of the code that reads them.
+- **Refused**, each with a message that says what to do (see
+  [When something is wrong](#when-something-is-wrong)): a GLB with textures or images (textured
+  models are step 9), a `.gltf` or a GLB that keeps its data in another file, a compressed GLB
+  (Draco, meshopt), one with bones (a skin) or GPU instancing, one that needs a glTF extension
+  lysark doesn't read, a file that isn't the STL or binary glTF 2.0 its name says, or has no
+  triangles, and a Git LFS pointer in place of the file (course CI doesn't fetch LFS files: keep
+  models in git itself).
+- **Left out without a word:** a GLB's lights and cameras (the scene's own lights stay the only
+  ones), its animations, its lines and points, and its materials, vertex colours and texture
+  coordinates; an STL's colours. Meshes the file hangs under a light, camera, line or points stay,
+  where the file put them.
+- **In `lysark dev`**, changing a model file reloads the preview, as an image does.
+- **In the editor**, the panel reads the model files through VS Code once the images have come,
+  checks them as the build does, and shows the models. M puts each model's ring at its middle, and
+  a new `at` or `rotate`, dragged or typed, goes in as for any object. Any other change to a
+  model object (its `model`, `unit`, `up`, `material` or `parent`) loads the panel afresh, which
+  reads the file again. Creating, deleting or renaming a model file in VS Code loads it afresh
+  too, but a file overwritten in place (a new export from the CAD program, a `git pull`)
+  doesn't: press ▷ (Open Lysark Preview) in the editor's title bar, as for an image.
+
+  A model the panel can't show (a file that isn't there, too large, or refused) is drawn as an
+  empty node, still an anchor and a parent, and a banner lists each under **Models not shown:**
+  (after **Images not shown:**, if any), with the scene file, the line, the object and the build's
+  words. Letter case is the exception, as for images: desktop VS Code on Windows finds
+  `Bracket.stl` for `bracket.stl`, so the panel shows a model only the build refuses. A path
+  whose case is wrong in a folder after `..` (`../../Assets/bracket.stl`) the panel calls outside
+  the lecture folder, on any computer, and the build says the case is wrong.
 
 ## Saving views in the editor
 
@@ -407,6 +517,56 @@ The build (and the panel) names the file, the line and what to do. For example:
 - `scenes/agilus.yaml, line 2: unknown key 'object'. Did you mean 'objects'? A scene file has
   'base', 'views', 'poses' and 'objects'`
 
+For models, what the text alone shows is a compile error, as above (the panel keeps showing the
+last good version), and the build fails on anything about the file itself. The panel then draws
+the object without its model and lists the message under "Models not shown:", in the build's
+words (for a file VS Code won't read, its own reason). For example:
+
+- `scenes/arm.yaml, line 41: object 'bracket' model 'bracket.step' isn't a file a lecture can
+  show: export it from the CAD program as .stl (binary) or .glb`
+- `scenes/arm.yaml, line 42: object 'bracket' unit 'millimetre' isn't one of mm, cm or m: what the
+  file is measured in (without unit, m). Did you mean 'mm'?`
+- `scenes/arm.yaml, line 42: object 'bracket' has 'scale': a shape's size is written with it (box:
+  [0.4, 0.2, 0.4]), and a model's comes from its file: give unit: mm for a file measured in
+  millimetres`
+- `scenes/arm.yaml, line 43: object 'bracket' up must be the axis that is up in the file, y or z;
+  without up, y; ROS meshes and many CAD programs have z up`
+- `scenes/arm.yaml, line 41: object 'bracket' model 'models/.export/bracket.stl' has a folder name
+  starting with '.' ('.export'), which VS Code's panel won't read: rename the folder` (`file
+  name` and `rename the file` for the file's own name). A name with `~` and a digit gets `has a
+  file name with ~ and a digit ('bracket~1.stl'), like a Windows short name, which VS Code's
+  panel won't read: rename the file`, and one with a `:` gets `has a folder name with a colon
+  ('v2:final'), which VS Code's panel won't read: rename the folder`.
+- `scenes/arm.yaml, line 41: object 'bracket': the model 'models/cad/bracket.stl' goes through a
+  link ('models/cad'), which VS Code's panel won't read: copy the file into place` (the panel
+  itself names such a file outside the lecture folder)
+- `scenes/arm.yaml, line 41: object 'bracket': the model '../Demo/models/bracket.stl' has the
+  wrong capital letters: on disk the name is 'demo'. Letter case must match, because the course
+  is built on Linux. Fix the path in the scene file, or rename 'demo' with git mv (renaming only
+  the case in Explorer is invisible to git)` (in any folder of the path, or the file's name)
+- `scenes/arm.yaml, line 41: object 'bracket': the model '../../assets/bracket.stl' is in the
+  course's assets folder, which on disk is named 'Assets'. It must be named 'assets', because the
+  course is built on Linux. Rename the folder with git mv (renaming only the case in Explorer is
+  invisible to git)` (an image there gets the same, as `the image`)
+- `scenes/arm.yaml, line 41: object 'bracket': the model '../models/bracket.stl' is outside the
+  lecture folder. Write models/bracket.stl: the path is from the lecture folder, not from
+  scenes/` (a path written from `scenes/` gets this hint whenever the file is there read that way)
+- `scenes/arm.yaml, line 41: object 'bracket': the model is 80 m across, read in m. Is the file in
+  millimetres? Write unit: mm` (and the other way round: `the model is 0.16 mm across, read in
+  mm. Is the file in metres? Leave out unit`)
+- `scenes/arm.yaml, line 49: object 'tray': the model has textures, which come in a later step.
+  Its colour comes from material: anyway, so export it without materials or textures (or as
+  STL)`
+- `scenes/arm.yaml, line 41: object 'bracket': the model is 7.3 MB; a model may be at most 5 MB.
+  Export it with fewer triangles, or as binary STL rather than text STL (about five times
+  smaller)`
+- `scenes/arm.yaml, line 49: object 'tray': the model is a Git LFS pointer, not the model: the
+  course build doesn't fetch LFS files. Keep the file in git itself (git lfs untrack, then commit
+  it again)`
+
+When several objects show one file in different units, the message names the first object whose
+unit is wrong, at its own line.
+
 **Slide keys are checked too** (from v2.5.0). A misspelled key used to be ignored without a word;
 now `camrea:` stops the build: `slides.md, line 9: slide 3 has the key 'camrea', which a slide
 doesn't have. Did you mean 'camera'?` A slide's keys are `id`, `scene`, `layout`, `joints`,
@@ -466,9 +626,49 @@ check names and parents, the compiler needs each scene's anchors, and like the j
 load the scenes: `src/scenes/anchors.ts` holds them, and a test checks it against the scenes'
 own `anchors:`.
 
+Models take the images' road. The compiler reads no files, so it only checks what the text
+shows (the path's form and names, the file type, `unit` and `up`: `src/compiler/model-types.ts`)
+and reports each model object's path with its scene file and line, for the scenes some slide
+runs. The build (`vite-plugin-slides.ts`, `resolveFile`) finds each file as it finds an image:
+it follows the path name by name from the lecture folder, each name as the folder lists it, so
+letter case is checked on Windows as on Linux, and for a model it refuses a link on the way.
+Then it checks the file (`src/scene/model-check.ts`): its size first, then what its bytes say (a
+GLB's list of what it holds is read before anything is parsed), then it parses the file with
+three.js's own STL and glTF loaders, the ones the lecture uses, checks what they built for bones
+and GPU instancing, and counts and measures it. The glTF loader is given a loading manager that
+refuses every address, so a file that asks for another and gets past the checks fails to parse
+(`it asks for another file`) rather than fetching anything. The build puts each file into the
+slides once, as base64 text, under every path the scene files write for it. Only a lecture with
+models gets the code that reads them (`src/scene/models.ts`, with the loaders;
+`vite-plugin-lecture.ts`). When a scene is first shown, the scene manager turns each model
+object's text back into bytes and parses it in memory, then adds the objects
+(`src/scene/objects.ts`): the model on its object, scaled by `unit`, turned for `up`, moved so
+that the middle of its underside is the object's origin, and given the preset's material.
+Nothing is fetched and nothing runs in a worker, so the student file still works from
+`file://`. In the panel, the runtime reads the same paths through VS Code once the images have
+come (`src/editor/panel-models.ts`), runs the same check, and hands the files that pass to the
+same code; a file that fails is left out and named in the banner. No extension update was
+needed: extension 0.3.0 reads files in the lecture folder or `assets/` as bytes, as it reads
+images, but no path with a name starting with `.`, a name with `~` and a digit, or a `:`, and no
+file through a link (`resolveInside` in `extension/src/logic.ts`, `noLinks` in
+`extension/src/extension.ts`). For a model the compiler refuses those names
+(`modelPathProblem`) and the build a link, so the build and the panel agree. For an image they
+don't yet: it builds, and the panel leaves it out as outside the lecture folder
+(scene-files-proposal.md, "Proposals from step 8").
+
+Textures wait for step 9 for two reasons. The scene teardown (`src/scene/dispose.ts`) frees a
+scene's geometry and materials but not textures, so a textured model would keep GPU memory after
+its scene is put away, and two scenes' worth could be alive at once. And three.js's glTF loader
+turns a GLB's images into `blob:` addresses and fetches them, which the student-file check
+counts as a request and the released panel doesn't allow. So step 8 refuses textures, and with
+them everything else that would need a request, a worker or wasm (a `.gltf`, Draco and meshopt
+compression) or GPU memory `dispose.ts` doesn't free (bones, GPU instancing). The rest a GLB can
+hold (lights, cameras, lines, points) is taken out before the scene sees it.
+
 ## Not yet
 
-- Models from `assets/`, steps 8 and 9.
+- Textured models, step 9 (see [Models](#models) and
+  [scene-files-proposal.md](scene-files-proposal.md)).
 - Changing an object's size, or turning it about other axes than the vertical, in the panel: type
   those in the scene file.
 - Showing, hiding or moving objects per slide, and objects in `agilus-duo` hanging on a robot.

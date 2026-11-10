@@ -1,0 +1,5 @@
+# Model files (docs/scene-files.md, "Models") are bytes, not text: git keeps
+# them exactly as they are, never changing line endings (core.autocrlf is on
+# here), so a text STL has the same bytes, and size, on Windows and in CI.
+*.stl binary
+*.glb binary

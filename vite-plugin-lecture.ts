@@ -73,10 +73,11 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 }
 
-function deckModuleCode(engineRoot: string, lectureDir: string): string {
+/** the generated deck module of the lecture in lectureDir (exported for its tests) */
+export function deckModuleCode(engineRoot: string, lectureDir: string): string {
   const slidesPath = join(lectureDir, 'slides.md')
   // a scene file names the engine scene it builds on: the slides then name that one
-  const { slides, objects } = compileLecture(readFileSync(slidesPath, 'utf8'), lectureSceneFiles(lectureDir))
+  const { slides, objects, models } = compileLecture(readFileSync(slidesPath, 'utf8'), lectureSceneFiles(lectureDir))
   const known = new Set<string>(SCENE_NAMES)
   const used: string[] = []
   for (const slide of slides) {
@@ -94,11 +95,18 @@ function deckModuleCode(engineRoot: string, lectureDir: string): string {
   const entries = used.map((name, i) => `${JSON.stringify(name)}: scene${i}`)
   // the scene files' objects, as data, for the scenes the slides run
   const placed = Object.fromEntries(Object.entries(objects).filter(([scene]) => used.includes(scene)))
+  // the model loader, and three.js's loaders with it, only when a scene the slides
+  // run shows a model: a lecture without models is the size it was. The files'
+  // bytes come with the slides (vite-plugin-slides.ts), which always export them.
+  const slidesModule = JSON.stringify(normalizePath(slidesPath))
+  const loader = models.length > 0
   return [
     `import { defineDeck } from ${engine('src/engine/deck.ts')}`,
     ...imports,
-    `import slides from ${JSON.stringify(normalizePath(slidesPath))}`,
-    `export default defineDeck({ scenes: { ${entries.join(', ')} }, slides, objects: ${JSON.stringify(placed)} })`,
+    loader ? `import slides, { models } from ${slidesModule}` : `import slides from ${slidesModule}`,
+    ...(loader ? [`import { modelLoader } from ${engine('src/scene/models.ts')}`] : []),
+    `export default defineDeck({ scenes: { ${entries.join(', ')} }, slides, objects: ${JSON.stringify(placed)}` +
+      `${loader ? ', models: modelLoader(models)' : ''} })`,
   ].join('\n')
 }
 

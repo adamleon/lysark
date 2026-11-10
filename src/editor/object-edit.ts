@@ -181,11 +181,20 @@ export function placeText(place: ObjectPlace): string {
   return `at ${list(place.at)} · rotate ${rotateText(place.rotate)}`
 }
 
+/** an object's data but its place, as text to compare */
+function allButPlace(object: SceneObject): string {
+  const { at: _at, rotate: _rotate, ...rest } = object
+  return JSON.stringify(rest)
+}
+
 /**
  * The objects whose place (`at`, `rotate`) differs between the objects a
  * deck runs with and new ones, each with its scene and its new data; null if
  * anything else differs (an object added, removed or renamed, or a shape,
- * size, colour or parent changed), which needs the scene built afresh.
+ * size, colour, parent, or a model's file, unit or up changed), which needs
+ * the scene built afresh. Every key but the place counts, so a key added to
+ * objects later can't be taken for a move. (Both come from the compiler,
+ * which sets an object's keys in one order, so the same data is the same text.)
  */
 export function placementChanges(
   before: Record<string, SceneObject[]>,
@@ -197,8 +206,8 @@ export function placementChanges(
     const b = after[scene] ?? []
     if (a.length !== b.length) return null
     for (let i = 0; i < a.length; i++) {
-      const same = (key: keyof SceneObject) => JSON.stringify(a[i][key]) === JSON.stringify(b[i][key])
-      if (!(['name', 'shape', 'size', 'material', 'parent'] as const).every(same)) return null
+      if (allButPlace(a[i]) !== allButPlace(b[i])) return null
+      const same = (key: 'at' | 'rotate') => JSON.stringify(a[i][key]) === JSON.stringify(b[i][key])
       if (!same('at') || !same('rotate')) out.push({ scene, index: i, object: b[i] })
     }
   }

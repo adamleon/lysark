@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import type { SceneObject } from '../engine/object-types'
+import { binaryStl, box, glb } from './model-test-files.js'
+import { parseModel } from './models'
 import { addObjects, buildObject } from './objects'
 
 /** a colour per token, so a test can see which token each part took */
@@ -21,6 +23,22 @@ const world = (node: THREE.Object3D) => {
   return node.getWorldPosition(new THREE.Vector3())
 }
 const near = (a: THREE.Vector3, b: [number, number, number]) => expect(a.distanceTo(new THREE.Vector3(...b))).toBeLessThan(1e-9)
+/** a model object showing models/part.stl */
+const modelSpec = (spec: Partial<SceneObject> & Pick<SceneObject, 'name'>, unit: 'mm' | 'cm' | 'm' = 'm', up: 'y' | 'z' = 'y'): SceneObject =>
+  object({ shape: 'model', size: [], model: { src: 'models/part.stl', unit, up }, ...spec })
+/** the world box of everything under the node, as the scene shows it */
+const worldBox = (node: THREE.Object3D) => {
+  node.updateWorldMatrix(true, true)
+  return new THREE.Box3().setFromObject(node, true)
+}
+const nearly = (a: THREE.Vector3, b: [number, number, number]) => expect(a.distanceTo(new THREE.Vector3(...b))).toBeLessThan(1e-6)
+const meshesUnder = (node: THREE.Object3D) => {
+  const out: THREE.Mesh[] = []
+  node.traverse((part) => {
+    if ((part as THREE.Mesh).isMesh) out.push(part as THREE.Mesh)
+  })
+  return out
+}
 
 describe('objects', () => {
   it('stands a shape on its origin, the middle of its underside', () => {
@@ -130,5 +148,80 @@ describe('objects', () => {
     near(world(scene.anchors['base, 30'].children[0]), [0, 0.5, 0])
     const x = new THREE.Vector3(1, 0, 0).applyQuaternion(scene.anchors['base, 30'].getWorldQuaternion(new THREE.Quaternion()))
     near(x, [c30 * 2, 0, -0.5])
+  })
+
+  it('gives every object its middle: how high above at, before rotate (the editor ring sits there)', () => {
+    const middle = (spec: SceneObject) => buildObject(spec, color).userData.middle
+    expect(middle(object({ name: 'b', shape: 'box', size: [0.4, 0.2, 0.6], rotate: [0, 0, 90] }))).toBeCloseTo(0.1)
+    expect(middle(object({ name: 'c', shape: 'cylinder', size: [0.1, 0.5] }))).toBeCloseTo(0.25)
+    expect(middle(object({ name: 's', shape: 'sphere', size: [0.08] }))).toBeCloseTo(0.04)
+    expect(middle(object({ name: 'f', shape: 'frame', size: [0.2] }))).toBe(0)
+    expect(middle(object({ name: 'p', shape: 'point', size: [] }))).toBe(0)
+    // a model object without its model (the file was refused): an empty node, still an anchor and a parent
+    const empty = buildObject(modelSpec({ name: 'm' }), color)
+    expect(empty.children).toHaveLength(0)
+    expect(empty.userData.middle).toBe(0)
+  })
+
+  it("stands a model's underside on at, measured after unit and up and before rotate", async () => {
+    // 100 x 50 x 20 mm, drawn z up with its origin at a corner, as a CAD program writes it
+    const part = () => parseModel(binaryStl(box([0, 0, 0], [100, 50, 20])), 'stl')
+    const bracket = buildObject(modelSpec({ name: 'bracket', at: [1, 0.5, 2] }, 'mm', 'z'), color, await part())
+    // the file's z is up, its y runs along -z, and the middle of the underside is at `at`
+    nearly(worldBox(bracket).min, [0.95, 0.5, 1.975])
+    nearly(worldBox(bracket).max, [1.05, 0.52, 2.025])
+    expect(bracket.userData.middle).toBeCloseTo(0.01)
+    // rotate turns it about at, and leaves its middle as it was
+    const turned = buildObject(modelSpec({ name: 'turned', rotate: [0, 0, 90] }, 'mm', 'z'), color, await part())
+    nearly(worldBox(turned).min, [-0.02, -0.05, -0.025])
+    nearly(worldBox(turned).max, [0, 0.05, 0.025])
+    expect(turned.userData.middle).toBeCloseTo(0.01)
+    // the same numbers in centimetres, y up
+    const tray = buildObject(modelSpec({ name: 'tray' }, 'cm'), color, await parseModel(binaryStl(box([0, 0, 0], [10, 4, 2])), 'stl'))
+    nearly(worldBox(tray).min, [-0.05, 0, -0.01])
+    nearly(worldBox(tray).max, [0.05, 0.04, 0.01])
+    expect(tray.userData.middle).toBeCloseTo(0.02)
+  })
+
+  it("gives every mesh of a model the object's one preset, casting and taking shadows", async () => {
+    const tray = buildObject(modelSpec({ name: 'tray', material: 'wood' }), color, await parseModel(glb({ meshes: [{}, { translation: [2, 0, 0] }] }), 'glb'))
+    const parts = meshesUnder(tray)
+    expect(parts).toHaveLength(2)
+    expect(parts[1].material).toBe(parts[0].material)
+    expect((parts[0].material as THREE.MeshStandardMaterial).color.getHexString()).toBe(new THREE.Color('#a07040').getHexString())
+    expect(parts.every((mesh) => mesh.castShadow && mesh.receiveShadow)).toBe(true)
+    const plain = meshesUnder(buildObject(modelSpec({ name: 'plain' }), color, await parseModel(binaryStl(), 'stl')))[0]
+    expect((plain.material as THREE.MeshStandardMaterial).color.getHexString()).toBe(new THREE.Color('#808080').getHexString())
+  })
+
+  it("hangs objects on a model's node, where they don't count in its box", async () => {
+    const scene = { root: new THREE.Group(), anchors: {} as Record<string, THREE.Object3D> }
+    addObjects(
+      scene,
+      [modelSpec({ name: 'tray', at: [1, 0, 0] }), object({ name: 'cup', shape: 'cylinder', size: [0.08, 0.3], at: [0, 0.1, 0], parent: 'tray' })],
+      color,
+      new Map([['tray', await parseModel(binaryStl(box([0, 0, 0], [0.4, 0.1, 0.3])), 'stl')]]),
+    )
+    expect(scene.anchors.cup.parent).toBe(scene.anchors.tray)
+    expect(scene.anchors.tray.userData.middle).toBeCloseTo(0.05)
+    nearly(worldBox(scene.anchors.tray.children[0]).min, [0.8, 0, -0.15])
+    near(world(scene.anchors.cup), [1, 0.1, 0])
+  })
+
+  it("turns a z-up file onto a robot anchor's axes with up: z and rotate [90, 0, 0]", async () => {
+    const root = new THREE.Group()
+    const base = new THREE.Group()
+    base.rotation.x = -Math.PI / 2 // a robot's base: its z points up
+    root.add(base)
+    const scene = { root, anchors: { base } as Record<string, THREE.Object3D> }
+    // a gripper 20 mm across and 60 mm long, along the file's z
+    const gripper = await parseModel(binaryStl(box([-10, -10, 0], [10, 10, 60])), 'stl')
+    addObjects(scene, [modelSpec({ name: 'gripper', parent: 'base', rotate: [90, 0, 0] }, 'mm', 'z')], color, new Map([['gripper', gripper]]))
+    root.updateWorldMatrix(true, true)
+    // the file's x, y and z are the anchor's
+    expect(gripper.getWorldQuaternion(new THREE.Quaternion()).angleTo(base.getWorldQuaternion(new THREE.Quaternion()))).toBeLessThan(1e-7)
+    // so it stands along the anchor's z, which points up
+    nearly(worldBox(scene.anchors.gripper).min, [-0.01, 0, -0.01])
+    nearly(worldBox(scene.anchors.gripper).max, [0.01, 0.06, 0.01])
   })
 })

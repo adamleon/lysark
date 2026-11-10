@@ -36,3 +36,16 @@ objects:                     # things in the scene (from v2.11.0), in metres and
   tool frame:                # moves with the end effector
     frame: 0.1
     parent: end_effector
+  # models (from v2.13.0): parts from files in the lecture's models/ folder
+  bracket:                   # an STL from a CAD program: in millimetres, z up
+    model: models/bracket.stl
+    unit: mm
+    up: z
+    at: [0.1, 0.3, 0.1]      # the middle of its underside, on the table's top
+    rotate: 180              # half a turn: the slide's camera sees into its corner
+    parent: table
+    material: metal
+  tray:                      # a GLB from Blender: in metres and y up, as glTF is
+    model: models/tray.glb
+    at: [-0.1, 0.3, -0.1]
+    parent: table

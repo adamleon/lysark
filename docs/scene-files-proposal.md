@@ -1,15 +1,18 @@
 # Scene files: proposal
 
 Step 3 of [lysark-v2.md](lysark-v2.md) designs the scene file format before the editor writes
-named views and poses. **Decided 2026-10-16: all eight decisions as recommended** (recorded in lysark-v2.md section 8).
-It is built in the steps below. Step 1 is released (2026-11-03: extension 0.3.0, engine v2.4.0;
-[editor-host.md](editor-host.md)). Step 2, named views, is released (2026-11-04, engine v2.5.0); the
-format reference is [scene-files.md](scene-files.md). Steps 3 to 7 are released (2026-11-09) and
+named views and poses. **Decided 2026-10-16: all eight decisions as recommended** (recorded in
+lysark-v2.md section 8); **decision 9, models, decided 2026-11-09 as recommended**. It is built
+in the steps below. Step 1 is released (2026-11-03: extension 0.3.0, engine v2.4.0;
+[editor-host.md](editor-host.md)). Step 2, named views, is released (2026-11-04, engine v2.5.0);
+the format reference is [scene-files.md](scene-files.md). Steps 3 to 7 are released (2026-11-09) and
 were tried in github.dev on the course lecture the same day: step 3, Save view as… (engine
 v2.6.0); step 4, named poses (v2.7.0); step 5 in three parts, as V did across steps 2 and 3: 5a,
 the joint sliders (J) and P (v2.8.0), 5b, Shift+P, "Save pose as…" (v2.9.0), and 5c, dragging the
 tool with inverse kinematics (v2.10.0); step 6, objects written by hand (v2.11.0); step 7, drag
-handles for objects (v2.12.0). Step 8 is next.
+handles for objects (v2.12.0). Step 8, models from STL and untextured GLB files, is built
+(2026-11-09, engine v2.13.0, no extension change), not yet released; how to write them is in
+[scene-files.md](scene-files.md#models). Its proposals are [below](#proposals-from-step-8).
 It came from four independent designs (smallest change, editor-first, lecturer-first,
 engine-first), scored by three reviewers and combined; the claims about today's code were
 checked against the code.
@@ -136,16 +139,19 @@ Each step lands on its own, with a note and coverage in the demo lecture, as ste
 5. **Pose the robot in the panel.** Joint sliders, P and Shift+P; then dragging the tool with IK.
 6. **Objects, written by hand.** Boxes, cylinders, spheres, coordinate frames, invisible points.
 7. **Drag handles** for objects.
-8. **Models from `assets/`** (STL, and GLB without textures), with a size limit per file.
+8. **Models from `assets/`** (STL, and GLB without textures), with a size limit per file. As
+   decided (decision 9), from the lecture folder too, as images are: `model: <path>` with `unit`
+   and `up`, at most 5 MB per file.
 9. **Textured models**, only once the engine frees textures when a scene is put away (it doesn't
-   today) and they load without a network request, checked in both browsers.
+   today) and they load without a network request, checked in both browsers. The released panel
+   blocks the loader's way of loading them; see [Proposals from step 8](#proposals-from-step-8).
 
 Left for when a lecture needs them: a start state per scene run, a second robot or a moved robot
 in one scene, showing or moving objects per slide, and scene files shared between lectures.
 
 ## Decisions for the author
 
-Each has a recommendation; the names in 3 are permanent once lectures use them.
+Each has a recommendation; the names in 3 and 9 are permanent once lectures use them.
 
 1. **How a slide uses a name.** (a) Where values go: `camera: oversikt`, `joints: q0`.
    (b) New keys `view:` and `pose:`, with `camera:`/`joints:` on top. *Recommended: (a).* Today's
@@ -173,6 +179,27 @@ Each has a recommendation; the names in 3 are permanent once lectures use them.
    *Recommended: yes, for every slide, from step 2.* Both existing lectures use only known keys
    (checked). Strictly, this bends the rule that engine changes never require editing a lecture,
    but only for a key that never did anything.
+9. **Models** (needed before step 8; **decided 2026-11-09, all four parts as recommended**):
+   - *The words.* `model: <path>`, a shape like `box:`, plus `unit: mm | cm | m` (without it, m)
+     and `up: y | z` (without it, y), allowed only with `model`. An STL has no unit: CAD programs
+     usually write millimetres, ROS meshes metres (REP 103). ROS meshes and many CAD programs have
+     z up, and `rotate` alone can't stand a z-up part up, since the underside is measured before
+     the turn. Both keys describe the file, so the scene stays y up in metres, as decision 7 has
+     it. `mesh`, `stl` and `glb` get "Did you mean 'model'?", and `scale` its own message pointing
+     to `unit`.
+   - *Where the files are.* As for images: the path is from the lecture folder (where `slides.md`
+     is), and the file is in the lecture folder or `<course>/assets/` (`models/x.stl`,
+     `../../assets/x.stl`). It is the rule the course README teaches for images, the build and the
+     extension already resolve exactly these two roots, and the engine's demo can have a model in
+     CI (its `/assets/` is not in git).
+   - *The size limit.* 5,000,000 bytes per file on disk, no total per lecture for now. About
+     100,000 triangles as binary STL, far under the extension's own 32 MB, so the lecturer gets the
+     engine's advice. It bounds the one cost not yet measured: every fresh panel page in github.dev
+     reads every model again.
+   - *The course repo.* A small commit of its own once the course runs v2.13.0: a `.gitattributes`
+     with `*.stl binary` and `*.glb binary` (with `core.autocrlf` on, a text STL would otherwise
+     change size between Windows and CI), and a "Models" paragraph in the README (paths, `unit`
+     and `up`, 5 MB, no Git LFS). The engine repo has the same `.gitattributes` from step 8.
 
 ## Also checked
 
@@ -183,3 +210,59 @@ Each has a recommendation; the names in 3 are permanent once lectures use them.
 - The camera spring carries forward per key (`src/engine/camera-merge.ts`).
 - The scene teardown frees geometry and materials but not textures (`src/scene/dispose.ts`),
   which is why textured models wait for step 9.
+
+## Proposals from step 8
+
+Not built; each would be its own small change, landed and understood before a lecture uses it.
+
+At minimum priority, because they go against confirmed decision 7 (colours as named presets;
+`at` at the middle of the underside):
+
+- **A GLB's own colours** (`material: file`). Keep the file's materials instead of a preset. It
+  needs checks of its own (a metallic or see-through material that shows black or empty under the
+  stage's lights), and the colours would not follow the theme, so the print PDF could show a
+  white part on the white page.
+- **The file's own origin** (`origin: file`). Place a model by the origin it has in the file
+  instead of the middle of its bounding box's underside. It helps a tool part drawn around its
+  flange that isn't symmetric about the tool's axis, which today sits off the axis by that much
+  until `at` moves it.
+
+For the future:
+
+- **`unit: in`** (and `up: x`, should a file need it). Rare in this course; either can be added
+  without changing a lecture.
+- **One parse per file.** Each object decodes and parses its own copy of its file when the scene
+  is first shown: for a 5 MB binary STL in headless Chromium, about 30-55 ms per object (about
+  10 ms decoding the base64, the rest parsing and creasing). So two objects showing one file hold
+  two copies of its geometry, and the build parses a file shown in two units twice. Sharing one
+  parse saves that, but shared geometry is a trap for any later change that edits a model in
+  place. Worth it only once a lecture shows a large file many times.
+- **A total per lecture.** Only each file is limited today (5 MB). A lecture with many models
+  grows the student file by about 4/3 of their total, and every fresh panel page in github.dev
+  reads them all again. A total (say 20 MB) can be added without changing a lecture under it.
+- **Image paths the panel can't read.** For a model, the compiler refuses a folder or file name
+  starting with '.', a name with ~ and a digit, and a ':', and the build a path through a link,
+  since extension 0.3.0's panel won't read them. An image path with any of them still builds,
+  but the panel leaves the image out, under "Images not shown:", with the reason "outside the
+  lecture folder and the course's assets/ folder". The compiler could refuse them for images as
+  it does for models (and the build a link), so the build and the panel agree and the message
+  says what to rename. A lecture with such a path would then stop building, so the course's
+  lectures need checking first.
+- **A GPU-memory check in check-offline**, before step 9. On a slide without a scene, after every
+  scene has been shown, three's count of geometries and textures (`renderer.info.memory`) should
+  be what it was before the first one. Today the one-scene rule (lysark-design.md §4.1) rests
+  on `dispose.ts` freeing everything a scene can hold; step 8 keeps to what it frees by refusing
+  the rest, and checks that with a unit test. Textures change that, so this guard comes first,
+  as its own small change.
+- **`dispose.ts` for more than meshes**: textures with step 9, and lines, points, bones and GPU
+  instancing if a later step keeps them in models (today they are taken out or refused).
+- **Step 9's blocker: the released panel's security rules.** Extension 0.3.0's panel page allows
+  images from `blob:` addresses (`img-src data: blob:`), but not fetching them (`connect-src` has
+  no `blob:`). three.js's glTF loader turns a GLB's images into `blob:` addresses and loads them
+  with `ImageBitmapLoader`, which fetches, so in the panel every texture would fail (and the
+  student-file check, `scripts/check-offline.mjs`, fails on any `blob:` request). Textured models
+  need either their images loaded through an `<img>` element from a `data:` address (three's
+  `TextureLoader`; the panel's `img-src` and the student-file check both allow `data:`), or an
+  extension release that allows `blob:` in `connect-src`, with the check taught the same. Either
+  way also textures in `dispose.ts`, and `parseModel` (`src/scene/models.ts`) must let the
+  loader have its images: today its loading manager refuses every address, `blob:` included.

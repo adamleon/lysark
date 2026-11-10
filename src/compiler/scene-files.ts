@@ -1,10 +1,23 @@
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, visit, type Node, type Pair } from 'yaml'
 import type { CameraTargetSpec } from '../engine/slide-types'
-import { OBJECT_MATERIALS, OBJECT_SHAPES, type ObjectMaterial, type ObjectShape, type SceneObject } from '../engine/object-types'
+import {
+  MAX_METRES,
+  OBJECT_MATERIALS,
+  OBJECT_SHAPES,
+  type ModelUnit,
+  type ModelUp,
+  type ObjectMaterial,
+  type ObjectShape,
+  type SceneObject,
+} from '../engine/object-types'
 import { SCENE_ANCHORS } from '../scenes/anchors'
 import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
 import { closest } from './closest'
+import { modelFormat, modelPathProblem, MODEL_UNITS, type ModelRef } from './model-types'
+
+// kept here too, where the editor's handles have always found it
+export { MAX_METRES }
 
 /**
  * A lecture's scene files (scene-files-proposal.md, docs/scene-files.md):
@@ -32,6 +45,8 @@ export interface SceneFile {
   poses: Map<string, NamedPose>
   /** the objects it adds to its base scene, parents before the objects on them */
   objects: SceneObject[]
+  /** the model files its objects show, in the file's order, one for each model object (docs/scene-files.md, "Models") */
+  models: ModelRef[]
 }
 
 /** a named pose: the joints it sets, by name; a list in the file sets them all, in order */
@@ -248,8 +263,8 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
       poses.set(poseName as string, { joints: set, line: lineOf(p.key) })
     }
   }
-  const objects = readObjects(pair(root, 'objects'), base as SceneName, fail)
-  return { path, name, base: base as string, views, poses, objects }
+  const { objects, models } = readObjects(pair(root, 'objects'), base as SceneName, fail, lineOf, path)
+  return { path, name, base: base as string, views, poses, objects, models }
 }
 
 type Fail = (node: unknown, message: string) => never
@@ -260,8 +275,11 @@ const SIZE_OF: Record<(typeof OBJECT_SHAPES)[number], string> = {
   cylinder: 'cylinder must be [diameter, height], in metres (positive numbers)',
   sphere: 'sphere must be its diameter, in metres (a positive number)',
   frame: 'frame must be the length of its axes, in metres (a positive number)',
+  model:
+    "model must be the path of an .stl or .glb file from the lecture folder (where slides.md is), such as models/bracket.stl, " +
+    "or ../../assets/bracket.stl for one in the course's assets/ folder",
 }
-const OBJECT_KEYS = [...OBJECT_SHAPES, 'at', 'rotate', 'material', 'parent']
+const OBJECT_KEYS = [...OBJECT_SHAPES, 'at', 'rotate', 'material', 'parent', 'unit', 'up']
 /** words from other tools for an object's keys */
 const OBJECT_KEY_ALIASES: Record<string, string> = {
   position: 'at',
@@ -271,17 +289,38 @@ const OBJECT_KEY_ALIASES: Record<string, string> = {
   orientation: 'rotate',
   color: 'material',
   colour: 'material',
+  mesh: 'model',
+  stl: 'model',
+  glb: 'model',
+  units: 'unit',
+  up_axis: 'up',
+  upaxis: 'up',
 }
-/** anything larger, or farther out, is metres written as millimetres (the floor grid is 5 m across) */
-export const MAX_METRES = 10
+/** how the shapes are written, for the messages that list them */
+const SHAPES_WRITTEN = 'a shape (box, cylinder, sphere or frame) or a model (model: models/x.stl)'
+const MODEL_UNIT_NAMES = Object.keys(MODEL_UNITS) as ModelUnit[]
 
-/** the file's `objects:`, checked, parents before the objects on them */
-function readObjects(objectsPair: Pair<Node, Node> | undefined, base: SceneName, fail: Fail): SceneObject[] {
-  if (!objectsPair || objectsPair.value === null || (isScalar(objectsPair.value) && objectsPair.value.value === null)) return []
+/** the unit a lecturer most likely meant by `word`: a unit's name in full, or a typo of mm, cm or m */
+function unitGuess(word: string): ModelUnit | undefined {
+  const full = /^(milli|centi)?met(er|re)s?$/i.exec(word)
+  if (full) return full[1]?.toLowerCase() === 'milli' ? 'mm' : full[1]?.toLowerCase() === 'centi' ? 'cm' : 'm'
+  return closest(word, MODEL_UNIT_NAMES) as ModelUnit | undefined
+}
+
+/** the file's `objects:`, checked, parents before the objects on them, with the model files they show */
+function readObjects(
+  objectsPair: Pair<Node, Node> | undefined,
+  base: SceneName,
+  fail: Fail,
+  lineOf: (node: unknown) => number,
+  file: string,
+): { objects: SceneObject[]; models: ModelRef[] } {
+  if (!objectsPair || objectsPair.value === null || (isScalar(objectsPair.value) && objectsPair.value.value === null)) return { objects: [], models: [] }
   const map = objectsPair.value
   if (!isMap(map)) fail(map, "'objects' is a mapping of names to objects")
   const { anchors, parents } = SCENE_ANCHORS[base]
   const read: Array<{ object: SceneObject; node: Node }> = []
+  const models: ModelRef[] = []
   const pairs = (map as { items: Pair<Node, Node>[] }).items
   const names = pairs.map((p) => (isScalar(p.key) ? p.key.value : undefined))
   for (const p of pairs) {
@@ -299,18 +338,25 @@ function readObjects(objectsPair: Pair<Node, Node> | undefined, base: SceneName,
     const v = p.value
     const empty = v === null || (isScalar(v) && v.value === null) || (isMap(v) && v.items.length === 0)
     if (empty) {
-      fail(v ?? p.key, `${where} has nothing in it: give it a shape (box, cylinder, sphere or frame) and where it is, at: [x, y, z]. With only at, it is an invisible point`)
+      fail(v ?? p.key, `${where} has nothing in it: give it ${SHAPES_WRITTEN} and where it is, at: [x, y, z]. With only at, it is an invisible point`)
     }
-    if (!isMap(v)) fail(v, `${where} is a mapping: a shape (box, cylinder, sphere or frame) and where it is, at: [x, y, z]`)
+    if (!isMap(v)) fail(v, `${where} is a mapping: ${SHAPES_WRITTEN} and where it is, at: [x, y, z]`)
     const entries = (v as { items: Pair<Node, Node>[] }).items
     const valueOf = (key: string) => entries.find((q) => isScalar(q.key) && q.key.value === key)
     for (const q of entries) {
       const key = isScalar(q.key) ? q.key.value : undefined
       if (typeof key === 'string' && OBJECT_KEYS.includes(key)) continue
-      const known = 'An object has a shape (box, cylinder, sphere or frame), at, rotate, material and parent'
+      const known = `An object has ${SHAPES_WRITTEN}, at, rotate, material and parent; a model also has unit and up`
       const alias = typeof key === 'string' && Object.hasOwn(OBJECT_KEY_ALIASES, key.toLowerCase()) ? OBJECT_KEY_ALIASES[key.toLowerCase()] : undefined
       const guess = typeof key === 'string' ? (alias ?? closest(key, OBJECT_KEYS)) : undefined
       if (key === 'size') fail(q.key, `${where} has 'size': write the size with the shape, such as box: [0.4, 0.2, 0.4]. ${known}`)
+      if (key === 'scale') {
+        fail(
+          q.key,
+          `${where} has 'scale': a shape's size is written with it (box: [0.4, 0.2, 0.4]), and a model's comes from its file: ` +
+            `give unit: mm for a file measured in millimetres`,
+        )
+      }
       fail(q.key, `${where} has unknown key '${String(key)}'.${guess ? ` Did you mean '${guess}'?` : ''} ${known}`)
     }
     const shapes = OBJECT_SHAPES.filter((shape) => valueOf(shape))
@@ -322,8 +368,50 @@ function readObjects(objectsPair: Pair<Node, Node> | undefined, base: SceneName,
       }
     }
 
+    // a model: its file's path, checked as text only (the build and the panel find and
+    // check the file), and what the file can't say for itself, its unit and which axis is up
+    let model: SceneObject['model']
+    const unitPair = valueOf('unit')
+    const upPair = valueOf('up')
+    if (shape === 'model') {
+      const modelPair = valueOf('model')!
+      const node = modelPair.value
+      const src = isScalar(node) ? node.value : undefined
+      if (typeof src !== 'string' || src.trim() === '') fail(node ?? modelPair.key, `${where} ${SIZE_OF.model}`)
+      const problem = modelPathProblem(src as string)
+      if (problem) fail(node, `${where} ${problem}`)
+      let unit: ModelUnit = 'm'
+      if (unitPair) {
+        const value = isScalar(unitPair.value) ? unitPair.value.value : undefined
+        if (typeof value !== 'string' || !Object.hasOwn(MODEL_UNITS, value)) {
+          const guess = typeof value === 'string' ? unitGuess(value) : undefined
+          fail(
+            unitPair.value ?? unitPair.key,
+            `${where} unit '${String(value)}' isn't one of mm, cm or m: what the file is measured in (without unit, m).` +
+              `${guess ? ` Did you mean '${guess}'?` : ''}`,
+          )
+        }
+        unit = value as ModelUnit
+      }
+      let up: ModelUp = 'y'
+      if (upPair) {
+        const value = isScalar(upPair.value) ? upPair.value.value : undefined
+        if (value !== 'y' && value !== 'z') {
+          fail(upPair.value ?? upPair.key, `${where} up must be the axis that is up in the file, y or z; without up, y; ROS meshes and many CAD programs have z up`)
+        }
+        up = value as ModelUp
+      }
+      model = { src: src as string, unit, up }
+      models.push({ src: src as string, format: modelFormat(src as string)!, unit, object: name, file, line: lineOf(node) })
+    } else {
+      // a shape is built in metres with y up: only a file needs saying what it is in
+      const sized = shape === 'point' ? 'a shape' : `a ${shape}`
+      if (unitPair) fail(unitPair.key, `${where} has unit, which says what a model's file is measured in: ${sized}'s size is in metres already`)
+      if (upPair) fail(upPair.key, `${where} has up, which says which axis is up in a model's file: a shape is built with y up`)
+    }
+
     let size: number[] = []
-    if (shape !== 'point') {
+    if (shape !== 'point' && shape !== 'model') {
       const node = valueOf(shape)!.value
       const count = shape === 'box' ? 3 : shape === 'cylinder' ? 2 : 1
       // each number with its own node, so an error names the line of the one that is wrong
@@ -420,6 +508,7 @@ function readObjects(objectsPair: Pair<Node, Node> | undefined, base: SceneName,
     const object: SceneObject = { name, shape, size, at, rotate }
     if (shape !== 'point' && shape !== 'frame') object.material = material ?? 'grey'
     if (parent !== undefined) object.parent = parent
+    if (model) object.model = model
     read.push({ object, node: p.key })
   }
 
@@ -450,5 +539,5 @@ function readObjects(objectsPair: Pair<Node, Node> | undefined, base: SceneName,
     }
     left = left.filter((entry) => !ready.includes(entry))
   }
-  return out
+  return { objects: out, models }
 }

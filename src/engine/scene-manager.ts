@@ -3,7 +3,7 @@ import { themeColor } from '../theme'
 import type { SceneLayer } from '../scene/scene-layer'
 import { disposeSceneGraph } from '../scene/dispose'
 import { addObjects } from '../scene/objects'
-import type { SceneObject } from './object-types'
+import type { ModelLoader, SceneObject } from './object-types'
 import type { MotionSystem } from './motion-system'
 import type { SceneInstance, SceneModule } from './scene-types'
 
@@ -41,6 +41,8 @@ export class SceneManager {
     private readonly container: HTMLElement,
     /** the lecture's objects, by scene: added to each scene when it is first built */
     private readonly objects: Record<string, SceneObject[]> = {},
+    /** builds the objects' models; a deck has one only when a scene it runs has a model (src/scene/models.ts) */
+    private readonly models?: ModelLoader,
   ) {}
 
   get active(): SceneInstance | null {
@@ -129,9 +131,21 @@ export class SceneManager {
     let instance = this.instances.get(sceneId)
     if (!instance) {
       instance = await module.build()
+      const objects = this.objects[sceneId] ?? []
+      // models are parsed here, after suspendActive has swept the outgoing
+      // scene, and parsing makes CPU data only: two scenes' GPU resources are
+      // still never alive together. A model must never make this throw, or the
+      // snapshot would stay on screen: the loader never rejects, and should one
+      // anyway, the objects are built without their models
+      const models = this.models
+        ? await this.models.load(objects).catch((error: unknown) => {
+            console.error(`scene '${sceneId}': its models couldn't be built:`, error)
+            return undefined
+          })
+        : undefined
       // the lecture's objects (scene files) are part of the scene from now on,
       // kept and swept with it, and its anchors by their names
-      addObjects(instance, this.objects[sceneId] ?? [])
+      addObjects(instance, objects, themeColor, models)
       this.instances.set(sceneId, instance)
       if (!instance.defaults.camera?.lookAt || !instance.defaults.camera.offset) {
         console.warn(

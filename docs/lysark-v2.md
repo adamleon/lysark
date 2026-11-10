@@ -513,6 +513,16 @@ HTTPS server.
   moved to v2.12.0, and the author tried them in github.dev on Baneplanlegging the same day: they
   work. A preview opened before Publish lectures had finished kept the old engine until the page
   was reloaded. Next: step 8, models from `assets/`.
+- Scene files, step 8 (built 2026-11-09, not yet released): `model: <path>` makes an object a
+  part from an STL file (binary or text) or a GLB without textures, with `unit: mm|cm|m` and
+  `up: y|z` for what the file can't say. The path is from the lecture folder, as for images, and
+  the file is in the lecture folder or the course's `assets/`, at most 5 MB (decision 9, section
+  8). The model stands on `at` (the middle of its bounding box's underside) and takes its
+  object's `material` preset. The build checks each file and builds it in once; only a lecture
+  with models carries the code that reads them. The panel reads the same files through the host
+  after the images, with the same checks, and names a model it can't show under "Models not
+  shown:". The demo shows a bracket (STL, millimetres, z up) and a tray (GLB) on the table.
+  Engine v2.13.0, no extension change. [scene-files.md](scene-files.md#models).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).
@@ -618,6 +628,17 @@ Confirmed by the author on 2026-10-16, all as recommended in
 - Objects: height is the middle number (y up, as in `camera:`), `at` is the middle of the
   underside, turns are in degrees, colours are named presets.
 - A misspelled top-level slide key becomes a build error, from the step that adds named views.
+
+Confirmed by the author on 2026-11-09, all as recommended in
+[scene-files-proposal.md](scene-files-proposal.md) (decision 9, models, before step 8):
+
+- An object's model is written `model: <path>`, with `unit: mm | cm | m` (default m) and
+  `up: y | z` (default y), allowed only with `model`.
+- A model's path is from the lecture folder, as for images, and the file is in the lecture folder
+  or `<course>/assets/`.
+- A model file is at most 5,000,000 bytes on disk; no total per lecture for now.
+- The course repo gets a small commit of its own once it runs v2.13.0: `.gitattributes` (`*.stl`
+  and `*.glb` binary) and a README paragraph on models.
 
 ## 9. Open questions
 

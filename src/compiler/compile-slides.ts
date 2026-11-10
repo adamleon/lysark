@@ -6,6 +6,7 @@ import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
 import type { SceneObject } from '../engine/object-types'
 import { closest } from './closest'
+import type { ModelRef } from './model-types'
 import { lectureObjects, readSceneFiles, type SceneFile } from './scene-files'
 import { slideRanges, splitLines } from './slide-ranges'
 import { PROFILES, type ProfileName } from '../engine/time-scaling'
@@ -673,6 +674,9 @@ function validateTrajectory(raw: unknown, slideNo: number): TrajectorySpec | und
 // lysark-v2.md §5): it swaps each <img src> for a placeholder and reports the
 // sources, and the caller reads the files and fills the placeholders in.
 
+// the build and the panel take a lecture's models from here, as they take its images
+export type { ModelRef } from './model-types'
+
 /** an image a lecture uses, as written in its slides.md */
 export interface ImageRef {
   /** the src as written (HTML entities decoded); relative to slides.md */
@@ -687,6 +691,12 @@ export interface CompiledLecture {
   images: ImageRef[]
   /** the scene files' objects, by the base scene they are in (docs/scene-files.md) */
   objects: Record<string, SceneObject[]>
+  /**
+   * the model files the lecture shows, one for each model object, for the
+   * caller to read and check: only those of scenes some slide runs, so a model
+   * in a scene no slide uses is never read (docs/scene-files.md, "Models")
+   */
+  models: ModelRef[]
 }
 
 export const IMAGE_TOKEN = 'lysark-image:'
@@ -944,5 +954,9 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
     out.push(slide)
   })
 
-  return { slides: out, images, objects: lectureObjects(scenes) }
+  // a slide's scene is the base its scene file builds on, and a base's objects come
+  // from the one file of that base that has any (readSceneFiles)
+  const running = new Set(out.map((slide) => slide.scene))
+  const models = [...scenes.values()].filter((file) => running.has(file.base)).flatMap((file) => file.models)
+  return { slides: out, images, objects: lectureObjects(scenes), models }
 }

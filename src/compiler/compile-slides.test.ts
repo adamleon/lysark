@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileSlides } from './compile-slides'
+import { compileLecture, compileSlides } from './compile-slides'
 
 const deck = `---
 id: one
@@ -489,5 +489,34 @@ describe('compileSlides — trajectory playback + curve widget', () => {
     expect(() =>
       compileSlides('---\nscene: arm\nwidgets:\n  - type: curve\n    profile: cubic\n    show: [s, jerk]\n---\nx'),
     ).toThrow(/curve 'show'/)
+  })
+})
+
+describe('compileLecture — models (scene-files-proposal.md step 8)', () => {
+  const files = {
+    'scenes/celle.yaml': 'base: agilus\nobjects:\n  part: { model: models/part.stl, unit: mm }\n  table: { box: [1, 1, 1] }\n',
+    'scenes/arm.yaml': 'base: arm\nobjects:\n  tray: { model: ../../assets/tray.glb }\n  cup: { model: ../../assets/tray.glb, parent: tray }\n',
+  }
+  const slide = (scene?: string) => `---\n${scene ? `scene: ${scene}` : 'layout: center'}\n---\n# x\n`
+
+  it('reports the models of the scenes the slides run, and only those', () => {
+    const part = { src: 'models/part.stl', format: 'stl', unit: 'mm', object: 'part', file: 'scenes/celle.yaml', line: 3 }
+    expect(compileLecture(slide('celle'), files).models).toEqual([part])
+    // a slide that names the engine scene runs the same scene, with the file's objects
+    expect(compileLecture(slide('agilus'), files).models).toEqual([part])
+    // one for each object, even when two show the same file
+    expect(compileLecture(slide('arm') + slide('celle'), files).models.map((m) => `${m.file}:${m.object}`)).toEqual([
+      'scenes/arm.yaml:tray',
+      'scenes/arm.yaml:cup',
+      'scenes/celle.yaml:part',
+    ])
+  })
+
+  it('does not report a model in a scene no slide runs', () => {
+    expect(compileLecture(slide('arm'), files).models.map((m) => m.object)).toEqual(['tray', 'cup'])
+    expect(compileLecture(slide('pendulum'), files).models).toEqual([])
+    expect(compileLecture(slide(), files).models).toEqual([])
+    // the objects themselves are still all there: the build picks the scenes it runs (vite-plugin-lecture.ts)
+    expect(Object.keys(compileLecture(slide(), files).objects).sort()).toEqual(['agilus', 'arm'])
   })
 })

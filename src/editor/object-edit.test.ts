@@ -173,4 +173,33 @@ describe('objects in the files', () => {
     expect(placementChanges({}, objects([0, 0, 0]))).toBeNull()
     expect(placementChanges({}, {})).toEqual([])
   })
+
+  it("loads a model object afresh for any change but its place, as the compiler reads the file", () => {
+    const scene = (bracket: string) =>
+      readSceneFiles({ 'scenes/arm.yaml': `base: arm\n\nobjects:\n  table:\n    box: [0.4, 0.3, 0.4]\n  bracket:\n${bracket}` }).get('arm')!.objects
+    const before = { arm: scene('    model: models/bracket.stl\n    unit: mm\n    up: z\n    at: [0, 0.3, 0]\n    parent: table\n') }
+    const after = (text: string) => placementChanges(before, { arm: scene(text) })
+    // moved, typed or dragged: in place
+    const moved = after('    model: models/bracket.stl\n    unit: mm\n    up: z\n    at: [0.1, 0.3, 0]\n    rotate: 30\n    parent: table\n')
+    expect(moved).toEqual([{ scene: 'arm', index: 1, object: expect.objectContaining({ name: 'bracket', at: [0.1, 0.3, 0], rotate: [0, 30, 0] }) }])
+    // the same keys in another order are the same object
+    expect(after('    parent: table\n    at: [0, 0.3, 0]\n    up: z\n    unit: mm\n    model: models/bracket.stl\n')).toEqual([])
+    // another file, unit, up, colour or parent: the scene is built afresh
+    for (const changed of [
+      '    model: models/bracket.glb\n    unit: mm\n    up: z\n    at: [0, 0.3, 0]\n    parent: table\n',
+      '    model: models/bracket.stl\n    unit: cm\n    up: z\n    at: [0, 0.3, 0]\n    parent: table\n',
+      '    model: models/bracket.stl\n    unit: mm\n    at: [0, 0.3, 0]\n    parent: table\n',
+      '    model: models/bracket.stl\n    unit: mm\n    up: z\n    at: [0, 0.3, 0]\n    parent: table\n    material: metal\n',
+      '    model: models/bracket.stl\n    unit: mm\n    up: z\n    at: [0, 0.3, 0]\n',
+    ]) {
+      expect(after(changed), changed).toBeNull()
+    }
+  })
+
+  it('counts every key but at and rotate, a key objects get later too', () => {
+    const table: SceneObject = { name: 'table', shape: 'box', size: [0.4, 0.3, 0.4], at: [0, 0, 0], rotate: [0, 0, 0], material: 'wood' }
+    const extra = { ...table, later: 1 } as SceneObject
+    expect(placementChanges({ arm: [table] }, { arm: [extra] })).toBeNull()
+    expect(placementChanges({ arm: [extra] }, { arm: [{ ...extra, at: [1, 0, 0] }] })).toHaveLength(1)
+  })
 })

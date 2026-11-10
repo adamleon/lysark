@@ -335,6 +335,17 @@ opened directly. Full resolution, all interactivity.
 > `ColladaLoader.parse` inside a custom `URDFLoader` `loadMeshCb`. The output is
 > `dist-offline/<deck>-offline.html`, not `lysark-offline.html`. The rules themselves (no runtime
 > `fetch`, no dynamic `import()`, no workers from URLs, parse from strings) still hold.
+>
+> **From engine v2.13.0** there is a GLB path, for scene files' models only (scene-files.md,
+> "Models"): the build inlines each STL or GLB file once as a base64 constant
+> (`vite-plugin-slides.ts`), and `src/scene/models.ts` parses it in memory with
+> `STLLoader.parse` or `GLTFLoader.parseAsync`. Textures, buffers in other files, Draco and
+> meshopt are refused before parsing (`src/compiler/model-types.ts`): a GLB's embedded images
+> load through `blob:` URLs, and Draco can't be decoded in memory under these rules, since
+> `DRACOLoader` always decodes in a Worker made from a Blob URL. Two lines below are wrong for
+> that reason: textures "embedded inside the GLB" are fetched too, as `GLTFLoader` turns each
+> image into a `blob:` URL, which `ImageBitmapLoader` (its choice in Chrome and Firefox)
+> fetches; and a Draco-compressed GLB can't be "decoded in-memory".
 
 - **No `fetch` anywhere at runtime.** All GLB/URDF/textures pre-encoded to base64 constants
   (`scripts/encode-assets.mjs`); robot loaded via `URDFLoader.parse(urdfString)` plus a

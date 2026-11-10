@@ -81,11 +81,14 @@ export default defineConfig(({ command, mode }) => {
       : {}),
     // the engine runs from inside the course's node_modules, so its own source
     // isn't crawled for dependencies; list them so dev doesn't re-optimize mid-load
+    // (the STL and GLB loaders are src/scene/models.ts's, for a lecture with models)
     optimizeDeps: {
       include: [
         'three',
         'three/addons/controls/OrbitControls.js',
         'three/addons/loaders/ColladaLoader.js',
+        'three/addons/loaders/GLTFLoader.js',
+        'three/addons/loaders/STLLoader.js',
         'three/addons/utils/BufferGeometryUtils.js',
         'urdf-loader',
         'uplot',

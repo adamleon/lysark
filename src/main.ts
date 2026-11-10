@@ -37,6 +37,7 @@ const sceneManager = new SceneManager(
   deck.scenes,
   document.getElementById('scene-layer')!,
   deck.objects,
+  deck.models,
 )
 
 // reference-path lines (PTP curve / Lin straight line) — geometry only, never

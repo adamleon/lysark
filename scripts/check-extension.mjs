@@ -3,10 +3,11 @@
 // isolated like vscode.dev and github.dev), driven with Playwright, against an
 // editor runtime served the way GitHub Pages serves it. For each editor
 // folder it makes a small course from the demo lecture (an image in the
-// lecture folder, one in the course's assets/, a scene file), opens slides.md,
-// opens the preview and, by the runtime's message version:
+// lecture folder, one in the course's assets/, a scene file, and models in
+// both), opens slides.md, opens the preview and, by the runtime's message version:
 //
-//   3  images shown from both folders; saving a scene file sends the files
+//   3  images shown from both folders, and with models (v2.13.0) models from
+//      both folders shown in the scene; saving a scene file sends the files
 //      again; V and Scene Actions… write the view into slides.md; undoing that
 //      edit reaches the panel; and with an engine that has named views
 //      (v2.5.0), V on a slide that names one writes it into the scene file,
@@ -90,6 +91,23 @@ function knowsObjectHandles(editorDir) {
   return buildSays(editorDir, 'Letting go writes the object')
 }
 
+/** true if the editor build shows models from files (engine v2.13.0): the compiler's message for a file type it can't show is in its files */
+function knowsModels(editorDir) {
+  return buildSays(editorDir, "isn't a file a lecture can show")
+}
+
+/** the demo's scene file comment that starts its models, which come last (lectures/demo/scenes/arm.yaml) */
+const MODELS_MARK = /\r?\n[ \t]*# models \(from v2\.13\.0\)[\s\S]*$/
+
+/** the model makeCourse adds from the course's assets/, by its path from the lecture folder */
+const ASSETS_MODEL = '../../assets/bracket.stl'
+
+/** the srcs of the demo lecture's models, as its scene file writes them */
+function demoModels() {
+  const objects = parseYaml(readFileSync(join(ROOT, 'lectures/demo/scenes/arm.yaml'), 'utf8')).objects ?? {}
+  return Object.values(objects).flatMap((object) => (typeof object?.model === 'string' ? [object.model] : []))
+}
+
 /** true if the editor build has Save view as… (engine v2.6.0): its dialog's title is in its files */
 function knowsSaveAs(editorDir) {
   const assets = join(editorDir, 'assets')
@@ -117,16 +135,26 @@ function inlinePoses(slides, sceneText) {
 }
 
 /** a course folder whose workspace settings point the extension at `editorUrl` */
-function makeCourse(editorUrl, namedViews, poses, objects) {
+function makeCourse(editorUrl, namedViews, poses, objects, models) {
   const dir = mkdtempSync(join(tmpdir(), 'lysark-course-'))
   const lecture = join(dir, 'lectures', 'demo')
   mkdirSync(join(lecture, 'scenes'), { recursive: true })
   mkdirSync(join(dir, 'assets'))
   mkdirSync(join(dir, '.vscode'))
   cpSync(join(ROOT, 'lectures/demo/images'), join(lecture, 'images'), { recursive: true })
+  cpSync(join(ROOT, 'lectures/demo/models'), join(lecture, 'models'), { recursive: true })
   let arm = readFileSync(join(ROOT, 'lectures/demo/scenes/arm.yaml'), 'utf8')
-  // objects come last in the file (their slide's anchors then warn, and the camera stays)
+  // objects come last in the file (their slide's anchors then warn, and the camera stays),
+  // and the models last among them
   if (!objects) arm = arm.replace(/\r?\nobjects:[\s\S]*$/, '\n')
+  else if (!models) {
+    if (!MODELS_MARK.test(arm)) throw new Error("lectures/demo/scenes/arm.yaml has no '# models (from v2.13.0)' comment to leave its models out at")
+    arm = arm.replace(MODELS_MARK, '\n')
+  } else {
+    // a model from the course's assets/ too: its bytes as they are (the extension reads any file's)
+    writeFileSync(join(dir, 'assets/bracket.stl'), readFileSync(join(ROOT, 'lectures/demo/models/bracket.stl')))
+    arm = `${arm.replace(/\s*$/, '\n')}  shelf bracket:\n    model: ${ASSETS_MODEL}\n    unit: mm\n    up: z\n    at: [0.12, 0.3, -0.12]\n    parent: table\n`
+  }
   let slides = readFileSync(join(ROOT, 'lectures/demo/slides.md'), 'utf8')
   // what an older editor doesn't know is written out as numbers
   if (!poses) slides = inlinePoses(slides, arm)
@@ -199,7 +227,7 @@ process.on('SIGINT', () => {
 })
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, lines) {
+async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, models, lines) {
   let ok = true
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
@@ -278,6 +306,32 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
       JSON.stringify(images) === JSON.stringify(['../../assets/dot.svg', 'images/two-link-arm.svg']),
       `images from the lecture folder and the course's assets/: ${JSON.stringify(images)}`,
     )
+    if (models) {
+      // models from both folders too, read through the extension as images are, and shown: each
+      // model object of the first slide's scene (the arm's) is built with the file's meshes
+      const shown = await frame
+        .waitForFunction(() => {
+          const L = window.__lysark
+          if (L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm') return null
+          const meshes = {}
+          for (const [name, node] of Object.entries(L.sceneManager.active.anchors)) {
+            const model = node.children.find((child) => child.name === `object:${name}:model`)
+            if (!model) continue
+            meshes[name] = 0
+            model.traverse((part) => {
+              if (part.isMesh) meshes[name] += 1
+            })
+          }
+          return { files: Object.keys(window.__LYSARK_MODELS__ ?? {}).sort(), meshes }
+        }, null, { timeout: 30_000 })
+        .then((handle) => handle.jsonValue(), () => null)
+      const expected = [...demoModels(), ASSETS_MODEL].sort()
+      const built = Object.values(shown?.meshes ?? {})
+      check(
+        JSON.stringify(shown?.files) === JSON.stringify(expected) && built.length === expected.length && built.every((n) => n > 0),
+        `models from the lecture folder and the course's assets/, shown in the scene: ${JSON.stringify(shown)}`,
+      )
+    } else lines.push('(models not checked: this editor has none)')
     await frame.evaluate(() => {
       window.__received = []
       window.addEventListener('message', (e) => window.__received.push(e.data))
@@ -565,7 +619,8 @@ async function checkExtension(editorDir) {
   const namedViews = knowsNamedViews(editorDir)
   const poses = knowsPoses(editorDir)
   const objects = knowsObjects(editorDir)
-  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews, poses, objects)
+  const models = knowsModels(editorDir)
+  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews, poses, objects, models)
   let stopTestWeb
   let browser
   let ok = false
@@ -575,7 +630,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), lines)
+    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), models, lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

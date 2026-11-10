@@ -15,6 +15,7 @@ import { createJointPanel, type PanelState } from './joint-panel'
 import { objectEdit, objectsFile, placementChanges, type ObjectPlace } from './object-edit'
 import { createObjectHandles, type ObjectsState } from './object-handles'
 import { loadImages } from './panel-images'
+import { loadModels } from './panel-models'
 import { createToolHandle, stepToward } from './tool-handle'
 import { EDITOR_PROTOCOL } from './panel-page.js'
 import {
@@ -51,12 +52,12 @@ import {
  * site, and talks to the extension through VS Code's webview messages. The
  * extension sends the lecture's files (slides.md, and the files matching the
  * page's `include` patterns); this page checks that they compile, reads the
- * lecture's images through the extension, then starts the deck. New text that
- * only changes cameras (a saved view, say) is put into the running deck at
- * once and 'shown', as is text that only changes joints (a saved pose), or
- * where the scene's objects are (a moved object). Other
- * new text that compiles is 'accepted', and the
- * extension then loads the panel afresh and sends that text again on 'ready'.
+ * lecture's images and models through the extension, then starts the deck.
+ * New text that only changes cameras (a saved view, say) is put into the
+ * running deck at once and 'shown', as is text that only changes joints (a
+ * saved pose), or where the scene's objects are (a moved object). Other new
+ * text that compiles is 'accepted', and the extension then loads the panel
+ * afresh and sends that text again on 'ready'.
  * Text that doesn't compile leaves the last good version running and shows
  * the error.
  *
@@ -529,22 +530,30 @@ window.addEventListener('message', async (event) => {
     shownFiles = files
     if (typeof message.slide === 'number' && message.slide >= 0) location.hash = `#${message.slide + 1}`
     booted = true
-    // the images first: the deck is built with them (a slide asked for meanwhile
-    // goes into the address, where the deck starts)
-    // (a request at a time can be large and slow in github.dev: two minutes each)
-    const loaded = await loadImages(compileLecture(text, files).images, (paths) => host.read(paths, 'bytes', 120_000))
+    // the images, then the models: the deck is built with them (a slide asked
+    // for meanwhile goes into the address, where the deck starts)
+    // (a request at a time can be large and slow in github.dev: two minutes each.
+    // The extension answers one request at a time, but each waits from when it is
+    // sent, so the models are asked for only once the images have come)
+    const lecture = compileLecture(text, files)
+    const readBytes = (paths: string[]) => host.read(paths, 'bytes', 120_000)
+    const loaded = await loadImages(lecture.images, readBytes)
+    const models = await loadModels(lecture.models, readBytes)
     images = loaded.uris
     window.__LYSARK_FILES__ = files
     window.__LYSARK_IMAGES__ = images
+    window.__LYSARK_MODELS__ = models.files
     try {
       await import('../main')
       runningDeck = (await import('./deck-from-source')).default
       clearLoading()
       updateHint()
       post({ type: 'lysark:shown', seq: shownSeq, index: lysark()?.engine.currentIndex })
-      if (loaded.problems.length > 0) {
-        showBanner(`Images not shown:\n${loaded.problems.join('\n')}`)
-      }
+      const notShown = [
+        ...(loaded.problems.length > 0 ? [`Images not shown:\n${loaded.problems.join('\n')}`] : []),
+        ...(models.problems.length > 0 ? [`Models not shown:\n${models.problems.join('\n')}`] : []),
+      ]
+      if (notShown.length > 0) showBanner(notShown.join('\n'))
     } catch (err) {
       // the deck's files didn't load (a network failure, or the site was
       // republished meanwhile): only loading the panel afresh helps
@@ -1341,11 +1350,14 @@ function objectsFileHere(scene: string): ReturnType<typeof objectsFile> {
   return objectsFileMemo.file
 }
 
-/** how far up its own y an object's ring sits: the middle of its shape */
-function middleOf(spec: SceneObject): number {
-  if (spec.shape === 'box' || spec.shape === 'cylinder') return spec.size[1] / 2
-  if (spec.shape === 'sphere') return spec.size[0] / 2
-  return 0
+/**
+ * how far up its own y an object's ring sits: the middle of its shape or
+ * model, which src/scene/objects.ts measured when it built the object (a
+ * model's height is known only from its file)
+ */
+function middleOf(node: THREE.Object3D): number {
+  const middle: unknown = node.userData.middle
+  return typeof middle === 'number' && Number.isFinite(middle) ? middle : 0
 }
 
 /**
@@ -1393,7 +1405,7 @@ const objectHandles = createObjectHandles((): ObjectsState => {
         name: spec.name,
         node,
         place: placed?.place ?? { at: spec.at, rotate: spec.rotate },
-        middle: middleOf(spec),
+        middle: middleOf(node),
         turnable: spec.shape !== 'point' || carrying.has(spec.name),
       },
     ]

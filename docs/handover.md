@@ -118,6 +118,52 @@ panel's hint shows which: from v2.8.0 it ends "J: pose the robot"), and the pane
 after a click in it (it follows the cursor in slides.md, but keys typed there go into the text;
 now in scene-files.md and lysark-v2.md section 5). Next: step 8, models from `assets/`.
 
+Step 8 is built and checked (2026-11-09), not yet released: engine v2.13.0, no extension change.
+The author confirmed decision 9 of scene-files-proposal.md (all four parts as recommended) the
+same day: `model: <path>` with `unit: mm|cm|m` and `up: y|z`; paths from the lecture folder, as
+for images, the file in the lecture folder or the course's `assets/`; at most 5 MB per file; and
+a course commit later (below). An object's model is an STL (binary or text) or a GLB without
+textures. The compiler checks the text and reports each model with its scene file and line
+(src/compiler/scene-files.ts; src/compiler/model-types.ts holds the checks that need no parse,
+shared with the build and the panel). The build (vite-plugin-slides.ts) finds each file as it
+finds images, checks it (src/scene/model-check.ts, which parses with three's loaders, in Node)
+and inlines it once as base64 in the slides module's `models` export; the deck gets a model
+loader (src/scene/models.ts, with the loaders) only when a scene it runs has a model
+(vite-plugin-lecture.ts, `Deck.models`), so other lectures are unchanged. The scene manager
+parses the models before it adds the objects, and src/scene/objects.ts (`fitModel`) stands each
+on its `at` (the middle of its bounding box's underside, after `unit` and `up`) with the preset
+material and records `userData.middle` for M's ring, for every shape. The panel reads the files
+through the host after the images (src/editor/panel-models.ts), with the same checks and a
+"Models not shown:" banner; any change to a model object but its place loads the panel afresh.
+Refused (each with a message): textures (step 9), data outside the .glb, Draco and meshopt,
+skins, GPU instancing, unknown required glTF extensions, Git LFS pointers. A GLB's lights,
+cameras, lines, points and animations are left out without a word. The demo has a bracket
+(models/bracket.stl, mm, z up) and a tray (models/tray.glb) on the table, made by
+scripts/make-demo-models.mjs, and the engine repo now has a `.gitattributes` (`*.stl binary`,
+`*.glb binary`). Checked: vitest, build:demo and check:demo, check-editor in Chromium and
+Firefox (with a new section on the models), check-extension with this editor and v2.12.0's (so
+extension 0.3.0 serves `../../assets/*.stl` to the panel), and the Baneplanlegging build. A review (2026-11-10) then found and fixed: GLB
+layouts that got past the checks (a second JSON chunk, a list written as an object, a skin or
+GPU instancing on a node alone; what three.js built is now checked too, and the loader may ask
+for no other file); letter case above the lecture folder (`../L1/`) and in the name of the
+course's assets folder, which Windows let through, now checked all along the path, for images
+too; model paths only the panel refused (a name starting with '.', ~ and a digit, a ':', a
+link), now refused by the compiler and the build; and `lysark dev` not reloading after a rename
+that fixed letter case. Its proposals (a GLB's own colours and the file's own origin at minimum
+priority, as they go against decision 7; `unit: in`, one parse per file, a total per lecture,
+image paths the panel can't read refused as model paths are, a GPU-memory check in
+check-offline before step 9, and step 9's blocker in the released panel's security rules) are
+in scene-files-proposal.md, "Proposals from step 8".
+
+**To release step 8:** the panel loads its editor from the course's site, so github.dev can
+only try v2.13.0 once it is tagged and the course has moved to it (Update engine). Then, on the
+course lecture with a model of about 5 MB in `assets/`, time the first panel load and a reload
+(if it is slow, a v2.13.1 lowers the limit before any lecture relies on it), and check that the
+PDF shows the model. After that, the course commit of decision 9: `.gitattributes`
+(`*.stl binary`, `*.glb binary`; SolidWorks writes `.STL` in capitals, and where git matches
+patterns by case, as on Linux, `*.[sS][tT][lL]` covers both) and a README "Models" paragraph
+(paths, `unit` and `up`, 5 MB, no Git LFS). Then the discussion below.
+
 **After step 8, raise with the author** (asked for on 2026-11-09, not to be worked on before):
 `slides.md` is getting large and hard to navigate. Every slide starts with a long frontmatter
 block before its content, and the content holds syntax such as `<!-- pause -->`. Discuss how
@@ -231,7 +277,8 @@ tool stays within 0.7 mm of the line. The pptx's rendered-equation slides 6–8 
 
 12 slides, 3 scenes (arm/pendulum/agilus): title idle wave · PID control + loop
 SVG · overshoot slider+plot · anchored `$x_e$` · damping regimes · objects from the
-scene file · pendulum · agilus intro + joint · scene-less outro. Every milestone's review leaned on it —
+scene file (two of them models from `models/`, written by `scripts/make-demo-models.mjs`) ·
+pendulum · agilus intro + joint · scene-less outro. Every milestone's review leaned on it —
 keep it green.
 
 ## Layout
@@ -241,7 +288,11 @@ keep it green.
   channel-binding, camera-merge.
 - `src/scene/` — scene-layer (the one persistent renderer), camera-controller,
   **ik** (DLS solver), dispose, **objects** (builds a scene file's objects into a scene;
-  their data type is `src/engine/object-types.ts`).
+  their data type is `src/engine/object-types.ts`), **models** (parses STL and GLB files
+  for model objects; holds three's loaders, so only decks with models import it),
+  model-check (the model file check the build and the panel share; the checks that need no
+  parse are `src/compiler/model-types.ts`), model-test-files.js (model files as bytes, for
+  tests and the demo's files).
 - `src/scenes/` — `arm` (exposes `ik` from v2.10.0), `pendulum`, `agilus` (+ `parseAgilusRobot`, exposes `ik`),
   `agilus-duo` (two robots). One scene's GPU alive at a time. `joints.ts` and `anchors.ts`:
   each scene's joints and anchors for the compiler, which can't load the scenes.
@@ -255,7 +306,9 @@ keep it green.
   text in the browser), `camera-edit.ts` (writes a view into a slide, byte for byte),
   `panel-page.js` (the panel's page and the runtime's file list, shared with the
   extension and the CI check), `joint-panel.ts` and `tool-handle.ts` (J), `pose-edit.ts` (P),
-  `object-handles.ts` and `object-edit.ts` (M, moving objects). `editor.html` is its build entry.
+  `object-handles.ts` and `object-edit.ts` (M, moving objects), `panel-images.ts` and
+  `panel-models.ts` (the images and models, read through the host). `editor.html` is its build
+  entry.
   `src/compiler/slide-ranges.ts` — where each slide sits, shared by the compiler
   and the extension. `src/scenes/all.ts` — every scene, for the editor.
 - `extension/` — the VS Code extension: own `package.json`, esbuild bundle, `.vsix`
@@ -263,7 +316,8 @@ keep it green.
 - `lectures/demo/` — the engine's test lecture.
 - `bin/lysark.mjs` — the `lysark` command (plain JS). `scripts/` — lectures.mjs
   (find/build lectures, dev server), check-offline.mjs, export-pdf.mjs, site.mjs
-  (course CI publishing), browser.mjs (playwright-core launch).
+  (course CI publishing), browser.mjs (playwright-core launch), make-demo-models.mjs (writes
+  the demo's model files; they are committed, so run it only to change them).
 - `src/styles.css` — theme tokens in `:root`.
 - `vite.config.ts` — reads the lecture from `LYSARK_*` env vars set by the command;
   singlefile build, KaTeX woff2-only. `vite-plugin-lecture.ts` — generated deck
@@ -273,7 +327,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**329**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**429**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
@@ -341,6 +395,12 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
   in a custom `URDFLoader.loadMeshCb`. Traps: (1) real cb signature is
   `(path, manager, material, onComplete)` — the typings drop `material`; (2) hand
   the DAE back un-rotated or links separate at extended poses; faceting → `toCreasedNormals(…, 40°)`.
+- **Models in the build** (from v2.13.0): vite-plugin-slides.ts imports
+  src/scene/model-check.ts, so the Vite config process loads three and its STL and glTF loaders
+  in every build; engine CI's course-style job is what proves they resolve from
+  `node_modules/lysark`. To tell whether a built lecture carries the model code, look for
+  `THREE.GLTFLoader`, not `STLLoader`: urdf-loader brings STLLoader into every arm or KUKA
+  lecture anyway.
 - **file:// build**: no runtime fetch / dynamic import / workers-from-URL. The
   `fetch(` left in the bundle (three/urdf-loader) are dead code — `lysark check`
   proves 0 requests fire. The raw 37 MB `assets/kuka_agilus/` is gitignored; only

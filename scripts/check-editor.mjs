@@ -17,7 +17,8 @@
 //   Scene Actions, on a slide with its own camera and on one that names a view,
 //   and saves poses with P, into a named pose and into a slide.
 //
-// It requires: the lecture shown in an isolated panel with its images, VS
+// It requires: the lecture shown in an isolated panel with its images, and
+// with its models (each file read once, after the images), VS
 // Code's default styles gone, a view computed on an older version refused, a
 // saved view written as one edit to the first slide's frontmatter and put into
 // the running deck, a camera-only change put in place, a named view saved into
@@ -35,7 +36,10 @@
 // a new scene file, the ring at the arm's tool dragged (the joints follow by
 // inverse kinematics, marked, and P saves them), Space on the panel's × not
 // changing the slide, a new text
-// accepted and shown after a reload, a broken text
+// accepted and shown after a reload, the scene file's objects moved with M, the
+// models among them standing on their at with M's rings at their middle, a typed
+// new place for one put in place, a new unit loading the panel afresh, a model
+// file that isn't there named in the banner with its line, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
 // course-style build in Chromium and Firefox.
@@ -54,6 +58,9 @@ import { EDITOR_PREFIX, serveEditor, stopServer } from './editor-server.mjs'
 import { EDITOR_PROTOCOL, editorAssets, editorProtocol, panelPage } from '../src/editor/panel-page.js'
 
 const ISOLATED = { 'cross-origin-opener-policy': 'same-origin', 'cross-origin-embedder-policy': 'require-corp' }
+
+// the model files a scene file can name (MODEL_FORMATS in src/compiler/model-types.ts)
+const MODEL_FILE = /\.(stl|glb)$/i
 
 // VS Code's pre/fake.html: an empty page the panel's HTML is written into
 const FAKE_HTML = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Fake</title></head><body></body></html>'
@@ -232,6 +239,42 @@ function namedViews(text) {
 }
 
 /**
+ * The models the panel should read, by their src as the scene files write
+ * them, sorted: those of the scene files whose base a slide runs, as
+ * compileLecture reports them (a slide's `scene: arm` runs the base of
+ * scenes/arm.yaml, or the engine's scene arm without that file).
+ * @param {string} text slides.md
+ * @param {Map<string, { text: string }>} docs the scene files, by path
+ */
+function usedModels(text, docs) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const yamlOf = (doc) => {
+    try {
+      return parseYaml(doc?.text ?? '') ?? {}
+    } catch {
+      return {}
+    }
+  }
+  const running = new Set()
+  for (let n = 0; ; n++) {
+    const range = frontmatterLines(text, n)
+    if (!range) break
+    const fm = yamlOf({ text: lines.slice(range.from, range.to).join('\n') })
+    if (typeof fm.scene !== 'string') continue
+    const file = yamlOf(docs.get(`scenes/${fm.scene}.yaml`) ?? docs.get(`scenes/${fm.scene}.yml`))
+    running.add(typeof file.base === 'string' ? file.base : fm.scene)
+  }
+  const srcs = new Set()
+  for (const [path, doc] of docs) {
+    if (!path.startsWith('scenes/')) continue
+    const file = yamlOf(doc)
+    if (!running.has(file.base)) continue
+    for (const object of Object.values(file.objects ?? {})) if (typeof object?.model === 'string') srcs.add(object.model)
+  }
+  return [...srcs].sort()
+}
+
+/**
  * The extension's side of messages version 3 (docs/editor-host.md), for the
  * check: slides.md and the lecture's scene files are documents with versions,
  * kept here; other files are read from the lecture folder.
@@ -261,6 +304,8 @@ function createHost(lectureDir, lectureText) {
     edits: [],
     /** image files read and found */
     served: 0,
+    /** model files read and found, by path: the panel reads each once for each page it loads */
+    modelReads: {},
     /** the next edit finds the document changed meanwhile (typing between read and edit) */
     typeBeforeNextEdit: false,
     /** paths asked for outside the lecture folder */
@@ -287,7 +332,9 @@ function createHost(lectureDir, lectureText) {
         else if (!file || !existsSync(file)) files[rel] = { error: 'not found' }
         else if (message.as === 'bytes') {
           files[rel] = { base64: readFileSync(file).toString('base64') }
-          host.served += 1
+          // the panel reads images and models the same way (panel-images.ts, panel-models.ts)
+          if (MODEL_FILE.test(rel)) host.modelReads[rel] = (host.modelReads[rel] ?? 0) + 1
+          else host.served += 1
         } else files[rel] = { text: readFileSync(file, 'utf8'), version: 1 }
       }
       return reply({ files })
@@ -475,6 +522,32 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       return fail(`the deck's slides don't show the images read: ${JSON.stringify({ read: images.uris.length, inSlides: images.inSlides, placeholder: images.placeholder })}`)
     }
     lines.push(`${images.uris.length} image${images.uris.length === 1 ? '' : 's'} read through the host and shown in the slides as data URIs`)
+    // the models of the scenes the slides run: each file read once, in a request of its own after
+    // the images' (each request's time runs from when it is sent), and given to the deck by the src
+    // the scene file writes; nothing listed as not shown
+    const modelSrcs = usedModels(lectureText, host.docs)
+    const modelPaths = [...new Set(modelSrcs.map((src) => src.replace(/^(\.\/)+/, '')))].sort()
+    const given = await inPanel((w) => Object.entries(w.__LYSARK_MODELS__ ?? {}).map(([src, base64]) => [src, typeof base64 === 'string' ? base64.length : 0]))
+    const notShownYet = await banner()
+    if (JSON.stringify(given.map(([src]) => src).sort()) !== JSON.stringify(modelSrcs) || given.some(([, length]) => length === 0)) {
+      return fail(`the panel gave the deck the models ${JSON.stringify(given)}, expected ${JSON.stringify(modelSrcs)} (the panel says: ${notShownYet})`)
+    }
+    const reads = Object.entries(host.modelReads)
+    if (JSON.stringify(reads.map(([path]) => path).sort()) !== JSON.stringify(modelPaths) || reads.some(([, times]) => times !== 1)) {
+      return fail(`the panel should read each model file once: it read ${JSON.stringify(host.modelReads)}, the scene files show ${JSON.stringify(modelPaths)}`)
+    }
+    const byteReads = await page.evaluate(() => window.__toExtension.filter((m) => m.type === 'lysark:read' && m.as === 'bytes').map((m) => m.paths))
+    const modelRequests = byteReads.flatMap((paths, k) => (paths.some((p) => MODEL_FILE.test(p)) ? [k] : []))
+    const imageRequests = byteReads.flatMap((paths, k) => (paths.some((p) => !MODEL_FILE.test(p)) ? [k] : []))
+    if (modelRequests.some((k) => imageRequests.includes(k) || imageRequests.some((i) => i > k))) {
+      return fail(`the panel asked for models with or before the images: ${JSON.stringify(byteReads)}`)
+    }
+    if (/not shown/.test(notShownYet)) return fail(`the panel says some of the lecture is not shown: ${notShownYet}`)
+    lines.push(
+      modelPaths.length > 0
+        ? `${modelPaths.length} model file${modelPaths.length === 1 ? '' : 's'} read through the host, once each after the images, and given to the deck (${modelSrcs.join(', ')}); nothing listed as not shown`
+        : '(the lecture shows no models, so reading them was not checked)',
+    )
 
     // 2. V: the panel reads slides.md, computes the edit, and asks the host to
     //    apply it to the version it read. First with typing in between, which
@@ -1203,8 +1276,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     const armObjects = armPath ? parseYaml(host.docs.get(armPath).text)?.objects : undefined
     if (armObjects && typeof armObjects === 'object') {
       const names = Object.keys(armObjects)
-      // one standing in the scene, one that can be turned if there is one (a shape or a frame, or a point something hangs on)
-      const turnable = (n) => ['box', 'cylinder', 'sphere', 'frame'].some((s) => armObjects[n][s] !== undefined) || names.some((m) => armObjects[m]?.parent === n)
+      // one standing in the scene, one that can be turned if there is one (a shape, a model or a frame, or a point something hangs on)
+      const turnable = (n) =>
+        ['box', 'cylinder', 'sphere', 'frame', 'model'].some((s) => armObjects[n][s] !== undefined) || names.some((m) => armObjects[m]?.parent === n)
       const standing = names.filter((n) => armObjects[n] && armObjects[n].parent === undefined)
       // what a slide's camera looks at (its own, or its named view's), and the objects that carries
       const views = parseYaml(host.docs.get(armPath).text)?.views ?? {}
@@ -1385,20 +1459,20 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       let turnedBy = null
       if (turnable(moving)) {
         // round the turn's axis on screen, at the ring's height, where the handles measure the turn from
-        // (the ring itself, for an object that stands; off it, for one laid down)
-        const o = armObjects[moving]
-        const middleOf = Array.isArray(o.box) ? o.box[1] / 2 : Array.isArray(o.cylinder) ? o.cylinder[1] / 2 : typeof o.sphere === 'number' ? o.sphere / 2 : 0
+        // (the ring itself, for an object that stands; off it, for one laid down). The ring is at the
+        // middle the panel measured when it built the object: a model's comes from its file
         const axis = await inPanel(
-          (w, [name, up]) => {
+          (w, name) => {
             const L = w.__lysark
             const n = L.sceneManager.active.anchors[name]
+            const up = Number.isFinite(n.userData.middle) ? n.userData.middle : 0
             const origin = n.getWorldPosition(n.position.clone())
             const ring = n.localToWorld(n.position.clone().set(0, up, 0))
             const p = origin.clone().set(origin.x, ring.y, origin.z).project(L.sceneLayer.camera)
             const rect = L.sceneLayer.renderer.domElement.getBoundingClientRect()
             return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height }
           },
-          [moving, middleOf],
+          moving,
         )
         const before = await local()
         turnedBy = await moveBy('turning with the dot', dotOf, (from) => {
@@ -1494,7 +1568,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
 
       // any other change to an object needs the scene built afresh
       const recoloured = parseDocument(host.docs.get(armPath).text)
-      const shaped = ['box', 'cylinder', 'sphere'].some((s) => armObjects[moving][s] !== undefined)
+      const shaped = ['box', 'cylinder', 'sphere', 'model'].some((s) => armObjects[moving][s] !== undefined)
       // a value it hasn't already
       const other = shaped ? (armObjects[moving].material === 'red' ? 'blue' : 'red') : armObjects[moving].frame === 0.1 ? 0.2 : 0.1
       recoloured.setIn(['objects', moving, shaped ? 'material' : 'frame'], other)
@@ -1508,6 +1582,190 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       if (!(await fromRuntime({ type: 'lysark:shown', seq: objectChanged }))) return fail('the changed object was not shown after loading afresh')
       if (!(await waitFor(placed))) return fail(`after loading afresh, the objects are not anchors of the arm scene`)
       lines.push(`changing '${moving}' otherwise (${shaped ? 'its material' : 'a shape'}) loaded the panel afresh`)
+
+      // 3c. models (scene-files step 8): an object with a model has the file's meshes under its
+      // node, standing on its at (the middle of its underside) and centred on it, and M's ring sits
+      // at the middle of the fitted model; a typed new place for one goes in place; a new unit loads
+      // the panel afresh, which reads the files again and fits the model anew; and a model file
+      // that isn't there is named in the banner with the scene file and line, its object left empty
+      const modelled = names.filter((n) => typeof armObjects[n]?.model === 'string')
+      if (modelled.length > 0) {
+        await toRuntime({ type: 'lysark:goto', slide: objectSlide })
+        if (!(await settledOn(objectSlide))) return fail(`the panel never settled on slide ${objectSlide + 1}`)
+        /** each model object's meshes, and the box round them in its node's frame (before rotate) */
+        const fitted = () =>
+          inPanel((w, all) => {
+            const L = w.__lysark
+            if (!L || L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm') return null
+            const out = {}
+            for (const name of all) {
+              const node = L.sceneManager.active.anchors[name]
+              if (!node) return null
+              node.updateWorldMatrix(true, true)
+              const toNode = node.matrixWorld.clone().invert()
+              const v = node.position.clone()
+              const low = [Infinity, Infinity, Infinity]
+              const high = [-Infinity, -Infinity, -Infinity]
+              let meshes = 0
+              let triangles = 0
+              // the model's own group: objects hung on this one are other children of the node
+              node.children.find((c) => c.name === `object:${name}:model`)?.traverse((part) => {
+                if (!part.isMesh) return
+                meshes += 1
+                const position = part.geometry.attributes.position
+                triangles += (part.geometry.index ?? position).count / 3
+                for (let i = 0; i < position.count; i++) {
+                  v.fromBufferAttribute(position, i).applyMatrix4(part.matrixWorld).applyMatrix4(toNode)
+                  ;[v.x, v.y, v.z].forEach((x, k) => {
+                    low[k] = Math.min(low[k], x)
+                    high[k] = Math.max(high[k], x)
+                  })
+                }
+              })
+              out[name] = { meshes, triangles, low, high, middle: node.userData.middle, at: [node.position.x, node.position.y, node.position.z] }
+            }
+            return out
+          }, modelled)
+        const height = (f) => f.high[1] - f.low[1]
+        const across = (f) => Math.max(...f.high.map((x, k) => x - f.low[k]))
+        /** what is wrong with how a model object stands; null if nothing */
+        const near = (a, b) => Math.abs(a - b) <= 1e-6
+        const misfit = (name, f) => {
+          if (!f || f.meshes === 0 || f.triangles === 0) return `'${name}' has no meshes under its node`
+          if (!near(f.low[1], 0) || !near(f.low[0], -f.high[0]) || !near(f.low[2], -f.high[2])) {
+            return `'${name}' doesn't stand on its at, centred: in its node's frame its box is ${JSON.stringify(f.low)} to ${JSON.stringify(f.high)}`
+          }
+          if (!near(f.middle, height(f) / 2)) return `'${name}' has its middle at ${f.middle}, but it is ${height(f)} m tall`
+          return null
+        }
+        const shown = await waitFor(fitted)
+        if (!shown) return fail(`on slide ${objectSlide + 1}, the arm scene never showed with its model objects ${JSON.stringify(modelled)}`)
+        for (const name of modelled) {
+          const problem = misfit(name, shown[name])
+          if (problem) return fail(`${problem} (the panel says: ${await banner()})`)
+        }
+        lines.push(
+          `the models are built under their objects, each standing on its at, centred: ` +
+            modelled
+              .map((n) => `'${n}' ${shown[n].meshes} mesh${shown[n].meshes === 1 ? '' : 'es'}, ${shown[n].triangles} triangles, ${Math.round(height(shown[n]) * 1000)} mm tall`)
+              .join('; '),
+        )
+
+        // M: each model's ring where the middle of its fitted model is on screen
+        await waitFor(() => inPanel((w) => !w.__lysark.cameraCtl.active || null), 20, 250)
+        await page.waitForTimeout(300)
+        await key('m')
+        const ringGaps = await waitFor(
+          () =>
+            inPanel(
+              (w, [all, heights]) => {
+                const L = w.__lysark
+                const rect = L.sceneLayer.renderer.domElement.getBoundingClientRect()
+                const out = {}
+                for (const [k, name] of all.entries()) {
+                  const el = w.document.querySelector(`.lysark-object-handle[data-object="${name}"]`)
+                  if (!el || el.style.display === 'none') return null
+                  const n = L.sceneManager.active.anchors[name]
+                  const p = n.localToWorld(n.position.clone().set(0, heights[k] / 2, 0)).project(L.sceneLayer.camera)
+                  const r = el.getBoundingClientRect()
+                  out[name] = Math.hypot(r.left + r.width / 2 - (rect.left + ((p.x + 1) / 2) * rect.width), r.top + r.height / 2 - (rect.top + ((1 - p.y) / 2) * rect.height))
+                }
+                return out
+              },
+              [modelled, modelled.map((n) => height(shown[n]))],
+            ),
+          10,
+          200,
+        )
+        if (!ringGaps) return fail(`M on slide ${objectSlide + 1} did not show a ring on each model: ${JSON.stringify(await shownRings())}`)
+        const offRing = modelled.find((n) => !(ringGaps[n] <= 1.5))
+        if (offRing) return fail(`the ring on '${offRing}' is ${ringGaps[offRing].toFixed(1)} px from the middle of its model`)
+        await key('m')
+        lines.push(`M showed a ring on each model at the middle of the model (within ${Math.max(...Object.values(ringGaps)).toFixed(2)} px)`)
+
+        // a typed new place for a model the slide doesn't look at: in place, the model kept
+        const looked = carrying(lookAtOf(fms[objectSlide]))
+        const placedModel = modelled.find((n) => !looked.includes(n))
+        if (placedModel) {
+          const doc = parseDocument(host.docs.get(armPath).text)
+          const from = doc.getIn(['objects', placedModel, 'at'])?.toJSON?.() ?? [0, 0, 0]
+          const to = [Number((from[0] - 0.02).toFixed(3)), from[1], from[2]]
+          doc.setIn(['objects', placedModel, 'at'], doc.createNode(to, { flow: true }))
+          host.docs.set(armPath, { text: doc.toString(), version: host.docs.get(armPath).version + 1 })
+          const typedModel = await source(added)
+          if (!(await fromRuntime({ type: 'lysark:shown', seq: typedModel }, 10000)) || (await reloaded(typedModel))) {
+            return fail(`a typed new place for the model '${placedModel}' was not put into the running scene in place`)
+          }
+          const moved = await waitFor(async () => {
+            const now = await fitted()
+            return now && same(now[placedModel].at, to) ? now : null
+          }, 10, 200)
+          if (!moved || moved[placedModel].meshes !== shown[placedModel].meshes) {
+            return fail(`after a typed new place ${JSON.stringify(to)}, the model '${placedModel}' is ${JSON.stringify(moved?.[placedModel] ?? null)}`)
+          }
+          lines.push(`a typed new place for '${placedModel}' (${JSON.stringify(from)} → ${JSON.stringify(to)}) went in place, its model kept`)
+        } else {
+          lines.push(`(slide ${objectSlide + 1} looks at every model, so a typed new place for one in place was not checked)`)
+        }
+
+        // a new unit: the panel loads afresh, reads the model files again, and the model is fitted
+        // anew at its new size (one that the checks still take: from 1 mm to 10 m)
+        const scaled = modelled[0]
+        const SCALE = { mm: 0.001, cm: 0.01, m: 1 }
+        const unitWas = parseYaml(host.docs.get(armPath).text).objects[scaled].unit ?? 'm'
+        const sizeIn = (u) => across(shown[scaled]) * (SCALE[u] / SCALE[unitWas])
+        const unit = ['cm', 'mm', 'm'].find((u) => u !== unitWas && sizeIn(u) >= 0.001 && sizeIn(u) <= 10)
+        if (unit) {
+          const reunit = parseDocument(host.docs.get(armPath).text)
+          reunit.setIn(['objects', scaled, 'unit'], unit)
+          host.docs.set(armPath, { text: reunit.toString(), version: host.docs.get(armPath).version + 1 })
+          const readsBefore = { ...host.modelReads }
+          const reunitSeq = await source(added)
+          if (!(await fromRuntime({ type: 'lysark:accepted', seq: reunitSeq }))) return fail(`unit: ${unit} for '${scaled}' (was ${unitWas}) did not load the panel afresh`)
+          if (!(await render(34))) return fail('the runtime did not say ready after a new unit')
+          await toRuntime({ type: 'lysark:source', files: host.files(added), seq: reunitSeq, slide: objectSlide, protocol: EDITOR_PROTOCOL })
+          if (!(await fromRuntime({ type: 'lysark:shown', seq: reunitSeq }))) return fail('the new unit was not shown after loading afresh')
+          const refit = await waitFor(fitted)
+          const problem = misfit(scaled, refit?.[scaled])
+          if (problem) return fail(`after unit: ${unit}, ${problem} (the panel says: ${await banner()})`)
+          const grew = height(refit[scaled]) / height(shown[scaled])
+          if (!(Math.abs(grew / (SCALE[unit] / SCALE[unitWas]) - 1) <= 1e-6)) {
+            return fail(`after unit: ${unit} for '${scaled}' (was ${unitWas}), it is ${grew} times as tall, expected ${SCALE[unit] / SCALE[unitWas]}`)
+          }
+          if (!modelPaths.every((p) => host.modelReads[p] === (readsBefore[p] ?? 0) + 1)) {
+            return fail(`loading afresh for the new unit should read each model file once more: ${JSON.stringify(readsBefore)} → ${JSON.stringify(host.modelReads)}`)
+          }
+          lines.push(`unit: ${unit} for '${scaled}' (was ${unitWas}) loaded the panel afresh, which read the model files again: it is ${Number(grew.toFixed(4))} times as tall`)
+        } else {
+          lines.push(`(no other unit keeps '${scaled}' between 1 mm and 10 m across, so a new unit was not checked)`)
+        }
+
+        // a model file that isn't there: the banner names it at its line, and its object stays an empty node
+        const lost = modelled[modelled.length - 1]
+        const gone = `models/not-there${/\.[^./]+$/.exec(armObjects[lost].model)?.[0].toLowerCase() ?? '.stl'}`
+        const without = parseDocument(host.docs.get(armPath).text)
+        without.setIn(['objects', lost, 'model'], gone)
+        host.docs.set(armPath, { text: without.toString(), version: host.docs.get(armPath).version + 1 })
+        const lostSeq = await source(added)
+        if (!(await fromRuntime({ type: 'lysark:accepted', seq: lostSeq }))) return fail(`model: ${gone} for '${lost}' did not load the panel afresh`)
+        if (!(await render(35))) return fail('the runtime did not say ready after a model file went')
+        await toRuntime({ type: 'lysark:source', files: host.files(added), seq: lostSeq, slide: objectSlide, protocol: EDITOR_PROTOCOL })
+        if (!(await fromRuntime({ type: 'lysark:shown', seq: lostSeq }))) return fail('the text with a model file that isn\'t there was not shown')
+        const lineNo = host.docs.get(armPath).text.split(/\r?\n/).findIndex((l) => l.trim() === `model: ${gone}`) + 1
+        const expected = `${armPath}, line ${lineNo}: object '${lost}': the model '${gone}' was not found`
+        const said = await waitFor(async () => {
+          const text = await banner()
+          return text.includes('Models not shown') ? text : null
+        }, 20, 250)
+        if (!said?.includes(`Models not shown:\n${expected}`)) return fail(`for a model file that isn't there the panel said ${JSON.stringify(said ?? (await banner()))}, expected it to name "${expected}"`)
+        const left = await waitFor(fitted)
+        if (!left || left[lost].meshes !== 0 || modelled.some((n) => n !== lost && left[n].meshes === 0)) {
+          return fail(`with '${lost}''s file not there, the models are ${JSON.stringify(left)}: '${lost}' should be an empty node, the others shown`)
+        }
+        lines.push(`a model file that isn't there: the banner names "${expected}", and '${lost}' stays an empty node`)
+      } else {
+        lines.push('(the arm scene file has no models, so models in the panel were not checked)')
+      }
     } else {
       lines.push('(the lecture has no objects in scenes/arm.yaml, so objects were not checked)')
     }

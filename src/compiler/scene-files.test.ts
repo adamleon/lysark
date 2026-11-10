@@ -414,3 +414,178 @@ objects:
     expect(on('agilus', 'base')[0].parent).toBe('base')
   })
 })
+
+describe('models (scene-files-proposal.md step 8)', () => {
+  const ARM = `base: arm
+objects:
+  table:
+    box: [0.4, 0.3, 0.4]
+    at: [0.62, 0, -0.69]
+    material: wood
+  bracket:                            # a part from CAD: STL in millimetres, z up
+    model: ../../assets/bracket.stl
+    unit: mm
+    up: z
+    at: [0.1, 0.3, 0.08]
+    parent: table
+    material: metal
+  tray:
+    model: models/tray.glb
+    at: [-0.1, 0.3, -0.08]
+    parent: table
+  gripper:
+    model: ../../assets/Gripper.STL
+    unit: cm
+    parent: end_effector
+    rotate: [90, 0, 0]
+`
+  const problem = (text: string) => {
+    try {
+      readSceneFiles({ 'scenes/arm.yaml': text })
+      return 'no error'
+    } catch (err) {
+      return (err as Error).message
+    }
+  }
+  const one = (body: string) => problem(`base: arm\nobjects:\n  a:\n${body}`)
+
+  it('reads a model as a shape: its file, unit and up, at, rotate, material and parent', () => {
+    const objects = readSceneFiles({ 'scenes/arm.yaml': ARM }).get('arm')!.objects
+    expect(objects.find((o) => o.name === 'bracket')).toEqual({
+      name: 'bracket',
+      shape: 'model',
+      size: [],
+      at: [0.1, 0.3, 0.08],
+      rotate: [0, 0, 0],
+      material: 'metal',
+      parent: 'table',
+      model: { src: '../../assets/bracket.stl', unit: 'mm', up: 'z' },
+    })
+    // without unit, up and material: metres, y up and grey
+    expect(objects.find((o) => o.name === 'tray')).toEqual({
+      name: 'tray',
+      shape: 'model',
+      size: [],
+      at: [-0.1, 0.3, -0.08],
+      rotate: [0, 0, 0],
+      material: 'grey',
+      parent: 'table',
+      model: { src: 'models/tray.glb', unit: 'm', up: 'y' },
+    })
+    expect(objects.find((o) => o.name === 'gripper')).toMatchObject({ rotate: [90, 0, 0], parent: 'end_effector', model: { unit: 'cm', up: 'y' } })
+    // a box has no model
+    expect(objects.find((o) => o.name === 'table')).not.toHaveProperty('model')
+  })
+
+  it("reports each model with its scene file and the line of its path, in the file's order", () => {
+    expect(readSceneFiles({ 'scenes/arm.yaml': ARM }).get('arm')!.models).toEqual([
+      { src: '../../assets/bracket.stl', format: 'stl', unit: 'mm', object: 'bracket', file: 'scenes/arm.yaml', line: 8 },
+      { src: 'models/tray.glb', format: 'glb', unit: 'm', object: 'tray', file: 'scenes/arm.yaml', line: 15 },
+      { src: '../../assets/Gripper.STL', format: 'stl', unit: 'cm', object: 'gripper', file: 'scenes/arm.yaml', line: 19 },
+    ])
+    expect(readSceneFiles({ 'scenes/arm.yaml': 'base: arm\nobjects:\n  b: { box: [1, 1, 1] }\n' }).get('arm')!.models).toEqual([])
+    expect(readSceneFiles({ 'scenes/arm.yaml': 'base: arm\n' }).get('arm')!.models).toEqual([])
+  })
+
+  it('refuses anything but a path as the model, naming its line (C1)', () => {
+    const c1 =
+      "object 'a' model must be the path of an .stl or .glb file from the lecture folder (where slides.md is), such as models/bracket.stl, " +
+      "or ../../assets/bracket.stl for one in the course's assets/ folder"
+    expect(one('    model: 3\n')).toBe(`scenes/arm.yaml, line 4: ${c1}`)
+    expect(one('    model: ""\n')).toBe(`scenes/arm.yaml, line 4: ${c1}`)
+    expect(one('    model: [a.stl]\n')).toBe(`scenes/arm.yaml, line 4: ${c1}`)
+    expect(one('    at: [0, 0, 0]\n    model:\n')).toMatch(/^scenes\/arm\.yaml, line 5: object 'a' model must be the path of an \.stl or \.glb file/)
+  })
+
+  it('checks the path as written, naming its line (C2-C7)', () => {
+    expect(one('    at: [0, 0, 0]\n    model: C:/Users/adam/bracket.stl\n')).toBe(
+      "scenes/arm.yaml, line 5: object 'a' model 'C:/Users/adam/bracket.stl' is an absolute path on this computer: copy the file into the " +
+        "lecture folder (for example models/) or the course's assets/ folder, and give the path from the lecture folder",
+    )
+    expect(one('    model: https://example.com/bracket.stl\n')).toMatch(/^scenes\/arm\.yaml, line 4: object 'a' model 'https:\/\/example\.com\/bracket\.stl' is a web address\. /)
+    expect(one('    model: models\\bracket.stl\n')).toBe(
+      "scenes/arm.yaml, line 4: object 'a' model 'models\\bracket.stl' contains a backslash: use /, such as models/bracket.stl",
+    )
+    expect(one('    model: /models/bracket.stl\n')).toMatch(/line 4: object 'a' model '\/models\/bracket\.stl' starts with '\/'/)
+    expect(one('    model: models/tray.gltf\n')).toMatch(/line 4: object 'a' model 'models\/tray\.gltf' is glTF as text/)
+    expect(one('    model: models/bracket.step\n')).toBe(
+      "scenes/arm.yaml, line 4: object 'a' model 'models/bracket.step' isn't a file a lecture can show: export it from the CAD program as .stl (binary) or .glb",
+    )
+    // a name VS Code's panel won't read, which the build would: said at the line, so both agree
+    expect(one('    at: [0, 0, 0]\n    model: .cad/bracket.stl\n')).toBe(
+      "scenes/arm.yaml, line 5: object 'a' model '.cad/bracket.stl' has a folder name starting with '.' ('.cad'), which VS Code's panel won't read: rename the folder",
+    )
+    expect(one('    model: models/bracket~1.stl\n')).toMatch(/^scenes\/arm\.yaml, line 4: object 'a' model 'models\/bracket~1\.stl' has a file name with ~ and a digit/)
+    expect(one('    model: "models/a:b.stl"\n')).toMatch(/^scenes\/arm\.yaml, line 4: object 'a' model 'models\/a:b\.stl' has a file name with a colon/)
+  })
+
+  it('allows unit and up only with a model (C8)', () => {
+    expect(one('    box: [1, 1, 1]\n    unit: mm\n')).toBe(
+      "scenes/arm.yaml, line 5: object 'a' has unit, which says what a model's file is measured in: a box's size is in metres already",
+    )
+    expect(one('    cylinder: [0.1, 0.2]\n    up: z\n')).toBe(
+      "scenes/arm.yaml, line 5: object 'a' has up, which says which axis is up in a model's file: a shape is built with y up",
+    )
+    expect(one('    at: [0, 0, 0]\n    unit: mm\n')).toMatch(/line 5: object 'a' has unit, .*: a shape's size is in metres already/)
+  })
+
+  it('checks unit, guessing the unit meant (C9)', () => {
+    const c9 = "isn't one of mm, cm or m: what the file is measured in (without unit, m)."
+    expect(one('    model: x.stl\n    unit: millimetre\n')).toBe(`scenes/arm.yaml, line 5: object 'a' unit 'millimetre' ${c9} Did you mean 'mm'?`)
+    expect(one('    model: x.stl\n    unit: centimeters\n')).toMatch(/unit 'centimeters' .* Did you mean 'cm'\?$/)
+    expect(one('    model: x.stl\n    unit: meter\n')).toMatch(/Did you mean 'm'\?$/)
+    expect(one('    model: x.stl\n    unit: MM\n')).toMatch(/Did you mean 'mm'\?$/)
+    expect(one('    model: x.stl\n    unit: inch\n')).toBe(`scenes/arm.yaml, line 5: object 'a' unit 'inch' ${c9}`)
+    expect(one('    model: x.stl\n    unit: 1000\n')).toBe(`scenes/arm.yaml, line 5: object 'a' unit '1000' ${c9}`)
+  })
+
+  it('checks up (C10)', () => {
+    const c10 = 'up must be the axis that is up in the file, y or z; without up, y; ROS meshes and many CAD programs have z up'
+    expect(one('    model: x.stl\n    up: x\n')).toBe(`scenes/arm.yaml, line 5: object 'a' ${c10}`)
+    expect(one('    model: x.stl\n    up: Z\n')).toBe(`scenes/arm.yaml, line 5: object 'a' ${c10}`)
+    expect(one('    model: x.stl\n    up: [0, 0, 1]\n')).toBe(`scenes/arm.yaml, line 5: object 'a' ${c10}`)
+  })
+
+  it('says a model takes its size from its file, not from scale (C11)', () => {
+    expect(one('    model: x.stl\n    scale: 0.001\n')).toBe(
+      "scenes/arm.yaml, line 5: object 'a' has 'scale': a shape's size is written with it (box: [0.4, 0.2, 0.4]), and a model's comes from its file: " +
+        'give unit: mm for a file measured in millimetres',
+    )
+  })
+
+  it('allows one shape per object, a model being one (C12)', () => {
+    expect(one('    box: [1, 1, 1]\n    model: x.stl\n')).toBe("scenes/arm.yaml, line 5: object 'a' has both box and model: one shape per object")
+    // named in the order of the shapes, at the line of the second, as for any two shapes
+    expect(one('    model: x.stl\n    frame: 0.1\n')).toBe("scenes/arm.yaml, line 4: object 'a' has both frame and model: one shape per object")
+  })
+
+  it("offers 'model', 'unit' and 'up' for the words other tools use", () => {
+    for (const key of ['mesh', 'stl', 'glb', 'STL']) expect(one(`    ${key}: x.stl\n`)).toMatch(new RegExp(`line 4: object 'a' has unknown key '${key}'\\. Did you mean 'model'\\?`))
+    expect(one('    model: x.stl\n    units: mm\n')).toMatch(/line 5: object 'a' has unknown key 'units'\. Did you mean 'unit'\?/)
+    for (const key of ['up_axis', 'upAxis']) expect(one(`    model: x.stl\n    ${key}: z\n`)).toMatch(new RegExp(`has unknown key '${key}'\\. Did you mean 'up'\\?`))
+  })
+
+  it('lists a model with the shapes, wherever the messages list them', () => {
+    expect(one('')).toBe(
+      "scenes/arm.yaml, line 3: object 'a' has nothing in it: give it a shape (box, cylinder, sphere or frame) or a model (model: models/x.stl) " +
+        'and where it is, at: [x, y, z]. With only at, it is an invisible point',
+    )
+    expect(problem('base: arm\nobjects:\n  a: x.stl\n')).toBe(
+      "scenes/arm.yaml, line 3: object 'a' is a mapping: a shape (box, cylinder, sphere or frame) or a model (model: models/x.stl) and where it is, at: [x, y, z]",
+    )
+    expect(one('    model: x.stl\n    colour: red\n')).toBe(
+      "scenes/arm.yaml, line 5: object 'a' has unknown key 'colour'. Did you mean 'material'? An object has a shape (box, cylinder, sphere or frame) " +
+        'or a model (model: models/x.stl), at, rotate, material and parent; a model also has unit and up',
+    )
+  })
+
+  it("checks at, rotate, material and parent as for any shape, with a shape's wording for at", () => {
+    expect(one('    model: x.stl\n    at: [0, 0]\n')).toBe("scenes/arm.yaml, line 5: object 'a' at must be [x, y, z], in metres: the middle of its underside")
+    expect(one('    model: x.stl\n    at: [0, 0, 740]\n')).toMatch(/line 5: object 'a' at has 740/)
+    expect(one('    model: x.stl\n    material: gold\n')).toMatch(/line 5: object 'a' material 'gold' isn't one of the colours/)
+    expect(one('    model: x.stl\n    parent: tabel\n')).toMatch(/line 5: object 'a' has the parent 'tabel'/)
+    // a model is a parent and an anchor like any object
+    const objects = readSceneFiles({ 'scenes/arm.yaml': 'base: arm\nobjects:\n  cup: { sphere: 0.05, parent: tray }\n  tray: { model: tray.glb }\n' }).get('arm')!.objects
+    expect(objects.map((o) => o.name)).toEqual(['tray', 'cup'])
+  })
+})
