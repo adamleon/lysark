@@ -215,6 +215,14 @@ Proposals (not built):
   frames), in Chromium and Firefox. Fix: catch an exception in `tick`, report it once in the
   console, and keep the loop's bookkeeping right (ask for the next frame, or reset `ticking`), so
   the rest of the lecture still runs in front of the class. Small, and its own change.
+- From v2.13.1: a save the panel ignores says nothing. While a view or pose waits for the host's
+  reply, V, P, Shift+V, Shift+P and Scene Actions' saves return without a word
+  (src/editor/runtime.ts: `if (saving) return` in saveView, saveAs, savePoseAs and the keys). In
+  github.dev a slow reply could make a key press look broken. Fix: say "A save is still on its
+  way; try again in a moment", as the second P already does. Small, and its own change.
+  (Engine CI for v2.13.1 first failed on the check's side of this: scripts/check-editor.mjs read
+  the panel's message, or started its next save, before the reply was in. It now waits for the
+  panel's message after every save, and passes with the host's replies held back 1.5 s.)
 - From v2.13.1: check anchor names at build time. A string `lookAt` (a slide's `camera:`, a
   named view) and each `anchored:` entry's `anchor` must name an anchor of the slide's scene:
   the engine scene's anchors in src/scenes/anchors.ts (for a scene file, those of its `base`)

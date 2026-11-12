@@ -476,7 +476,17 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         const t = L.cameraCtl.active ? L.cameraCtl.lookTarget : L.controls.target
         return [p.x - t.x, p.y - t.y, p.z - t.z]
       })
-    const banner = () => inPanel((w) => [...w.document.querySelectorAll('div')].find((d) => d.style.position === 'fixed' && d.style.bottom === '12px')?.textContent ?? '')
+    /** the banner's text, and whether the check's mark (markBanner) is still in it */
+    const bannerNow = () =>
+      inPanel((w) => {
+        const el = [...w.document.querySelectorAll('div')].find((d) => d.style.position === 'fixed' && d.style.bottom === '12px')
+        return { text: el?.textContent ?? '', marked: !!el && [...el.childNodes].some((n) => n.nodeType === w.Node.COMMENT_NODE) }
+      })
+    const banner = async () => (await bannerNow()).text
+    // a mark in the banner, a comment (not part of its text), that the panel's next message replaces:
+    // savedSays then takes only a message from after it, where two saves in a row say the same
+    const markBanner = () =>
+      inPanel((w) => [...w.document.querySelectorAll('div')].find((d) => d.style.position === 'fixed' && d.style.bottom === '12px')?.append(w.document.createComment('check')))
     const waitFor = async (test, tries = 40, every = 500) => {
       for (let i = 0; i < tries; i++) {
         const value = await test()
@@ -485,6 +495,18 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       }
       return null
     }
+    /**
+     * The panel's message for a save, once it says it: `said` is how the message begins, or a pattern
+     * for it. The host records an edit before it replies, and the panel says what it saved only once
+     * the reply is in, and takes no other save until then. So after each save the check waits for
+     * this before it reads what the panel says or starts another save. null if it never says it
+     */
+    const savedSays = (said) =>
+      waitFor(async () => {
+        const now = await bannerNow()
+        const says = typeof said === 'string' ? now.text.startsWith(said) : said.test(now.text)
+        return says && !now.marked ? now.text : null
+      }, 20, 250)
 
     // 1. the panel loads, isolated, and shows the lecture with its images
     await page.goto(`http://127.0.0.1:${hostPort}/`)
@@ -581,6 +603,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     if (!fm || lineOf(change.start) < fm.from || lineOf(change.end) > fm.to) {
       return fail(`the saved view changed text outside the first slide's frontmatter: ${JSON.stringify(change)}`)
     }
+    if (!(await savedSays(/^Camera view saved to slide 1$/))) return fail(`after the view saved from Scene Actions, the panel did not say it saved it to slide 1: ${await banner()}`)
     lines.push(`saved view written into slide 1 as one small edit: ${JSON.stringify(change.text)}`)
     if (screenshot) {
       await page.waitForTimeout(2500) // past the slide's entry fade
@@ -642,6 +665,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         return fail(`V on slide ${first + 1} did not write the view '${named.view}' into ${path}: ${JSON.stringify(edit ?? null)}`)
       }
       const saved = parseYaml(host.docs.get(path).text).views[named.view]
+      if (!(await savedSays(`View '${named.view}' changed in ${path}, not saved yet`))) {
+        return fail(`after V on slide ${first + 1}, the panel did not say it changed the view '${named.view}' in ${path}: ${await banner()}`)
+      }
       // the extension then sends the scene file with slides.md as last sent: only cameras changed
       const inPlace = await source(host.doc.text)
       if (!(await fromRuntime({ type: 'lysark:shown', seq: inPlace }, 10000))) return fail('the saved named view was not put into the running deck')
@@ -730,6 +756,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       const range = frontmatterLines(host.doc.text, bare.slide)
       const fm = parseYaml(host.doc.text.replace(/\r\n/g, '\n').split('\n').slice(range.from, range.to).join('\n'))
       if (fm.camera !== 'checked') return fail(`slide ${bare.slide + 1} doesn't name the new view: camera is ${JSON.stringify(fm.camera)}`)
+      if (!(await savedSays(`New view 'checked' in a new file, ${path}; slide ${bare.slide + 1} uses it`))) {
+        return fail(`after Save view as… a new view, the panel did not say it saved 'checked' in a new ${path}: ${await banner()}`)
+      }
       // the extension sends the edited files, the way VS Code reports them: first
       // the created file (with slides.md as last sent), then the edit's own text.
       // The slide's camera is now the view, so only cameras changed
@@ -867,6 +896,10 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       const written = parseYaml(host.docs.get('scenes/arm.yaml').text).poses[pose]
       const joint2 = Array.isArray(written) ? written[1] : written?.joint2
       if (joint2 !== 0.5) return fail(`the pose '${pose}' has joint2 ${JSON.stringify(joint2)} after P, expected 0.5: ${JSON.stringify(written)}`)
+      // until the panel says it saved the pose, a P on the next slide is told to wait (one pose at a time)
+      if (!(await savedSays(`Pose '${pose}' changed in scenes/arm.yaml, not saved yet`))) {
+        return fail(`after P on slide ${poseSlide + 1}, the panel did not say it changed the pose '${pose}' in scenes/arm.yaml: ${await banner()}`)
+      }
       // on to the next slide, which carries the pose on, before the edit's text
       // comes back: the text still goes in place, and the robot there goes to the pose
       const carrier = poseSlide + 1
@@ -902,6 +935,10 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       const own = parseYaml(host.doc.text.replace(/\r\n/g, '\n').split('\n').slice(range.from, range.to).join('\n'))
       if (JSON.stringify(own.joints) !== JSON.stringify({ joint1: -0.4 })) {
         return fail(`slide ${ownSlide + 1}'s joints after P: ${JSON.stringify(own.joints)}, expected { joint1: -0.4 }`)
+      }
+      // the save done (the panel says so once the host's reply is in), the pose's text not back yet
+      if (!(await savedSays(new RegExp(`^Pose saved to slide ${ownSlide + 1}$`)))) {
+        return fail(`after P on slide ${ownSlide + 1}, the panel did not say it saved the pose to the slide: ${await banner()}`)
       }
       // moved again before the text comes back: P says to wait (one save at a time)
       await jog('joint1', -0.2)
@@ -980,6 +1017,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         const kuka = frontmatters()[kukaSlide].joints
         if (JSON.stringify(kuka) !== JSON.stringify({ joint_2: 0.3, joint_1: 0.5 })) {
           return fail(`slide ${kukaSlide + 1}'s joints after P: ${JSON.stringify(kuka)}, expected { joint_2: 0.3, joint_1: 0.5 }`)
+        }
+        if (!(await savedSays(new RegExp(`^Pose saved to slide ${kukaSlide + 1}$`)))) {
+          return fail(`after P on slide ${kukaSlide + 1}, the panel did not say it saved the pose to the slide: ${await banner()}`)
         }
         const kukaInPlace = await source(host.doc.text)
         if (!(await fromRuntime({ type: 'lysark:shown', seq: kukaInPlace }, 10000))) return fail(`slide ${kukaSlide + 1}'s saved pose was not put into the running deck`)
@@ -1089,7 +1129,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       if (frontmatters()[ownSlide].joints !== 'low') return fail(`slide ${ownSlide + 1} doesn't name the pose 'low' after Save pose as…: ${JSON.stringify(frontmatters()[ownSlide].joints)}`)
       // the panel names the other slides whose robot moves: those that use 'low' (and only those)
       const lowUsers = frontmatters().flatMap((fm, i) => (fm.joints === 'low' && i !== ownSlide ? [i + 1] : []))
-      const said = await banner()
+      // the panel's message for this save, not the one before it (P on the idle: slide)
+      const said = await savedSays(`Slide ${ownSlide + 1} uses the pose 'low' now, changed to this pose in scenes/arm.yaml`)
+      if (!said) return fail(`after Save pose as… the pose 'low', the panel did not say slide ${ownSlide + 1} uses it now: ${await banner()}`)
       const expected = lowUsers.length === 1 ? `slide ${lowUsers[0]} changes with it` : null
       if (expected && !said.endsWith(expected)) return fail(`after Save pose as… the pose 'low', the panel said "${said}", expected it to end "${expected}"`)
       const lowInPlace = await source(host.doc.text)
@@ -1124,6 +1166,10 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       if (JSON.stringify(q1) !== JSON.stringify(armPose) || frontmatters()[ownSlide].joints !== 'q1') {
         return fail(`after Scene Actions… a new pose, q1 is ${JSON.stringify(q1)} (the robot: ${JSON.stringify(armPose)}) and slide ${ownSlide + 1} names ${JSON.stringify(frontmatters()[ownSlide].joints)}`)
       }
+      // the panel takes no new save until it has said this one's done, so the next request would be ignored
+      if (!(await savedSays(`New pose 'q1' in scenes/arm.yaml (not saved yet); slide ${ownSlide + 1} uses it`))) {
+        return fail(`after Scene Actions… a new pose, the panel did not say it saved 'q1': ${await banner()}`)
+      }
       const q1InPlace = await source(host.doc.text)
       if (!(await fromRuntime({ type: 'lysark:shown', seq: q1InPlace }, 10000))) return fail('the new pose from Scene Actions… was not put into the running deck')
       // and an existing pose: 'reach' takes the robot's pose, and the slide names it
@@ -1134,6 +1180,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       const reach = parseYaml(host.docs.get('scenes/arm.yaml').text).poses.reach
       if (!reachEdit?.result.ok || JSON.stringify(reach) !== JSON.stringify(armPose) || frontmatters()[ownSlide].joints !== 'reach') {
         return fail(`Scene Actions… 'Save pose as: the pose reach' gave reach ${JSON.stringify(reach)} and the slide ${JSON.stringify(frontmatters()[ownSlide].joints)}: ${JSON.stringify(reachEdit ?? null)} (the panel says: ${await banner()})`)
+      }
+      if (!(await savedSays(`Slide ${ownSlide + 1} uses the pose 'reach' now`))) {
+        return fail(`after Scene Actions… the pose 'reach', the panel did not say slide ${ownSlide + 1} uses it now: ${await banner()}`)
       }
       const reachInPlace = await source(host.doc.text)
       if (!(await fromRuntime({ type: 'lysark:shown', seq: reachInPlace }, 10000))) return fail("the pose 'reach' from Scene Actions… was not put into the running deck")
@@ -1169,6 +1218,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
           return fail(`the new scene file is not right: ${host.docs.get('scenes/agilus.yaml').text}`)
         }
         if (frontmatters()[kukaSlide].joints !== 'grip') return fail(`slide ${kukaSlide + 1} doesn't name the new pose: ${JSON.stringify(frontmatters()[kukaSlide].joints)}`)
+        if (!(await savedSays(`New pose 'grip' in a new file, scenes/agilus.yaml; slide ${kukaSlide + 1} uses it`))) {
+          return fail(`after Save pose as… a new pose, the panel did not say it saved 'grip' in a new scenes/agilus.yaml: ${await banner()}`)
+        }
         // as VS Code reports it: the new file first (slides.md as last sent), then the edit's text
         const fileFirst = await source(slidesBefore)
         if (!(await fromRuntime({ type: 'lysark:shown', seq: fileFirst }, 10000))) return fail('the new scene file alone was not shown')
@@ -1230,6 +1282,8 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       if (!want.every((q, k) => !turned[k] || Math.abs(got[k] - q) < 0.006)) {
         return fail(`P after the drag wrote ${JSON.stringify(dragged)}, the robot is at ${JSON.stringify(qAfter)}`)
       }
+      const dragSaid = typeof named === 'string' ? `Pose '${named}' changed in scenes/arm.yaml, not saved yet` : new RegExp(`^Pose saved to slide ${ownSlide + 1}$`)
+      if (!(await savedSays(dragSaid))) return fail(`after P after the drag, the panel did not say it saved the pose: ${await banner()}`)
       const dragInPlace = await source(host.doc.text)
       if (!(await fromRuntime({ type: 'lysark:shown', seq: dragInPlace }, 10000))) return fail('the pose saved after the drag was not put into the running deck')
       lines.push(
@@ -1415,14 +1469,22 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         while (tail < x.length - head && tail < y.length - head && x[x.length - 1 - tail] === y[y.length - 1 - tail]) tail++
         return y.slice(head, y.length - tail)
       }
-      /** one move from the panel: its edit, written into the scene file, and its text put into the running scene in place */
-      const moveBy = async (what, selector, path, options) => {
+      /**
+       * one move from the panel: its edit, written into the scene file, the panel saying the object
+       * was `how` (moved, turned), and its text put into the running scene in place
+       */
+      const moveBy = async (what, how, selector, path, options) => {
         const editsBefore = host.edits.length
         const text = host.docs.get(armPath).text
+        // two moves in a row say the same (an object that can't be turned): wait for this one's
+        await markBanner()
         if (!(await dragHandle(selector, path, options))) return { problem: `${what}: the handle ${selector} is not shown` }
         const edit = await waitFor(async () => host.edits[editsBefore], 20, 300)
         if (!edit?.result.ok || edit.message.changes.length !== 1 || edit.message.changes[0].path !== armPath) {
           return { problem: `${what} did not write one edit into ${armPath}: ${JSON.stringify(edit ?? null)} (the panel says: ${await banner()})` }
+        }
+        if (!(await savedSays(`Object '${moving}' ${how} in ${armPath}, not saved yet`))) {
+          return { problem: `${what}: the panel did not say '${moving}' was ${how} in ${armPath}: ${await banner()}` }
         }
         const after = host.docs.get(armPath).text
         const shownSeq = await source(added)
@@ -1449,7 +1511,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
 
       // along the floor: x and z change, the height stays; only the at line changes
       const start = await local()
-      const moved = await moveBy('dragging the ring', ringOf, (from) => line(from, 40, 16))
+      const moved = await moveBy('dragging the ring', 'moved', ringOf, (from) => line(from, 40, 16))
       if (moved.problem) return fail(moved.problem)
       if (!onlyChanged(moved, 'at')) return fail(`dragging '${moving}' changed more than its at, in one line: ${JSON.stringify(moved.lines)}`)
       if (!same(moved.written.at, moved.node.at) || moved.written.at[1] !== start.at[1] || same(moved.written.at, start.at)) {
@@ -1475,7 +1537,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
           moving,
         )
         const before = await local()
-        turnedBy = await moveBy('turning with the dot', dotOf, (from) => {
+        turnedBy = await moveBy('turning with the dot', 'turned', dotOf, (from) => {
           const r = Math.max(Math.hypot(from.x - axis.x, from.y - axis.y), 30)
           const a = Math.atan2(from.y - axis.y, from.x - axis.x)
           return Array.from({ length: 6 }, (_, k) => ({ x: axis.x + r * Math.cos(a - ((k + 1) * Math.PI) / 18), y: axis.y + r * Math.sin(a - ((k + 1) * Math.PI) / 18) }))
@@ -1506,7 +1568,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
       }
       if (screenshot) await page.screenshot({ path: screenshot.replace(/(\.png)?$/i, '-objects.png') })
       // with Shift: up only
-      const lifted = await moveBy('dragging the ring with Shift', ringOf, (from) => line(from, 0, -30), { shift: true })
+      const lifted = await moveBy('dragging the ring with Shift', 'moved', ringOf, (from) => line(from, 0, -30), { shift: true })
       if (lifted.problem) return fail(lifted.problem)
       if (!onlyChanged(lifted, 'at') || !(lifted.written.at[1] > moved.written.at[1]) || lifted.written.at[0] !== moved.written.at[0] || lifted.written.at[2] !== moved.written.at[2]) {
         return fail(`dragging '${moving}' up with Shift: at ${JSON.stringify(moved.written.at)} → ${JSON.stringify(lifted.written.at)}`)
