@@ -237,6 +237,15 @@ For the future:
   two copies of its geometry, and the build parses a file shown in two units twice. Sharing one
   parse saves that, but shared geometry is a trap for any later change that edits a model in
   place. Worth it only once a lecture shows a large file many times.
+- **The panel's cost per fresh page.** With a 5 MB STL, every fresh panel page (opening the
+  panel, and every save but a camera or pose change) took 0.25-0.4 s longer locally with a GPU
+  (2026-11-10): the extension's `bytesToBase64` about 100 ms, the panel's check about 60 ms, and
+  the deck's own parse of the same file about 50 ms. The author noticed no difference in
+  github.dev (2026-11-12). If a lecture with several large models makes saves slow, three ways
+  to cut it: hand the check's parse to the deck instead of parsing twice; encode with Node's
+  `Buffer` where it exists (desktop VS Code, about 2 ms; github.dev runs the extension in the
+  browser, where it doesn't); or have the extension keep each file's last read between panel
+  pages (an extension release).
 - **A total per lecture.** Only each file is limited today (5 MB). A lecture with many models
   grows the student file by about 4/3 of their total, and every fresh panel page in github.dev
   reads them all again. A total (say 20 MB) can be added without changing a lecture under it.

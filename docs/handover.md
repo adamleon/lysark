@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-11-09)
+## Where the project is (2026-11-12)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -118,7 +118,7 @@ panel's hint shows which: from v2.8.0 it ends "J: pose the robot"), and the pane
 after a click in it (it follows the cursor in slides.md, but keys typed there go into the text;
 now in scene-files.md and lysark-v2.md section 5). Next: step 8, models from `assets/`.
 
-Step 8 is built and checked (2026-11-09), not yet released: engine v2.13.0, no extension change.
+Step 8 is released (2026-11-12, below): engine v2.13.0, no extension change.
 The author confirmed decision 9 of scene-files-proposal.md (all four parts as recommended) the
 same day: `model: <path>` with `unit: mm|cm|m` and `up: y|z`; paths from the lecture folder, as
 for images, the file in the lecture folder or the course's `assets/`; at most 5 MB per file; and
@@ -155,14 +155,26 @@ image paths the panel can't read refused as model paths are, a GPU-memory check 
 check-offline before step 9, and step 9's blocker in the released panel's security rules) are
 in scene-files-proposal.md, "Proposals from step 8".
 
-**To release step 8:** the panel loads its editor from the course's site, so github.dev can
-only try v2.13.0 once it is tagged and the course has moved to it (Update engine). Then, on the
-course lecture with a model of about 5 MB in `assets/`, time the first panel load and a reload
-(if it is slow, a v2.13.1 lowers the limit before any lecture relies on it), and check that the
-PDF shows the model. After that, the course commit of decision 9: `.gitattributes`
-(`*.stl binary`, `*.glb binary`; SolidWorks writes `.STL` in capitals, and where git matches
-patterns by case, as on Linux, `*.[sS][tT][lL]` covers both) and a README "Models" paragraph
-(paths, `unit` and `up`, 5 MB, no Git LFS). Then the discussion below.
+**Released (2026-11-12):** v2.13.0 is tagged on 3cd20ba, after engine CI passed on it. The
+course runs v2.13.0 (Update engine, then Publish lectures, 08:05 UTC). Timed locally first
+(2026-11-10, two independent runs, a 4,999,984-byte binary STL of 99,998 triangles): the build
+takes 0.6-0.7 s longer; the student file is 7.9 MB (3.3 MB gzipped) and the model slide's first
+frame comes 0.12-0.17 s later; with a GPU the frame rate is unchanged (without one, 100k
+triangles drop it to 14-32 fps); each fresh panel page takes 0.25-0.4 s longer with a GPU. The
+author then tried a model in the course's `assets/` in github.dev on Baneplanlegging: it shows,
+and a save with it is no noticeably slower than without, so the 5 MB limit stays. (The
+browser's Network tab showed no read of the file, even on a reload of the page, so it says
+nothing about whether github.dev keeps the file.) The PDF shows models: `lysark pdf` waits for
+the scene manager, which waits for the models; checked locally on the demo and on a 5 MB
+lecture. The course commit of decision 9 followed: `.gitattributes` (`*.[sS][tT][lL] binary`,
+`*.[gG][lL][bB] binary`, as SolidWorks writes `.STL` in capitals) and a README "Models" section
+(paths, `unit` and `up`, M to move, 5 MB, no Git LFS), whose example was built into
+Baneplanlegging and offline-checked. Next: the discussion below.
+
+**Not on main yet:** branch `claude/vibrant-matsumoto-662c6a` (202e56a) fixes an anchor name
+that every JavaScript object has (`constructor`, `toString`, ...) in a camera's `lookAt`, in
+`anchored:` or in a view: the deck threw instead of warning. It was written as v2.11.1; it
+goes out as v2.13.1 once the author says yes.
 
 **After step 8, raise with the author** (asked for on 2026-11-09, not to be worked on before):
 `slides.md` is getting large and hard to navigate. Every slide starts with a long frontmatter
