@@ -183,7 +183,9 @@ interface CameraPose {
 function resolveCameraPose(spec: CameraTargetSpec, seed?: CameraPose): CameraPose | null {
   let look: THREE.Vector3
   if (typeof spec.lookAt === 'string') {
-    const anchor = sceneManager.active?.anchors[spec.lookAt]
+    // own keys only: a name like 'constructor' must warn, not find Object's
+    const anchors = sceneManager.active?.anchors
+    const anchor = anchors && Object.hasOwn(anchors, spec.lookAt) ? anchors[spec.lookAt] : undefined
     if (!anchor) {
       console.warn(`camera lookAt: unknown anchor '${spec.lookAt}'`)
       return null

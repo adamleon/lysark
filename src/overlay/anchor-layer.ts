@@ -60,7 +60,8 @@ export class AnchorLayer {
     this.clear()
     if (!scene) return
     for (const spec of specs) {
-      const node = scene.anchors[spec.anchor]
+      // own keys only: a name like 'toString' must warn, not find Object's
+      const node = Object.hasOwn(scene.anchors, spec.anchor) ? scene.anchors[spec.anchor] : undefined
       if (!node) console.warn(`anchored: unknown anchor '${spec.anchor}'`)
       const el = document.createElement('div')
       let live: LiveRow[] | undefined

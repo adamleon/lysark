@@ -171,10 +171,16 @@ lecture. The course commit of decision 9 followed: `.gitattributes` (`*.[sS][tT]
 (paths, `unit` and `up`, M to move, 5 MB, no Git LFS), whose example was built into
 Baneplanlegging and offline-checked. Next: the discussion below.
 
-**Not on main yet:** branch `claude/vibrant-matsumoto-662c6a` (202e56a) fixes an anchor name
-that every JavaScript object has (`constructor`, `toString`, ...) in a camera's `lookAt`, in
-`anchored:` or in a view: the deck threw instead of warning. It was written as v2.11.1; it
-goes out as v2.13.1 once the author says yes.
+Engine v2.13.1 (2026-11-12), a fix on its own: an anchor name that is also a member of every
+JavaScript object (`constructor`, `toString`, `valueOf`, `__proto__`, …), written in a slide's
+`camera: lookAt`, its `anchored:` or a named view's `lookAt`, found that member instead of nothing,
+so the "unknown anchor" warning was skipped and the deck threw `getWorldPosition is not a function`
+(V in the panel too). The three lookups (src/main.ts resolveCameraPose, src/overlay/anchor-layer.ts
+show, src/editor/runtime.ts currentView) now take own keys only (`Object.hasOwn`), as
+src/scene/objects.ts and step 7's handles already did; src/overlay/anchor-layer.test.ts covers the
+layer. Written on 2026-11-09 as v2.11.1 on branch `claude/vibrant-matsumoto-662c6a` (202e56a),
+which waited while Actions were off, and ported onto step 8 unchanged. The compiler already
+refuses an object named like that (src/compiler/scene-files.ts).
 
 **After step 8, raise with the author** (asked for on 2026-11-09, not to be worked on before):
 `slides.md` is getting large and hard to navigate. Every slide starts with a long frontmatter
@@ -193,6 +199,36 @@ Proposals (not built):
   of slides is at minimum priority.
 - From step 3: in the panel, change slides with history.replaceState instead of a new
   `#n` entry, so browser Back in github.dev doesn't step through preview slides.
+- From v2.13.1: channel names have the same hole as anchor names had. Measured on v2.11.0: an
+  anchored vector's `joints: [constructor]` and a slider's `bind: toString` throw ("reading
+  'toFixed'"); a slide's `joints: { constructor: 0.5 }`, a plot's `bind: valueOf` and `idle:` on
+  `constructor` skip their "unknown channel" warning and write onto JavaScript's own `Object`.
+  Fix: own keys only in the channel lookups by an authored name (src/main.ts: plot and slider
+  bind, idle, trajectory; src/engine/slide-engine.ts: joints and a slider's gains;
+  src/overlay/anchor-layer.ts: a vector's rows; src/editor/runtime.ts: J's pose code). Small,
+  and its own change. The vector's throw happens in the frame loop, so it freezes the deck (next
+  proposal).
+- From v2.13.1: one bad frame freezes the deck until the page is reloaded. `tick` in
+  src/main.ts asks for the next frame only at its end, so an exception anywhere in it leaves
+  `ticking` true with no frame coming, and `ensureTicking` never restarts it. Seen on v2.13.0: a
+  label on `__proto__` threw in `anchorLayer.update`, and every later slide stayed frozen (0
+  frames), in Chromium and Firefox. Fix: catch an exception in `tick`, report it once in the
+  console, and keep the loop's bookkeeping right (ask for the next frame, or reset `ticking`), so
+  the rest of the lecture still runs in front of the class. Small, and its own change.
+- From v2.13.1: check anchor names at build time. A string `lookAt` (a slide's `camera:`, a
+  named view) and each `anchored:` entry's `anchor` must name an anchor of the slide's scene:
+  the engine scene's anchors in src/scenes/anchors.ts (for a scene file, those of its `base`)
+  plus the scene file's object names. Otherwise the build fails with the line, the closest name
+  and the list, as an unknown view or pose does. A view is checked in its own file
+  (src/compiler/scene-files.ts), a slide against the scene it names (compile-slides.ts); the
+  compiler has all it needs (`SceneFile.base`, `SceneFile.objects`, `SCENE_ANCHORS`). Why: today
+  a misspelled anchor only warns in the browser console, which the panel doesn't show; the
+  camera just doesn't move there, or the label stays hidden. In the panel the build error would
+  show in its red box. No lecture breaks: the demo uses end_effector, grip (an object), bob and
+  tool0, and Baneplanlegging uses tool0. Like decision 8 it turns a warning into a build error,
+  so it is the author's call. The same check could cover channel names against
+  src/scenes/joints.ts, once it is settled how to treat agilus-duo's `ghost_` channels, which
+  joints.ts doesn't list.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
@@ -339,7 +375,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**429**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**431**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

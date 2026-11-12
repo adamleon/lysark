@@ -526,6 +526,11 @@ HTTPS server.
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).
+- Engine v2.13.1 (2026-11-12): an anchor name that every JavaScript object already has
+  (`constructor`, `toString`, `valueOf`, …) in a slide's `camera: lookAt`, in `anchored:`, or in a
+  named view's `lookAt` threw an error in the running deck, and stopped V in the panel, instead of
+  warning "unknown anchor". The runtime now looks only at the scene's own anchors, so such a name
+  warns like any other misspelled one. (Written on 2026-11-09 as v2.11.1; released after step 8.)
 
 ## 7. Postponed
 

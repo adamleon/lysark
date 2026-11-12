@@ -705,7 +705,9 @@ function currentView(): { view: CameraView; rounded: NonNullable<typeof savedVie
   let center = L.cameraCtl.active ? L.cameraCtl.lookTarget : L.controls.target
   let lookAt: [number, number, number] | string = [center.x, center.y, center.z]
   const declared = slide.effective.camera?.lookAt
-  const anchor = typeof declared === 'string' ? L.sceneManager.active?.anchors[declared] : undefined
+  // own keys only: a name like 'valueOf' is no anchor, so the point is saved
+  const anchors = L.sceneManager.active?.anchors
+  const anchor = typeof declared === 'string' && anchors && Object.hasOwn(anchors, declared) ? anchors[declared] : undefined
   const anchorAt = anchor?.getWorldPosition(camera.clone())
   if (typeof declared === 'string' && anchorAt && anchorAt.distanceTo(center) < ANCHOR_TOLERANCE) {
     // the slide follows an anchor and the camera still looks at it: keep it.
