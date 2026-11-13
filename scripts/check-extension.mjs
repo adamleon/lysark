@@ -22,9 +22,11 @@
 //
 //   node scripts/check-extension.mjs <editor dir> [<editor dir> …]
 //
-// Not part of CI: the first run downloads VS Code Insiders (about 55 MB, into
-// extension/.vscode-test-web), and the workbench's markup changes between
-// Insiders builds. Run it before an extension release, with this engine's
+// Not part of CI: it runs one pinned VS Code Insiders build (VSCODE_COMMIT below),
+// downloaded on the first run only (about 55 MB, into extension/.vscode-test-web), as the
+// workbench's markup changes between Insiders builds. Unpinned, test-web asked for the newest
+// build on every run and, when there was one, deleted the cached one and downloaded it. Moving
+// the pin is a deliberate change. Run it before an extension release, with this engine's
 // editor (`node bin/lysark.mjs editor-build`) and the previous release's.
 import { execSync, spawn } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -40,6 +42,8 @@ import { editorProtocol } from '../src/editor/panel-page.js'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const EXTENSION = join(ROOT, 'extension')
 const TEST_WEB = '@vscode/test-web@0.0.80'
+/** the VS Code for the web build the check runs: Insiders 1.147, cached in extension/.vscode-test-web */
+const VSCODE_COMMIT = '0f38c8f0ffcd27a721b2927a22f1c02085e2c8a0'
 
 /**
  * true if the editor build knows named views (engine v2.5.0): its compiler's
@@ -184,7 +188,7 @@ function freePort() {
 /** VS Code for the web on `port`, with the extension from extension/, opened on `folder` */
 async function startTestWeb(folder, port) {
   const windows = process.platform === 'win32'
-  const args = ['--yes', TEST_WEB, '--extensionDevelopmentPath=.', '--browserType=none', `--port=${port}`, '--coi', windows ? `"${folder}"` : folder]
+  const args = ['--yes', TEST_WEB, '--quality=insiders', `--commit=${VSCODE_COMMIT}`, '--extensionDevelopmentPath=.', '--browserType=none', `--port=${port}`, '--coi', windows ? `"${folder}"` : folder]
   const child = spawn('npx', args, { cwd: EXTENSION, shell: windows, detached: !windows })
   const stop = () => {
     running.delete(stop)
