@@ -4,7 +4,14 @@
 // editor runtime served the way GitHub Pages serves it. For each editor
 // folder it makes a small course from the demo lecture (an image in the
 // lecture folder, one in the course's assets/, a scene file, and models in
-// both), opens slides.md, opens the preview and, by the runtime's message version:
+// both), opens slides.md, checks finding one's way in it (extension 0.4.0,
+// docs/slide-navigation.md: Quick Outline lists the slides' own headings, every
+// settings block is folded on opening, each slide's first line has its
+// separator, Lysark: Fold or Unfold Slide Settings opens and folds them, a
+// slide typed between two others leaves the blocks after it folded, a
+// README.md and a slides.md at the course's top keep their own headings, and
+// the first slide typed into a new lecture stays open), opens the preview and,
+// by the runtime's message version:
 //
 //   3  images shown from both folders, and with models (v2.13.0) models from
 //      both folders shown in the scene; saving a scene file sends the files
@@ -34,6 +41,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import MarkdownIt from 'markdown-it'
 import { parse as parseYaml } from 'yaml'
 import { launchBrowser } from './browser.mjs'
 import { EDITOR_PREFIX, serveEditor, stopServer } from './editor-server.mjs'
@@ -138,6 +146,59 @@ function inlinePoses(slides, sceneText) {
   return slides.replace(/^joints: *(\S[^\r\n]*?) *(?=\r?$)/gm, (line, name) => (poses[name] ? `joints: ${JSON.stringify(asJoints(poses[name]))}` : line))
 }
 
+/**
+ * The course's README.md: a Markdown file that is not a slides.md, with a
+ * heading between two `---` lines that a plugin treating it as slides would
+ * hide (not at the top, where Markdown would read the pair as front matter)
+ */
+const README = '# Test course\n\nNot a lecture: Lysark leaves its headings alone.\n\n---\n## Between two rules\n---\n\n## After the rules\n'
+
+/**
+ * A slides.md at the top of the course, as another slide tool's deck might
+ * be: not a lecture (that is lectures/<name>/slides.md), though it splits by
+ * Lysark's rules, which would fold `## Second` away as settings and label the
+ * slides. It starts with an empty line, so Markdown reads no front matter.
+ */
+const OTHER_DECK = '\n---\nlayout: cover\n---\n# A deck\n\nText.\n\n---\n## Second\n---\n\n## Third\n'
+
+/**
+ * Each slide of a slides.md, by the compiler's rules (src/compiler/slide-ranges.ts),
+ * written out again here so the check doesn't take the extension's word for
+ * them: its opening and closing `---` lines (0-based) and its id
+ */
+function slideParts(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const fence = (line) => line.trimEnd() === '---'
+  const parts = []
+  let i = 0
+  while (i < lines.length && !fence(lines[i])) i++
+  while (i < lines.length) {
+    const open = i++
+    while (i < lines.length && !fence(lines[i])) i++
+    if (i >= lines.length) throw new Error(`slides.md: the settings block on line ${open + 1} has no closing ---`)
+    const close = i++
+    let code = false
+    while (i < lines.length && !(fence(lines[i]) && !code)) {
+      if (/^(?:`{3,}|~{3,})/.test(lines[i].trimStart())) code = !code
+      i++
+    }
+    const id = lines.slice(open + 1, close).map((line) => /^id: *(\S+?) *$/.exec(line)?.[1]).find(Boolean) ?? null
+    parts.push({ open, close, id })
+  }
+  return parts
+}
+
+/**
+ * The outline VS Code's Markdown extension makes of a text: each heading as
+ * `## text`, its text the heading's plain text, as the Markdown language
+ * service names its symbols
+ */
+function outlineOf(text) {
+  const tokens = new MarkdownIt({ html: true }).parse(text, {})
+  const plain = (token) => (token.children ? token.children.map(plain).join('') : ['text', 'code_inline'].includes(token.type) ? token.content : '')
+  return tokens.flatMap((token, k) => (token.type === 'heading_open' ? [`${'#'.repeat(Number(token.tag.slice(1)))} ${plain(tokens[k + 1]).trim()}`] : []))
+}
+
 /** a course folder whose workspace settings point the extension at `editorUrl` */
 function makeCourse(editorUrl, namedViews, poses, objects, models) {
   const dir = mkdtempSync(join(tmpdir(), 'lysark-course-'))
@@ -173,6 +234,11 @@ function makeCourse(editorUrl, namedViews, poses, objects, models) {
   const pkg = { name: 'test-course', private: true, homepage: 'https://example.invalid/test-course/', dependencies: { lysark: 'github:adamleon/lysark' } }
   writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg, null, 2))
   writeFileSync(join(dir, '.vscode/settings.json'), JSON.stringify({ 'lysark.editorUrl': editorUrl }))
+  writeFileSync(join(dir, 'README.md'), README)
+  writeFileSync(join(dir, 'slides.md'), OTHER_DECK)
+  // a lecture just begun, for typing its first slide
+  mkdirSync(join(dir, 'lectures/new'))
+  writeFileSync(join(dir, 'lectures/new/slides.md'), '')
   return dir
 }
 
@@ -230,8 +296,297 @@ process.on('SIGINT', () => {
   process.exit(130)
 })
 
+/**
+ * The active editor's lines in sight, as VS Code renders them: each with its
+ * line number, its text, and the content of every ::after in it (a
+ * separator's label, a folded block's ⋯). Runs in the page.
+ */
+function linesInSight() {
+  const editor = document.querySelector('.editor-group-container.active .monaco-editor')
+  if (!editor) return []
+  const outside = (e) => !e.closest('.sticky-widget')
+  const numbers = [...editor.querySelectorAll('.margin-view-overlays .line-numbers')]
+    .filter(outside)
+    .map((e) => ({ top: e.getBoundingClientRect().top, n: Number(e.textContent.trim()) }))
+  return [...editor.querySelectorAll('.view-lines .view-line')].filter(outside).map((line) => {
+    const top = line.getBoundingClientRect().top
+    const box = line.querySelector('.inline-folded')?.getBoundingClientRect()
+    return {
+      n: numbers.find((x) => Math.abs(x.top - top) < 3)?.n,
+      text: line.textContent.replace(/\u00a0/g, ' '),
+      after: [...line.querySelectorAll('span')].map((s) => getComputedStyle(s, '::after').content).filter((c) => c && c !== 'none' && c !== 'normal'),
+      dots: box ? { x: box.left + box.width / 2, y: box.top + box.height / 2 } : null,
+    }
+  })
+}
+
+/**
+ * Finding one's way in slides.md (extension 0.4.0, docs/slide-navigation.md),
+ * in the lecture drive just opened, as VS Code shows it: Quick Outline, which
+ * lines are shown (the folds), the separators, the fold command, a slide
+ * typed between two others; the course's README.md and a slides.md at its
+ * top, which are not lectures and
+ * must keep their own headings; and the first slide typed into a new lecture,
+ * which stays open. Leaves every settings block open and the demo's slides.md
+ * in front, as the steps after it expect.
+ */
+async function checkNavigation(page, course, { check, tab, quickOpen }) {
+  const slides = readFileSync(join(course, 'lectures/demo/slides.md'), 'utf8')
+  const parts = slideParts(slides)
+  const folded = parts.filter((p) => p.close > p.open + 1)
+  // the lines a folded block hides (1-based, as VS Code numbers them): its settings and its closing ---
+  const settings = new Set(folded.flatMap((p) => Array.from({ length: p.close - p.open }, (_, k) => p.open + 2 + k)))
+  const plain = slides.replace(/\r\n/g, '\n').split('\n')
+  const expected = outlineOf(plain.map((line, k) => (parts.some((p) => k >= p.open && k <= p.close) ? '' : line)).join('\n'))
+
+  /** every line of the active editor VS Code renders, by number, scrolling it from top to bottom (and back) */
+  const rendered = async () => {
+    // the editor's box on screen (its .view-lines is as tall as the whole text); the mouse goes
+    // over the line numbers, since over the text a hover can open under it and take the wheel
+    const box = await page.locator('.editor-group-container.active .monaco-editor').first().boundingBox()
+    await page.mouse.move(box.x + 12, box.y + box.height / 2)
+    // each wheel tick scrolls the editor about 50 px, however large its delta
+    const ticks = async (delta, count) => {
+      for (let k = 0; k < count; k++) await page.mouse.wheel(0, delta)
+      await page.waitForTimeout(150)
+    }
+    const toTop = async () => {
+      for (let k = 0; k < 80 && !(await page.evaluate(linesInSight)).some((l) => l.n === 1); k++) await ticks(-100, 10)
+      await page.waitForTimeout(300)
+    }
+    await toTop()
+    const seen = new Map()
+    for (let k = 0, still = 0; k < 400 && still < 3; k++) {
+      const before = seen.size
+      for (const line of await page.evaluate(linesInSight)) if (line.n) seen.set(line.n, line)
+      still = seen.size === before ? still + 1 : 0
+      await ticks(100, 3)
+    }
+    await toTop()
+    return seen
+  }
+  /** lines of 1…count shown though `hidden` has them, or hidden though it doesn't */
+  const misshown = (seen, count, hidden) => {
+    const wrong = []
+    for (let n = 1; n <= count; n++) if (seen.has(n) === hidden.has(n)) wrong.push(`${n}${seen.has(n) ? ' shown' : ' hidden'}`)
+    return wrong.length ? `; wrong: ${wrong.slice(0, 10).join(', ')}${wrong.length > 10 ? ` and ${wrong.length - 10} more` : ''}` : ''
+  }
+  /** the symbols Quick Outline (Ctrl+Shift+O) lists for the active editor, in order */
+  const quickOutline = async () => {
+    await page.keyboard.press('Control+Shift+O')
+    await page.waitForSelector('.quick-input-widget .quick-input-list .monaco-list-row .label-name', { timeout: 15_000 }).catch(() => {})
+    await page.waitForTimeout(800)
+    const rows = new Map()
+    const box = await page.locator('.quick-input-widget .quick-input-list').first().boundingBox()
+    if (box) await page.mouse.move(box.x + box.width / 2, box.y + 20)
+    for (let k = 0; k < 20; k++) {
+      const before = rows.size
+      const found = await page.$$eval('.quick-input-widget .quick-input-list .monaco-list-row', (els) =>
+        els.map((e) => ({ index: Number(e.dataset.index), label: (e.querySelector('.label-name')?.textContent ?? '').replace(/\u00a0/g, ' ').trim() })),
+      )
+      for (const row of found) if (row.label) rows.set(row.index, row.label)
+      if (!box || rows.size === before) break
+      await page.mouse.wheel(0, box.height - 40)
+      await page.waitForTimeout(250)
+    }
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+    return [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, label]) => label)
+  }
+  /** Quick Outline once the Markdown language server has answered: what it lists when it matches, or at last */
+  const outline = async (want) => {
+    let rows = []
+    for (let attempt = 0; attempt < 4; attempt++) {
+      rows = await quickOutline()
+      if (JSON.stringify(rows) === JSON.stringify(want)) break
+      await page.waitForTimeout(2500)
+    }
+    return rows
+  }
+  /** run a command from the Command Palette */
+  const palette = async (name) => {
+    await page.keyboard.press('F1')
+    await page.waitForSelector('.quick-input-widget input', { timeout: 10_000 })
+    await page.keyboard.type(name, { delay: 10 })
+    await page.waitForTimeout(600)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(1500)
+  }
+  const foldCommand = () => palette('Lysark: Fold or Unfold Slide Settings')
+  /** close the active editor: View: Close Editor, picked by its exact name, since typing it also lists Close All Editors, above it */
+  const closeEditor = async () => {
+    await page.keyboard.press('F1')
+    await page.waitForSelector('.quick-input-widget input', { timeout: 10_000 })
+    await page.keyboard.type('View: Close Editor', { delay: 10 })
+    await page.waitForTimeout(600)
+    await page
+      .locator('.quick-input-widget .quick-input-list .monaco-list-row', { has: page.locator('.label-name', { hasText: /^View: Close Editor$/ }) })
+      .first()
+      .click()
+    await page.waitForTimeout(800)
+  }
+
+  // folded on opening: wait for the first block to fold (the folding waits for every provider,
+  // Markdown's language server included, which starts with the first Markdown file)
+  const first = folded[0]
+  for (let k = 0; k < 30; k++) {
+    const top = await page.evaluate(linesInSight)
+    if (!first || (top.some((l) => l.n === first.open + 1) && !top.some((l) => l.n === first.open + 2))) break
+    await page.waitForTimeout(1000)
+  }
+  const atOpen = await rendered()
+  const lineCount = plain.length
+  const wrongAtOpen = misshown(atOpen, lineCount, settings)
+  check(
+    folded.length > 0 && !wrongAtOpen,
+    `slides.md opens with every settings block folded (${folded.length}): its opening --- shown, its settings and closing --- not, every other line shown${wrongAtOpen}`,
+  )
+  if (!first) return
+
+  // the separators: each slide's opening line ends with its number and id, and no other line has one
+  const labels = parts.map((p, k) => (p.id ? `slide ${k + 1} · ${p.id}` : `slide ${k + 1}`))
+  const missing = parts.flatMap((p, k) => (atOpen.get(p.open + 1)?.after.some((c) => c.includes(labels[k])) ? [] : [`${labels[k]} (line ${p.open + 1}: ${JSON.stringify(atOpen.get(p.open + 1)?.after ?? null)})`]))
+  const opening = new Set(parts.map((p) => p.open + 1))
+  const stray = [...atOpen.values()].filter((l) => !opening.has(l.n) && l.after.some((c) => /slide \d/.test(c))).map((l) => l.n)
+  check(
+    missing.length === 0 && stray.length === 0,
+    `each slide's opening line carries its separator, "${labels[0]}" to "${labels.at(-1)}"` +
+      (missing.length ? `; missing: ${missing.slice(0, 4).join(', ')}` : '') +
+      (stray.length ? `; on other lines: ${stray.join(', ')}` : ''),
+  )
+
+  // Quick Outline: the slides' own headings, nothing from a settings block
+  const rows = await outline(expected)
+  check(
+    JSON.stringify(rows) === JSON.stringify(expected),
+    `Quick Outline lists slides.md's ${expected.length} headings and nothing from a settings block: ${JSON.stringify(rows)}` +
+      (JSON.stringify(rows) === JSON.stringify(expected) ? '' : `, expected ${JSON.stringify(expected)}`),
+  )
+
+  // the fold command: opens them all, folds them all, folds them all when one was opened by its ⋯,
+  // and opens them all again for the steps after this
+  const none = new Set()
+  await foldCommand()
+  const opened = misshown(await rendered(), lineCount, none)
+  await foldCommand()
+  const refolded = misshown(await rendered(), lineCount, settings)
+  const dots = (await page.evaluate(linesInSight)).find((l) => l.n === first.open + 1)?.dots
+  if (dots) await page.mouse.click(dots.x, dots.y)
+  await page.waitForTimeout(800)
+  const oneOpen = (await page.evaluate(linesInSight)).some((l) => l.n === first.open + 2)
+  await foldCommand()
+  const afterOne = misshown(await rendered(), lineCount, settings)
+
+  // a slide typed between two others, a line at a time, with every block folded: while it is
+  // half typed the text doesn't split into slides, and the blocks after it must stay folded
+  // (slide-blocks.ts, SlideTracker); its own block stays open, since VS Code folds "imports"
+  // ranges once per editor, and the separators after it count on. Then the typed lines are
+  // deleted again and the file saved, so the steps after this see the text as it was.
+  const goToLine = async (n) => {
+    await page.keyboard.press('Control+G')
+    await page.waitForSelector('.quick-input-widget input', { timeout: 10_000 })
+    await page.keyboard.type(String(n), { delay: 10 })
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(400)
+  }
+  // the first slide with a body line just above its opening ---
+  const at = parts.findIndex((p, k) => k > 0 && p.open - 1 > parts[k - 1].close)
+  let typedWrong = at > 0 ? '' : '; no slide has a body line above it'
+  if (at > 0) {
+    // the typed lines go at the slide's opening line (0-based), which moves down by 3
+    const where = parts[at].open
+    await goToLine(where)
+    await page.keyboard.press('End')
+    for (const text of ['---', 'id: typed', '---']) {
+      await page.keyboard.press('Enter')
+      await page.keyboard.type(text, { delay: 40 })
+      await page.waitForTimeout(1000)
+    }
+    await page.waitForTimeout(1500)
+    const seen = await rendered()
+    const hidden = new Set([...settings].map((n) => (n > where ? n + 3 : n)))
+    const label = (n, want) => (seen.get(n)?.after.some((c) => c.includes(want)) ? '' : `; line ${n} lacks "${want}"`)
+    typedWrong =
+      misshown(seen, lineCount + 3, hidden) +
+      label(where + 1, `slide ${at + 1} · typed`) +
+      label(where + 4, labels[at].replace(`slide ${at + 1}`, `slide ${at + 2}`))
+    await goToLine(where + 1)
+    for (let k = 0; k < 3; k++) await page.keyboard.press('Shift+ArrowDown')
+    await page.keyboard.press('Delete')
+    await page.keyboard.press('Control+S')
+    await page.waitForTimeout(1000)
+  }
+
+  await foldCommand()
+  const reopened = misshown(await rendered(), lineCount, none)
+  check(
+    !opened && !refolded && oneOpen && !afterOne && !reopened,
+    'Lysark: Fold or Unfold Slide Settings opened every block, folded them all, folded them all after ⋯ opened one, and opened them again' +
+      (opened ? `; opening${opened}` : '') +
+      (refolded ? `; folding${refolded}` : '') +
+      (oneOpen ? '' : `; clicking the ⋯ of line ${first.open + 1} didn't open its block`) +
+      (afterOne ? `; folding with one open${afterOne}` : '') +
+      (reopened ? `; opening again${reopened}` : ''),
+  )
+  check(
+    !typedWrong,
+    `a slide typed above slide ${at + 1}, a line at a time, stays open, every block stays folded while it is half typed and after, and the slides after it count on${typedWrong}`,
+  )
+
+  // files that are not lectures: their headings, folds and lines are Markdown's own (opened from
+  // the top of the Explorer: test-web's Quick Open finds no README.md)
+  const untouched = async (name, text, what) => {
+    await page.locator('.explorer-folders-view .monaco-list-row[aria-level="1"]', { hasText: new RegExp(`^${name.replace('.', '\\.')}$`) }).first().dblclick()
+    await page.waitForTimeout(1500)
+    const want = outlineOf(text)
+    const got = await outline(want)
+    const seen = await rendered()
+    const wrong = misshown(seen, text.split('\n').length, none)
+    const labelled = [...seen.values()].filter((l) => l.after.some((c) => /slide \d/.test(c))).map((l) => l.n)
+    check(
+      JSON.stringify(got) === JSON.stringify(want) && !wrong && labelled.length === 0,
+      `${what} keeps its own headings, ${JSON.stringify(got)}, with nothing folded and no separator` +
+        (JSON.stringify(got) === JSON.stringify(want) ? '' : `; expected ${JSON.stringify(want)}`) +
+        wrong +
+        (labelled.length ? `; separators on lines ${labelled.join(', ')}` : ''),
+    )
+    await closeEditor()
+  }
+  await untouched('README.md', README, 'README.md')
+  await untouched('slides.md', OTHER_DECK, 'A slides.md at the top of the course (not lectures/<name>/slides.md)')
+
+  // a lecture just begun: VS Code folds the blocks of the kind Imports the first time it has some
+  // to fold in an editor, so in a file opened without one, the first slide typed would fold with
+  // the cursor in it, and the next line typed would land in its settings
+  await quickOpen('lectures/new/slides.md')
+  await page.waitForSelector('.editor-group-container.active .monaco-editor .view-lines', { timeout: 20_000 })
+  await page.waitForTimeout(3000)
+  await page.locator('.editor-group-container.active .monaco-editor .view-lines').first().click()
+  for (const [k, text] of ['---', 'id: first', '---'].entries()) {
+    if (k) await page.keyboard.press('Enter')
+    await page.keyboard.type(text, { delay: 40 })
+  }
+  await page.waitForTimeout(2500)
+  const typed = await page.evaluate(linesInSight)
+  const shown = typed.map((l) => l.n).filter(Boolean)
+  const cursor = ((await page.locator('.statusbar [id="status.editor.selection"]').first().textContent().catch(() => '')) ?? '').trim()
+  const label = typed.find((l) => l.n === 1)?.after ?? []
+  check(
+    [1, 2, 3].every((n) => shown.includes(n)) && /^Ln 3, Col 4\b/.test(cursor) && label.some((c) => c.includes('slide 1 · first')),
+    `the first slide typed into a new lecture stays open, the cursor where it was typed, its separator "slide 1 · first": lines ${JSON.stringify(shown)}, ${cursor}, ${JSON.stringify(label)}`,
+  )
+  // empty again and saved, so that closing it asks nothing
+  await page.keyboard.press('Control+A')
+  await page.keyboard.press('Delete')
+  await page.keyboard.press('Control+S')
+  await page.waitForTimeout(1000)
+  await closeEditor()
+  await tab('slides.md').click()
+  await page.waitForTimeout(800)
+}
+
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, models, lines) {
+async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, models, course, lines) {
   let ok = true
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
@@ -291,6 +646,7 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
   await quickOpen('lectures/demo/slides.md')
   await page.waitForSelector('.monaco-editor .view-lines', { timeout: 20_000 })
   await page.waitForTimeout(1500)
+  await checkNavigation(page, course, { check, tab, quickOpen })
   await page.keyboard.press('F1')
   await page.waitForSelector('.quick-input-widget input', { timeout: 10_000 })
   await page.keyboard.type('Open Lysark Preview', { delay: 10 })
@@ -634,7 +990,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), models, lines)
+    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), models, course, lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

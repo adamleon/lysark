@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-11-12)
+## Where the project is (2026-11-14)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -182,10 +182,35 @@ layer. Written on 2026-11-09 as v2.11.1 on branch `claude/vibrant-matsumoto-662c
 which waited while Actions were off, and ported onto step 8 unchanged. The compiler already
 refuses an object named like that (src/compiler/scene-files.ts).
 
-**After step 8, raise with the author** (asked for on 2026-11-09, not to be worked on before):
-`slides.md` is getting large and hard to navigate. Every slide starts with a long frontmatter
-block before its content, and the content holds syntax such as `<!-- pause -->`. Discuss how
-to make the lecture file easier to find one's way in.
+**Finding one's way in slides.md** (raised after step 8, as the author asked on 2026-11-09):
+while scrolling it was hard to tell which slide you are on and where slides meet, and each
+slide's settings block dominated its text. After a prototype in VS Code for the web the author
+chose (2026-11-13) "Markdown + plugin": `slides.md` stays in VS Code's own Markdown editor, the
+settings blocks are folded when the file opens, and Lysark adds no slide list of its own.
+Extension 0.4.0 is built (2026-11-13), not released; no engine change. How it works, and its
+limits: [slide-navigation.md](slide-navigation.md). It works on a lecture's
+`lectures/<name>/slides.md` in a Lysark course (or the engine repo) and leaves every other file
+alone. A markdown-it plugin for VS Code's Markdown extension blanks the settings blocks of an
+open lecture before Markdown reads it, so the Outline, breadcrumbs, Quick Outline and sticky
+scroll show only the slides' headings (through a road VS Code doesn't document); each block is
+an "imports" folding range, folded by `editor.foldingImportsByDefault`, which the extension
+turns on for Markdown; each slide's opening line carries a separator (`slide 4 · ptp`); and
+**Lysark: Fold or Unfold Slide Settings** folds or opens them all. VS Code folds the blocks the
+first time a lecture opens in an editor and then keeps the folds as left, also on reopening, so
+a slide the author adds stays open until folded (the prototype showed this too; folding every
+block on every opening is written down as a proposal in slide-navigation.md, "Not built"). While
+a new slide is half typed, the blocks of the last text that split into slides are kept where
+they still stand (extension/src/slide-blocks.ts, `SlideTracker`), so the blocks after it stay
+folded. A text that splits without one of them counts as half typed only if one of their `---`
+lines changed sides or the text ends inside an open code fence, so a finished edit such as a
+slide put inside a code fence counts at once. A code review and a hands-on test (2026-11-13 and
+14) led to the lecture-only rule, plain (not "imports") ranges in a file opened with nothing to
+fold, leaving a file opened half typed as it is, that test for half typing, and a fold command
+that works with no block on screen and refuses to fold where the plugin is missing. Checked by
+vitest and by a new first section of `scripts/check-extension.mjs` (which also types a slide
+between two), with this engine's editor and v2.12.0's. To release: upload the `.vsix` that
+engine CI's extension job builds to the Marketplace, then try it in github.dev on
+Baneplanlegging (the checklist is in slide-navigation.md, "How to check it").
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -383,7 +408,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**431**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**472**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

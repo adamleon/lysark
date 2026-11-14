@@ -78,6 +78,11 @@ export function isCoursePackage(packageJson: unknown): boolean {
   return !!deps && typeof deps === 'object' && 'lysark' in deps
 }
 
+/** true if package.json is the engine's own (its repository has the demo lecture) */
+export function isEnginePackage(packageJson: unknown): boolean {
+  return (packageJson as { name?: unknown } | null)?.name === 'lysark'
+}
+
 // ---- the host's rules for message version 3 (read, list, edit) -------------
 
 /**

@@ -2,7 +2,7 @@
   "name": "lysark",
   "displayName": "Lysark",
   "description": "Preview Lysark lecture slides beside the text and edit their 3D scenes from the preview, also in github.dev",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "simply-wyvern",
   "license": "MIT",
   "repository": {
@@ -23,7 +23,9 @@
     "ui",
     "workspace"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
   "capabilities": {
     "virtualWorkspaces": true,
     "untrustedWorkspaces": {
@@ -35,6 +37,12 @@
     }
   },
   "contributes": {
+    "markdown.markdownItPlugins": true,
+    "configurationDefaults": {
+      "[markdown]": {
+        "editor.foldingImportsByDefault": true
+      }
+    },
     "commands": [
       {
         "command": "lysark.openPreview",
@@ -52,6 +60,11 @@
         "title": "Scene Actions…",
         "category": "Lysark",
         "icon": "$(list-selection)"
+      },
+      {
+        "command": "lysark.toggleSlideSettings",
+        "title": "Fold or Unfold Slide Settings",
+        "category": "Lysark"
       }
     ],
     "menus": {
@@ -84,6 +97,10 @@
         {
           "command": "lysark.sceneActions",
           "when": "activeWebviewPanelId == 'lysark.preview'"
+        },
+        {
+          "command": "lysark.toggleSlideSettings",
+          "when": "resourceFilename == slides.md"
         }
       ]
     },

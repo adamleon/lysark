@@ -10,12 +10,14 @@ import {
   isCameraView,
   isCoursePackage,
   isCreatablePath,
+  isEnginePackage,
   isWritablePath,
   matchSlide,
   notificationText,
   resolveInside,
   singleEdit,
 } from './logic'
+import { registerNavigation, type NavigationExports } from './navigation'
 
 /**
  * The Lysark VS Code extension (lysark-v2.md §5, step 3). It is a thin host:
@@ -27,6 +29,10 @@ import {
  * limits on which files (docs/editor-host.md). With version 2 (engine v2.3.x)
  * the extension writes saved views itself. It runs in desktop VS Code,
  * vscode.dev and github.dev alike, so it uses only the vscode API and fetch.
+ *
+ * From 0.4.0 it also helps find one's way in a lecture's slides.md (navigation.ts):
+ * folded settings blocks, a separator on each slide, and an outline of the
+ * slides' own headings, through a plugin for VS Code's Markdown extension.
  */
 
 /** the message versions this extension speaks */
@@ -57,7 +63,12 @@ const showError = (text: string, ...actions: string[]) => vscode.window.showErro
 const showWarning = (text: string, ...actions: string[]) =>
   vscode.window.showWarningMessage(notificationText(text), ...actions)
 
-export function activate(context: vscode.ExtensionContext): void {
+/**
+ * Runs when a lecture's commands are used or any Markdown file opens (the
+ * folding and separators of slides.md need it), and when the Markdown
+ * extension asks for the plugin it returns, so it only registers things.
+ */
+export function activate(context: vscode.ExtensionContext): NavigationExports {
   // one preview at a time, like the deck's one live scene (lysark-design.md §4.1):
   // previewing another lecture replaces it
   let preview: Preview | null = null
@@ -105,6 +116,11 @@ export function activate(context: vscode.ExtensionContext): void {
       preview = opened
     }),
     { dispose: () => preview?.panel.dispose() },
+  )
+  // a lecture's navigation works in a course, and in the engine's repository for its demo lecture
+  return registerNavigation(
+    context,
+    async (file) => (await findCoursePackage(file, (json) => isCoursePackage(json) || isEnginePackage(json))) !== null,
   )
 }
 
@@ -159,15 +175,18 @@ async function confirmSite(context: vscode.ExtensionContext, url: string): Promi
   return true
 }
 
-/** the nearest package.json above the file that belongs to a Lysark course, and its folder */
-async function findCoursePackage(file: vscode.Uri): Promise<{ json: unknown; dir: vscode.Uri } | null> {
+/** the nearest package.json above the file that belongs to a Lysark course (or that `accept` takes), and its folder */
+async function findCoursePackage(
+  file: vscode.Uri,
+  accept: (json: unknown) => boolean = isCoursePackage,
+): Promise<{ json: unknown; dir: vscode.Uri } | null> {
   const root = vscode.workspace.getWorkspaceFolder(file)?.uri
   let dir = vscode.Uri.joinPath(file, '..')
   for (let depth = 0; depth < 20; depth++) {
     try {
       const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(dir, 'package.json'))
       const json: unknown = JSON.parse(new TextDecoder().decode(bytes))
-      if (isCoursePackage(json)) return { json, dir }
+      if (accept(json)) return { json, dir }
     } catch {
       // no package.json here, or not JSON: keep looking upward
     }

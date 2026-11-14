@@ -127,6 +127,12 @@ engine v2.3.x it works as 0.2.1 did (V works, Scene Actions… says to update th
    Extensions view shows the version).
 3. Tag engine v2.4.0, then run Update engine in the course.
 
+Extension 0.4.0 (built 2026-11-13, not yet released) speaks the same messages as 0.3.0 and
+changes nothing above. It adds finding one's way in a lecture's `slides.md`: folded settings
+blocks, a separator on each slide, and an outline of the slides' own headings
+([slide-navigation.md](slide-navigation.md)). It needs no engine change, so it can be uploaded
+at any time.
+
 ## Tested
 
 - **Engine CI**, in Chromium and Firefox: `scripts/check-editor.mjs` plays the extension's side

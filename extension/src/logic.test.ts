@@ -7,6 +7,7 @@ import {
   isCameraView,
   isCoursePackage,
   isCreatablePath,
+  isEnginePackage,
   isWritablePath,
   notificationText,
   resolveInside,
@@ -63,6 +64,15 @@ describe('isCoursePackage', () => {
     expect(isCoursePackage({ dependencies: { vite: '6' } })).toBe(false)
     expect(isCoursePackage({})).toBe(false)
     expect(isCoursePackage(null)).toBe(false)
+  })
+})
+
+describe('isEnginePackage', () => {
+  it('is true only for the engine’s own package.json', () => {
+    expect(isEnginePackage({ name: 'lysark', version: '2.13.1' })).toBe(true)
+    expect(isEnginePackage({ name: 'test-course', dependencies: { lysark: 'github:adamleon/lysark' } })).toBe(false)
+    expect(isEnginePackage({})).toBe(false)
+    expect(isEnginePackage(null)).toBe(false)
   })
 })
 
