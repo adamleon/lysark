@@ -11,7 +11,8 @@ plugin for VS Code's Markdown extension keeps the settings out of its outline, t
 blocks are folded when the file opens, and Lysark adds no slide list of its own.
 
 Built 2026-11-13 as extension 0.4.0, then corrected after a code review and a hands-on test
-(2026-11-13 and 14); not yet released. It needs no engine change.
+(2026-11-13 and 14), and released on 2026-11-14; the author tried it in github.dev on
+Baneplanlegging the same day. It needs no engine change.
 
 ## What you see
 
@@ -154,8 +155,8 @@ the command.
   headings until the first edit.
 - **Files that aren't open.** Search for symbols in the whole workspace (Ctrl+T) also reads
   files that aren't open, and their settings still count as headings there.
-- **Tried in VS Code for the web 1.147 Insiders** (the build `scripts/check-extension.mjs` pins),
-  not yet in github.dev's stable VS Code, nor in desktop VS Code, which has the same Markdown
+- **Tried in VS Code for the web 1.147 Insiders** (the build `scripts/check-extension.mjs` pins)
+  and by the author in github.dev; not yet in desktop VS Code, which has the same Markdown
   extension, nor with a High Contrast theme.
 - `editor.foldingImportsByDefault` is on for every Markdown file. An extension that made
   "imports" folding ranges in Markdown would get them folded too; none is known.
@@ -205,7 +206,7 @@ Proposals for the author; none of these is in 0.4.0.
   that splits by Lysark's rules, both keeping all their headings, with nothing folded and no
   separator; and the first slide typed into an empty `lectures/new/slides.md` staying open, with
   the cursor where it was typed and its separator drawn.
-- **By hand, in github.dev on Baneplanlegging,** once 0.4.0 is on the Marketplace: open
+- **By hand, in github.dev on Baneplanlegging** (done for 0.4.0 on 2026-11-14): open
   `slides.md`. Every settings block is folded and each slide starts with its separator. The
   Outline view (in the Explorer) lists `# Baneplanlegging` and the 15 slide titles. Try the
   command, a click on a ⋯, V in the preview on a slide with its block folded (the block stays

@@ -187,7 +187,8 @@ while scrolling it was hard to tell which slide you are on and where slides meet
 slide's settings block dominated its text. After a prototype in VS Code for the web the author
 chose (2026-11-13) "Markdown + plugin": `slides.md` stays in VS Code's own Markdown editor, the
 settings blocks are folded when the file opens, and Lysark adds no slide list of its own.
-Extension 0.4.0 is built (2026-11-13), not released; no engine change. How it works, and its
+Extension 0.4.0 is released (2026-11-14; built from ac0e55d, whose engine CI passed); no engine
+change. The author tried it in github.dev on Baneplanlegging the same day: "perfect". How it works, and its
 limits: [slide-navigation.md](slide-navigation.md). It works on a lecture's
 `lectures/<name>/slides.md` in a Lysark course (or the engine repo) and leaves every other file
 alone. A markdown-it plugin for VS Code's Markdown extension blanks the settings blocks of an
@@ -208,9 +209,8 @@ slide put inside a code fence counts at once. A code review and a hands-on test 
 fold, leaving a file opened half typed as it is, that test for half typing, and a fold command
 that works with no block on screen and refuses to fold where the plugin is missing. Checked by
 vitest and by a new first section of `scripts/check-extension.mjs` (which also types a slide
-between two), with this engine's editor and v2.12.0's. To release: upload the `.vsix` that
-engine CI's extension job builds to the Marketplace, then try it in github.dev on
-Baneplanlegging (the checklist is in slide-navigation.md, "How to check it").
+between two), with this engine's editor and v2.12.0's. Released by uploading the `.vsix` that
+engine CI's extension job built to the Marketplace.
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
