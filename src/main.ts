@@ -21,6 +21,7 @@ import { MotionSystem, type PidChannel } from './engine/motion-system'
 import { SceneManager } from './engine/scene-manager'
 import { SlideEngine } from './engine/slide-engine'
 import { channelNamed, parseBinding, readField } from './engine/channel-binding'
+import { FrameLoop } from './engine/frame-loop'
 import type { SceneInstance } from './engine/scene-types'
 import type { CameraTargetSpec, CompiledSlide, TrajectorySpec, WidgetSpec } from './engine/slide-types'
 import deck from 'virtual:lysark-deck'
@@ -857,32 +858,23 @@ document.getElementById('overlay-layer')!.appendChild(panel)
   stepIdle: (now: number) => stepIdle(now),
   getTrajS: () => trajS,
   ensureTicking: () => ensureTicking(),
-  isTicking: () => ticking,
+  isTicking: () => loop.running,
 }
 
 // ---------------------------------------------------------------------------
-// Frame loop: fixed-timestep motion, then camera, then render. Pausable —
-// on a settled scene-less slide the loop stops entirely (spec §3); any
-// interaction or transition restarts it.
+// Frame loop (src/engine/frame-loop.ts): fixed-timestep motion, then camera,
+// then render. Pausable — on a settled scene-less slide the loop stops
+// entirely (spec §3); any interaction or transition restarts it. A frame that
+// throws is reported once and the loop goes on, so one bad slide doesn't
+// freeze the rest of the lecture.
 // ---------------------------------------------------------------------------
 
-let ticking = false
-let last = 0
-
-function ensureTicking(): void {
-  if (ticking) return
-  ticking = true
-  last = performance.now()
-  requestAnimationFrame(tick)
-}
-
-const tick = (now: number) => {
+function frame(now: number, dt: number): void {
   // idle sweeps setpoints and trajectory playback sets joint state BEFORE the
   // integrator reads them this frame (§11)
   stepIdle(now)
   stepTrajectory(now)
-  motion.step((now - last) / 1000)
-  last = now
+  motion.step(dt)
 
   if (cameraCtl.active) {
     if (cameraTrack) {
@@ -923,14 +915,17 @@ const tick = (now: number) => {
   anchorLayer.update(sceneLayer.camera, window.innerWidth, window.innerHeight, anchorsRevealed)
   // live plots sample here; t origin is arbitrary (window scrolls relatively)
   overlay.tick(now / 1000)
+}
 
+const loop = new FrameLoop({
+  frame,
   // keep ticking while a scene is live (orbiting needs frames); on scene-less
   // slides, stop once everything has settled — zero rAF work at rest (§3)
-  if (sceneVisible || cameraCtl.active || !motion.settled(0.5)) {
-    requestAnimationFrame(tick)
-  } else {
-    ticking = false
-  }
+  more: () => sceneManager.active !== null || sceneManager.busy || cameraCtl.active || !motion.settled(0.5),
+})
+
+function ensureTicking(): void {
+  loop.start()
 }
 
 for (const event of ['keydown', 'pointerdown', 'wheel', 'hashchange']) {
