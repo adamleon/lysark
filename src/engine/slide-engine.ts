@@ -2,6 +2,7 @@ import type { CameraTargetSpec, CompiledSlide, WidgetSpec } from './slide-types'
 import type { SceneInstance } from './scene-types'
 import type { SceneManager } from './scene-manager'
 import { mergeCameraSpec } from './camera-merge'
+import { channelNamed } from './channel-binding'
 import { Overlay, type OverlayContext } from '../overlay/overlay'
 
 export interface SlideEngineOptions {
@@ -136,7 +137,7 @@ export class SlideEngine {
   private applyTargets(slide: CompiledSlide, scene: SceneInstance, boundary: boolean): void {
     // gains first: restore scene defaults, then this slide's widget overrides
     for (const [name, gains] of Object.entries(scene.defaultGains)) {
-      const pid = scene.channels[name]?.pid
+      const pid = channelNamed(scene.channels, name)?.pid
       if (!pid) continue
       pid.kp = gains.kp
       pid.ki = gains.ki
@@ -144,7 +145,7 @@ export class SlideEngine {
     }
     for (const widget of slide.widgets) {
       if (widget.type !== 'slider' || !widget.pid) continue // plots carry no gains
-      const pid = scene.channels[widget.bind]?.pid
+      const pid = channelNamed(scene.channels, widget.bind)?.pid
       if (!pid) continue
       if (widget.pid.kp !== undefined) pid.kp = widget.pid.kp
       if (widget.pid.ki !== undefined) pid.ki = widget.pid.ki
@@ -154,7 +155,7 @@ export class SlideEngine {
     // joints: scene defaults ⊕ cumulative declared targets (spec §4.3)
     const joints = { ...scene.defaults.joints, ...slide.effective.joints }
     for (const [name, value] of Object.entries(joints)) {
-      const channel = scene.channels[name]
+      const channel = channelNamed(scene.channels, name)
       if (!channel) {
         console.warn(`slide '${slide.id}': unknown joint channel '${name}'`)
         continue

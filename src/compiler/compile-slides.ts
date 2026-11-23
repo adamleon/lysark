@@ -594,11 +594,12 @@ function validateTrajectory(raw: unknown, slideNo: number): TrajectorySpec | und
   const from = validatePose(raw.from, slideNo, 'from')
   const to = validatePose(raw.to, slideNo, 'to')
   // every q₀ joint must have a q_f value and vice versa — a partial pose is a typo
+  // (own keys: 'constructor' in { j1: 1 } is true through Object.prototype)
   for (const name of Object.keys(from)) {
-    if (!(name in to)) throw new Error(`slides: slide ${slideNo} trajectory joint '${name}' is in 'from' but not 'to'`)
+    if (!Object.hasOwn(to, name)) throw new Error(`slides: slide ${slideNo} trajectory joint '${name}' is in 'from' but not 'to'`)
   }
   for (const name of Object.keys(to)) {
-    if (!(name in from)) throw new Error(`slides: slide ${slideNo} trajectory joint '${name}' is in 'to' but not 'from'`)
+    if (!Object.hasOwn(from, name)) throw new Error(`slides: slide ${slideNo} trajectory joint '${name}' is in 'to' but not 'from'`)
   }
 
   const control = raw.control === undefined ? 'auto' : raw.control
@@ -903,7 +904,7 @@ export function compileLecture(source: string, sceneFiles: Record<string, string
         if ((poseNames.from !== undefined || poseNames.to !== undefined) && isMapping(from) && isMapping(to)) {
           const fromJoints = Object.keys(from)
           const toJoints = Object.keys(to)
-          if (fromJoints.length !== toJoints.length || fromJoints.some((joint) => !(joint in to))) {
+          if (fromJoints.length !== toJoints.length || fromJoints.some((joint) => !Object.hasOwn(to, joint))) {
             const sets = (end: 'from' | 'to', joints: string[]) =>
               `'${end}'${poseNames[end] !== undefined ? ` (the pose '${poseNames[end]}')` : ''} sets ${joints.join(', ')}`
             throw new Error(

@@ -26,6 +26,17 @@ export function parseBinding(bind: string): ParsedBinding {
   return { channel: bind, field: 'measured' }
 }
 
+/**
+ * The scene's channel by a name an author wrote (a slide's joints, a widget's
+ * bind, idle, a trajectory, a live vector's rows): own keys only, so a name
+ * that every JavaScript object has (constructor, toString, __proto__, …) finds
+ * nothing and warns like any misspelled name, instead of finding Object's
+ * member.
+ */
+export function channelNamed<T>(channels: Record<string, T>, name: string): T | undefined {
+  return Object.hasOwn(channels, name) ? channels[name] : undefined
+}
+
 export function readField(channel: PidChannel, field: ChannelField): number {
   switch (field) {
     case 'setpoint':

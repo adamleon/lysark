@@ -88,6 +88,10 @@ export function createIkSolver(robot: UrdfRobot, jointNames: string[], eeName: s
     return ee.getWorldPosition(new THREE.Vector3())
   }
 
+  // a joint by a name a slide wrote (a trajectory's ends): own keys only, so a name every
+  // JavaScript object has (constructor, toString, ...) is no joint, as a misspelled one isn't
+  const isJoint = (name: string): boolean => Object.hasOwn(robot.joints, name)
+
   const readJoints = (): Record<string, number> => {
     const out: Record<string, number> = {}
     for (const name of jointNames) out[name] = Number(robot.joints[name].angle)
@@ -102,7 +106,7 @@ export function createIkSolver(robot: UrdfRobot, jointNames: string[], eeName: s
 
     setJoints(joints) {
       for (const [name, v] of Object.entries(joints)) {
-        if (robot.joints[name]) robot.setJointValue(name, v)
+        if (isJoint(name)) robot.setJointValue(name, v)
       }
       robot.updateMatrixWorld(true)
     },
@@ -110,7 +114,7 @@ export function createIkSolver(robot: UrdfRobot, jointNames: string[], eeName: s
     fk(target) {
       const saved = readJoints()
       for (const [name, v] of Object.entries(target)) {
-        if (robot.joints[name]) robot.setJointValue(name, v)
+        if (isJoint(name)) robot.setJointValue(name, v)
       }
       const p = eePos()
       for (const name of jointNames) robot.setJointValue(name, saved[name])

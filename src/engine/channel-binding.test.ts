@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseBinding, readField } from './channel-binding'
+import { channelNamed, parseBinding, readField } from './channel-binding'
 import { PidChannel } from './motion-system'
 import { PID } from './pid'
 
@@ -26,5 +26,25 @@ describe('readField', () => {
     expect(readField(ch, 'measured')).toBe(1)
     expect(readField(ch, 'setpoint')).toBe(2)
     expect(readField(ch, 'error')).toBe(1) // setpoint − measured
+  })
+})
+
+describe('channelNamed', () => {
+  const joint1 = new PidChannel({ x0: 0, pid: new PID({ kp: 1, ki: 0, kd: 0, outMin: -1, outMax: 1 }) })
+  const channels = { joint1 }
+
+  it('finds a channel the scene has', () => {
+    expect(channelNamed(channels, 'joint1')).toBe(joint1)
+  })
+
+  it('finds nothing for a misspelled name, or a name every JavaScript object has', () => {
+    for (const name of ['joint9', 'constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(channelNamed(channels, name)).toBeUndefined()
+    }
+  })
+
+  it('finds a channel of a scene that names one like that itself', () => {
+    const own: Record<string, PidChannel> = { constructor: joint1 }
+    expect(channelNamed(own, 'constructor')).toBe(joint1)
   })
 })

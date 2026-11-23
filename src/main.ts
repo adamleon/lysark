@@ -20,7 +20,7 @@ import { Presenter } from './overlay/presenter'
 import { MotionSystem, type PidChannel } from './engine/motion-system'
 import { SceneManager } from './engine/scene-manager'
 import { SlideEngine } from './engine/slide-engine'
-import { parseBinding, readField } from './engine/channel-binding'
+import { channelNamed, parseBinding, readField } from './engine/channel-binding'
 import type { SceneInstance } from './engine/scene-types'
 import type { CameraTargetSpec, CompiledSlide, TrajectorySpec, WidgetSpec } from './engine/slide-types'
 import deck from 'virtual:lysark-deck'
@@ -111,7 +111,9 @@ function computeJointSamples(
       const s = i / STEPS
       sArr.push(s)
       const q = ik.solve(xA.clone().lerp(xB, s), { iterations: 20 })
-      for (const n of names) raw[n].push(q[n])
+      // own keys: a name that is no joint (misspelled, or one every JavaScript object has, as
+      // constructor) has no values, a gap in the graph, and the other joints are still drawn
+      for (const n of names) raw[n].push((Object.hasOwn(q, n) ? q[n] : undefined) as number)
     }
     ik.setJoints(live) // leave the robot as we found it
   } else {
@@ -360,7 +362,7 @@ function createWidget(spec: WidgetSpec): WidgetHandle | null {
   }
   if (spec.type === 'plot') {
     const { channel, field } = parseBinding(spec.bind)
-    const ch = binding.channels[channel]
+    const ch = channelNamed(binding.channels, channel)
     if (!ch) {
       console.warn(`plot bind: unknown channel '${channel}'`)
       return null
@@ -373,7 +375,7 @@ function createWidget(spec: WidgetSpec): WidgetHandle | null {
     })
   }
 
-  const channel = binding.channels[spec.bind]
+  const channel = channelNamed(binding.channels, spec.bind)
   if (!channel) {
     console.warn(`widget bind: unknown channel '${spec.bind}'`)
     return null
@@ -431,7 +433,7 @@ function applyIdle(slide: CompiledSlide, binding: SceneInstance | null): void {
   idleSpecs = slide.idle
   idleChannels = binding.channels
   for (const name of Object.keys(slide.idle)) {
-    const ch = binding.channels[name]
+    const ch = channelNamed(binding.channels, name)
     if (!ch) {
       console.warn(`idle: unknown channel '${name}'`)
       continue
@@ -447,7 +449,7 @@ function stepIdle(now: number): void {
   if (!idleSpecs || !idleChannels) return
   const t = (now - idleT0) / 1000
   for (const [name, osc] of Object.entries(idleSpecs)) {
-    const ch = idleChannels[name]
+    const ch = channelNamed(idleChannels, name)
     if (!ch) continue
     const center = osc.center ?? idleBase.get(name) ?? 0
     ch.setpoint = center + osc.amp * Math.sin(2 * Math.PI * osc.freq * t + osc.phase)
@@ -507,7 +509,7 @@ function buildTrack(
 ): TrajTrack {
   const joints: TrajJoint[] = []
   for (const name of Object.keys(spec.from)) {
-    const ch = binding.channels[chanKey(name)]
+    const ch = channelNamed(binding.channels, chanKey(name))
     if (!ch) {
       console.warn(`trajectory: unknown channel '${chanKey(name)}'`)
       continue

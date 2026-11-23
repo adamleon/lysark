@@ -407,6 +407,16 @@ describe('compileSlides — trajectory playback + curve widget', () => {
     ).toThrow(/control must be/)
   })
 
+  it('rejects trajectory ends whose other end has a name only through Object.prototype', () => {
+    // 'constructor' in { j1: 1 } is true, so these passed and the deck read Object as a joint value
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  control: slider\n  from: { j1: 0, constructor: 0 }\n  to: { j1: 1, valueOf: 1 }\n---\nx'),
+    ).toThrow("slides: slide 1 trajectory joint 'constructor' is in 'from' but not 'to'")
+    expect(() =>
+      compileSlides('---\nscene: arm\ntrajectory:\n  control: slider\n  from: { j1: 0 }\n  to: { j1: 1, toString: 1 }\n---\nx'),
+    ).toThrow("slides: slide 1 trajectory joint 'toString' is in 'to' but not 'from'")
+  })
+
   it('compiles a path widget with no bind', () => {
     const src = '---\nscene: arm\nwidgets:\n  - type: path\n    label: s\n---\nBody'
     const [slide] = compileSlides(src)

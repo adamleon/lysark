@@ -245,6 +245,10 @@ poses:
     expect(() =>
       compileSlides('---\nscene: agilus\ntrajectory:\n  control: slider\n  from: { joint_4: 0 }\n  to: { joint_6: 0 }\n---\n# T\n', files),
     ).toThrow(/is in 'from' but not 'to'/)
+    // a joint name every JavaScript object has is not in a pose that doesn't name it
+    expect(() =>
+      compileSlides('---\nscene: agilus\ntrajectory:\n  control: slider\n  from: { joint_4: 0, constructor: 0 }\n  to: vri\n---\n# T\n', files),
+    ).toThrow("trajectory 'from' sets joint_4, constructor, but 'to' (the pose 'vri') sets joint_4, joint_6.")
   })
 
   it("points an unknown trajectory pose at its own from: or to: line", () => {

@@ -36,4 +36,17 @@ describe('position inverse kinematics', () => {
     ik.fk(start)
     expect(ik.eePosition().distanceTo(at)).toBeLessThan(1e-9)
   })
+
+  it('leaves out a name that is no joint of the robot, also one every JavaScript object has', () => {
+    const ik = solver()
+    ik.setJoints(start)
+    const at = ik.eePosition()
+    for (const name of ['joint9', 'constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      // as a trajectory's end from a slide's YAML: an own key, also for __proto__
+      const pose = JSON.parse(`{ "${name}": 0.5, "joint1": 0 }`) as Record<string, number>
+      expect(ik.fk(pose).distanceTo(at)).toBeLessThan(1e-9)
+      ik.setJoints(pose)
+      expect(ik.eePosition().distanceTo(at)).toBeLessThan(1e-9)
+    }
+  })
 })

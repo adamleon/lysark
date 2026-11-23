@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { AnchoredSpec, AnchoredVectorSpec } from '../engine/slide-types'
+import { channelNamed } from '../engine/channel-binding'
 import { projectToScreen } from './project'
 
 /** the subset of a SceneInstance the anchor layer needs: named nodes + live channels */
@@ -94,7 +95,7 @@ export class AnchorLayer {
       const cell = document.createElement('span')
       cell.className = 'cv-val'
       col.appendChild(cell)
-      const channel = scene.channels[name]
+      const channel = channelNamed(scene.channels, name)
       if (!channel) console.warn(`anchored vector: unknown channel '${name}'`)
       rows.push({ el: cell, channel, digits: spec.digits })
     }

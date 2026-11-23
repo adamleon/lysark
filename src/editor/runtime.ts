@@ -1,5 +1,6 @@
 import { compileLecture } from '../compiler/compile-slides'
 import { lectureObjects, readSceneFiles } from '../compiler/scene-files'
+import { channelNamed } from '../engine/channel-binding'
 import type { Deck } from '../engine/deck'
 import type { SceneObject } from '../engine/object-types'
 import type { CameraTargetSpec } from '../engine/slide-types'
@@ -283,7 +284,7 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
     const active = lysark()?.sceneManager.active
     const joints = sceneJoints(pose.scene)
     for (const joint of changed) {
-      const channel = active?.channels[joint]
+      const channel = active ? channelNamed(active.channels, joint) : undefined
       const info = joints.find((j) => j.name === joint)
       const value = nextJoints![joint]
       if (!channel || !info) continue
@@ -852,7 +853,7 @@ function movesItself(slide: LysarkHandle['engine']['current']): string | null {
  * slide puts it nowhere and the sliders moved it.
  */
 function jointMoved(slide: LysarkHandle['engine']['current'], active: NonNullable<LysarkHandle['sceneManager']['active']>, name: string): boolean {
-  const channel = active.channels[name]
+  const channel = channelNamed(active.channels, name)
   if (!channel) return false
   const target = slide.effective.joints?.[name] ?? active.defaults.joints?.[name]
   if (target !== undefined) return Math.abs(channel.setpoint - target) > 1e-9
@@ -870,7 +871,7 @@ function jointMoved(slide: LysarkHandle['engine']['current'], active: NonNullabl
  * teaches with (inside the sliders' limits), and remember the move.
  */
 function jog(scene: string, active: NonNullable<LysarkHandle['sceneManager']['active']>, joint: JointInfo, value: number): void {
-  const channel = active.channels[joint.name]
+  const channel = channelNamed(active.channels, joint.name)
   if (!channel) return
   const v = Math.min(Math.max(value, Math.ceil(joint.min * 100 - 1e-6) / 100), Math.floor(joint.max * 100 + 1e-6) / 100)
   channel.setpoint = v
@@ -897,9 +898,9 @@ const jointPanel = createJointPanel((): PanelState => {
   }
   const why = movesItself(slide)
   const joints = sceneJoints(slide.scene)
-    .filter((j) => active.channels[j.name])
+    .filter((j) => channelNamed(active.channels, j.name))
     .map((j) => {
-      const channel = active.channels[j.name]
+      const channel = channelNamed(active.channels, j.name)!
       return {
         name: j.name,
         min: Math.ceil(j.min * 100 - 1e-6) / 100,
@@ -1079,7 +1080,7 @@ function robotPose(): {
   const robot: Record<string, number> = {}
   const moved: string[] = []
   for (const joint of sceneJoints(slide.scene)) {
-    const channel = active.channels[joint.name]
+    const channel = channelNamed(active.channels, joint.name)
     if (!channel) continue
     const target = slide.effective.joints?.[joint.name] ?? active.defaults.joints?.[joint.name]
     const isMoved = jointMoved(slide, active, joint.name)
