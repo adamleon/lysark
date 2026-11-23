@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-11-14)
+## Where the project is (2026-11-23)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -212,6 +212,27 @@ vitest and by a new first section of `scripts/check-extension.mjs` (which also t
 between two), with this engine's editor and v2.12.0's. Released by uploading the `.vsix` that
 engine CI's extension job built to the Marketplace.
 
+Engine v2.13.2 (built 2026-11-23, not yet pushed or tagged), three small fixes v2.13.1 left as
+proposals, each its own commit; no format change, no extension change. Channel names: a name
+every JavaScript object has (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `__proto__`)
+in a slide's `joints:`, a slider's or plot's `bind:`, `idle:`, a trajectory or an anchored
+vector's `joints:` found that member: it threw (the vector's in the frame loop, freezing the
+deck), wrote onto JavaScript's own `Object`, or blanked a task-space trajectory's joint graph.
+Every lookup of a channel or joint by an authored name now takes own keys only (`channelNamed`
+in src/engine/channel-binding.ts, and src/scene/ik.ts), so such a name warns "unknown channel"
+like a misspelled one; the compiler's check that a trajectory's ends set the same joints takes
+own keys too. The frame loop: an exception in a frame left `ticking` true with no frame coming,
+so one bad frame froze the deck until a reload. The loop is now src/engine/frame-loop.ts: it
+catches an exception in a frame, reports it once per message (`reportError`, so the panel and
+`lysark check` still see it), and asks for the next frame or stops as before (a settled
+scene-less slide stops it entirely, §3).
+Silent saves: while a view or pose waited for VS Code's answer, V, P, Shift+V, Shift+P and Scene
+Actions' saves returned without a word; they now show "A save is still on its way; try again in
+a moment." (runtime.ts, `saveInFlight`). Checked: unit tests that fail on the old code, a
+scratch lecture stepped in Chromium and Firefox before and after (a slide per bad name; a throw
+injected into the frames), and a new section of scripts/check-editor.mjs whose stand-in host
+holds back its answer to an edit (`holdEdits`) while the other saves are pressed.
+
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
   HTML job could skip the install, and the offline check, when `lysark site` has
@@ -224,30 +245,6 @@ Proposals (not built):
   of slides is at minimum priority.
 - From step 3: in the panel, change slides with history.replaceState instead of a new
   `#n` entry, so browser Back in github.dev doesn't step through preview slides.
-- From v2.13.1: channel names have the same hole as anchor names had. Measured on v2.11.0: an
-  anchored vector's `joints: [constructor]` and a slider's `bind: toString` throw ("reading
-  'toFixed'"); a slide's `joints: { constructor: 0.5 }`, a plot's `bind: valueOf` and `idle:` on
-  `constructor` skip their "unknown channel" warning and write onto JavaScript's own `Object`.
-  Fix: own keys only in the channel lookups by an authored name (src/main.ts: plot and slider
-  bind, idle, trajectory; src/engine/slide-engine.ts: joints and a slider's gains;
-  src/overlay/anchor-layer.ts: a vector's rows; src/editor/runtime.ts: J's pose code). Small,
-  and its own change. The vector's throw happens in the frame loop, so it freezes the deck (next
-  proposal).
-- From v2.13.1: one bad frame freezes the deck until the page is reloaded. `tick` in
-  src/main.ts asks for the next frame only at its end, so an exception anywhere in it leaves
-  `ticking` true with no frame coming, and `ensureTicking` never restarts it. Seen on v2.13.0: a
-  label on `__proto__` threw in `anchorLayer.update`, and every later slide stayed frozen (0
-  frames), in Chromium and Firefox. Fix: catch an exception in `tick`, report it once in the
-  console, and keep the loop's bookkeeping right (ask for the next frame, or reset `ticking`), so
-  the rest of the lecture still runs in front of the class. Small, and its own change.
-- From v2.13.1: a save the panel ignores says nothing. While a view or pose waits for the host's
-  reply, V, P, Shift+V, Shift+P and Scene Actions' saves return without a word
-  (src/editor/runtime.ts: `if (saving) return` in saveView, saveAs, savePoseAs and the keys). In
-  github.dev a slow reply could make a key press look broken. Fix: say "A save is still on its
-  way; try again in a moment", as the second P already does. Small, and its own change.
-  (Engine CI for v2.13.1 first failed on the check's side of this: scripts/check-editor.mjs read
-  the panel's message, or started its next save, before the reply was in. It now waits for the
-  panel's message after every save, and passes with the host's replies held back 1.5 s.)
 - From v2.13.1: check anchor names at build time. A string `lookAt` (a slide's `camera:`, a
   named view) and each `anchored:` entry's `anchor` must name an anchor of the slide's scene:
   the engine scene's anchors in src/scenes/anchors.ts (for a scene file, those of its `base`)
@@ -261,7 +258,9 @@ Proposals (not built):
   tool0, and Baneplanlegging uses tool0. Like decision 8 it turns a warning into a build error,
   so it is the author's call. The same check could cover channel names against
   src/scenes/joints.ts, once it is settled how to treat agilus-duo's `ghost_` channels, which
-  joints.ts doesn't list.
+  joints.ts doesn't list. It would also catch `__proto__` as a name in `joints:` or `idle:`,
+  which the compiler drops without a word today (since v2.13.2 the runtime warns about every
+  other such name).
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
@@ -366,7 +365,8 @@ keep it green.
 
 - `src/engine/` — motion-system (PID/spring + `playback`), slide-engine, scene-
   manager (lifecycle), compile-slides (build-time markdown→objects), time-scaling,
-  channel-binding, camera-merge.
+  channel-binding (and `channelNamed`, the lookup by an authored name), camera-merge,
+  frame-loop.
 - `src/scene/` — scene-layer (the one persistent renderer), camera-controller,
   **ik** (DLS solver), dispose, **objects** (builds a scene file's objects into a scene;
   their data type is `src/engine/object-types.ts`), **models** (parses STL and GLB files
@@ -381,7 +381,7 @@ keep it green.
   `widgets/` (slider, plot, curve, path, toggle, transport, compare-curve,
   joints-graph), project.
 - `src/main.ts` — wiring: camera, idle, trajectory (playback + IK + traces + all
-  the widget factories), debug panel, frame loop.
+  the widget factories), debug panel, the frame (run by src/engine/frame-loop.ts).
 - `src/editor/` — the editor runtime (step 3): `runtime.ts` (bridge to the VS Code
   panel), `deck-from-source.ts` (stands in for `virtual:lysark-deck`, compiles the
   text in the browser), `camera-edit.ts` (writes a view into a slide, byte for byte),
@@ -408,7 +408,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**472**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**488**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

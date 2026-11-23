@@ -531,6 +531,14 @@ HTTPS server.
   named view's `lookAt` threw an error in the running deck, and stopped V in the panel, instead of
   warning "unknown anchor". The runtime now looks only at the scene's own anchors, so such a name
   warns like any other misspelled one. (Written on 2026-11-09 as v2.11.1; released after step 8.)
+- Engine v2.13.2 (2026-11-23): three small fixes, the proposals v2.13.1 left. A channel name that
+  every JavaScript object has, in a slide's `joints:`, a widget's `bind:`, `idle:`, a trajectory
+  or an anchored vector's `joints:`, threw or wrote onto JavaScript's own `Object` instead of
+  warning "unknown channel"; the runtime now looks only at the scene's own channels and joints.
+  An error in one frame no longer freezes the deck until the page is reloaded: the frame loop
+  reports it once in the console and goes on. And while a view or pose is being saved, a second
+  V, P, Shift+V, Shift+P or Scene Actions save says "A save is still on its way; try again in a
+  moment." instead of nothing. No format change, no extension change.
 
 ## 7. Postponed
 
