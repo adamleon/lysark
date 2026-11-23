@@ -110,8 +110,9 @@ Full evidence and the framework comparison table are in `docs/archive/lysark-des
   it is stopped. `MotionSystem` is decoupled from rendering: when the WebGL loop is stopped, a
   lightweight overlay ticker (its own rAF) steps only the overlay channels — widget springs,
   static-plot transitions — and self-suspends the moment everything is settled, so an idle
-  scene-less slide does zero rAF work. A frame that throws is reported once (per message) and the
-  loop goes on (src/engine/frame-loop.ts), so one bad slide can't freeze the rest of the deck.
+  scene-less slide does zero rAF work. A frame that throws is reported once per message (at most
+  20 messages a page) and the loop goes on (src/engine/frame-loop.ts), so one bad slide can't
+  freeze the rest of the deck.
 - **Text is never rendered inside the WebGL scene.** The "text lives in the world" illusion comes
   from choreographing camera settle + anchored-element fade-in.
 

@@ -219,13 +219,18 @@ in a slide's `joints:`, a slider's or plot's `bind:`, `idle:`, a trajectory or a
 vector's `joints:` found that member: it threw (the vector's in the frame loop, freezing the
 deck), wrote onto JavaScript's own `Object`, or blanked a task-space trajectory's joint graph.
 Every lookup of a channel or joint by an authored name now takes own keys only (`channelNamed`
-in src/engine/channel-binding.ts, and src/scene/ik.ts), so such a name warns "unknown channel"
-like a misspelled one; the compiler's check that a trajectory's ends set the same joints takes
-own keys too. The frame loop: an exception in a frame left `ticking` true with no frame coming,
-so one bad frame froze the deck until a reload. The loop is now src/engine/frame-loop.ts: it
-catches an exception in a frame, reports it once per message (`reportError`, so the panel and
-`lysark check` still see it), and asks for the next frame or stops as before (a settled
-scene-less slide stops it entirely, §3).
+in src/engine/channel-binding.ts, src/scene/ik.ts, and the panel's pose code in
+src/editor/runtime.ts), so such a name warns "unknown channel" like a misspelled one; the
+compiler's check that a trajectory's ends set the same joints takes own keys too. The frame
+loop: an exception in a frame left `ticking` true with no frame coming, so one bad frame froze
+the deck until a reload. The loop is now src/engine/frame-loop.ts: it catches an exception in a
+frame and reports it as an uncaught one would be (`reportError`: in the console, so `lysark
+check` still fails on it, and to the page's error listeners, so in the panel it reaches VS
+Code's status bar for 8 s), once per message and at most 20 messages a page; then it asks for
+the next frame or stops as before (a settled scene-less slide stops it entirely, §3). An error
+with no message (a thrown object without a prototype) can't stop the loop either, and time a
+throwing channel leaves unspent in the motion step is dropped (src/engine/motion-system.ts), so
+it doesn't run all at once when the throwing stops.
 Silent saves: while a view or pose waited for VS Code's answer, V, P, Shift+V, Shift+P and Scene
 Actions' saves returned without a word; they now show "A save is still on its way; try again in
 a moment." (runtime.ts, `saveInFlight`). Checked: unit tests that fail on the old code, a
@@ -261,6 +266,17 @@ Proposals (not built):
   joints.ts doesn't list. It would also catch `__proto__` as a name in `joints:` or `idle:`,
   which the compiler drops without a word today (since v2.13.2 the runtime warns about every
   other such name).
+- From v2.13.2: show the running deck's errors in the panel. An uncaught error in the panel's
+  page, such as a frame that throws, reaches VS Code only as an 8-second status-bar message
+  (runtime.ts's window `error` listener posts a non-fatal `lysark:error`; extension.ts shows it
+  with setStatusBarMessage), and the frame loop reports each message once a page, at most 20.
+  So an error thrown on every frame of one slide is said once, for 8 s; after that the slide
+  runs with the rest of each frame skipped (labels or plots stand still, say) and nothing on
+  screen says why, and the same message on a later slide isn't said again. Fix: the panel
+  shows a non-fatal error in its banner, with the slide it happened on, and the frame loop
+  forgets what it reported when the slide changes, so each slide's error is said once. Editor
+  runtime and engine only, no extension change; the author's call, because the banner is the
+  panel's one message line and the saves use it.
 
 The **framework** (M1–M7 + theme + Agilus mesh) is complete. On top of it, the
 **first real lecture** — *Baneplanlegging* (trajectory planning, AIS2105, Norwegian)
@@ -408,7 +424,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**488**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**490**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
