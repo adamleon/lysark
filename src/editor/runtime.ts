@@ -266,7 +266,10 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
   const posesSlideShown = changed.length > 0
   const pose = savedPose
   const fromSavedPose =
-    pose !== null && fresh[i]?.scene === pose.scene && changed.every((joint) => nextJoints?.[joint] !== undefined && nextJoints[joint] === pose.values[joint])
+    pose !== null &&
+    fresh[i]?.scene === pose.scene &&
+    // own keys: a joint name a slide wrote may be one every JavaScript object has (constructor)
+    changed.every((joint) => !!nextJoints && Object.hasOwn(nextJoints, joint) && Object.hasOwn(pose.values, joint) && nextJoints[joint] === pose.values[joint])
   if (posesSlideShown && !fromSavedPose) return false
   // the slide shown runs its trajectory from the ends it had when it was entered
   if (JSON.stringify(fresh[i]?.trajectory) !== JSON.stringify(deck.slides[i]?.trajectory)) return false
@@ -1021,7 +1024,7 @@ function robotShown(slide: { effective: { joints?: Record<string, number> }; tra
   const joints: Record<string, number> = { ...defaults, ...slide.effective.joints }
   const driven = (slide.trajectory as { from?: Record<string, number> } | undefined)?.from ?? {}
   const put = Object.keys(joints)
-    .filter((name) => !(name in driven))
+    .filter((name) => !Object.hasOwn(driven, name))
     .sort()
     .map((name) => [name, joints[name]])
   return JSON.stringify([put, slide.trajectory ?? null])
