@@ -731,7 +731,7 @@ function currentView(): { view: CameraView; rounded: NonNullable<typeof savedVie
 
 async function saveView(): Promise<void> {
   if (!(await afterObjectSaves('view'))) return
-  if (saving) return
+  if (saveInFlight()) return
   const now = currentView()
   if (!now) return
   // a slide that names a view (`camera: overview`) saves into that view; any other into the slide
@@ -1114,10 +1114,21 @@ function posePending(): boolean {
   return true
 }
 
+/**
+ * A view or a pose is being saved (between the key and VS Code's answer):
+ * one save at a time, so a second is refused. Says so, as posePending does,
+ * or in github.dev a slow answer makes the key look broken.
+ */
+function saveInFlight(): boolean {
+  if (!saving) return false
+  showBanner('A save is still on its way; try again in a moment.', 'ok')
+  return true
+}
+
 async function savePose(): Promise<void> {
   if (!(await afterObjectSaves('pose'))) return
   if (posePending()) return
-  if (saving) return // a view is being saved
+  if (saveInFlight()) return // a view is being saved
   const now = currentPose()
   if (!now) return
   // a slide that names a pose (`joints: reach`) saves into that pose; any other into the slide
@@ -1232,7 +1243,7 @@ async function poseChoicesHere(): Promise<PoseAsChoices | null> {
  */
 async function savePoseAs(choice: SavePoseAs, choices: PoseAsChoices): Promise<void> {
   if (!(await afterObjectSaves('pose'))) return
-  if (saving || posePending()) return
+  if (posePending() || saveInFlight()) return
   const pose = robotPose()
   if (!pose) return
   saving = true
@@ -1540,7 +1551,7 @@ async function choicesHere(): Promise<SaveAsChoices | null> {
  */
 async function saveAs(choice: SaveAs, choices: SaveAsChoices): Promise<void> {
   if (!(await afterObjectSaves('view'))) return
-  if (saving) return
+  if (saveInFlight()) return
   const now = currentView()
   if (!now) return
   saving = true
@@ -1756,7 +1767,7 @@ function openChoiceDialog<C>(spec: {
 /** Shift+V: Save view as…, in the panel's own dialog */
 async function openSaveAs(): Promise<void> {
   if (!(await afterObjectSaves('view'))) return
-  if (dialog || saving || !currentView()) return
+  if (dialog || saveInFlight() || !currentView()) return
   const choices = await choicesHere()
   if (!choices || dialog) return
   const rows: DialogRow<SaveAs>[] = [
@@ -1804,7 +1815,7 @@ async function openSaveAs(): Promise<void> {
 /** Shift+P: Save pose as…, in the panel's own dialog */
 async function openSavePoseAs(): Promise<void> {
   if (!(await afterObjectSaves('pose'))) return
-  if (dialog || saving || posePending() || !robotPose()) return
+  if (dialog || posePending() || saveInFlight() || !robotPose()) return
   const choices = await poseChoicesHere()
   if (!choices || dialog) return
   const rows: DialogRow<SavePoseAs>[] = [

@@ -21,11 +21,12 @@
 // with its models (each file read once, after the images), VS
 // Code's default styles gone, a view computed on an older version refused, a
 // saved view written as one edit to the first slide's frontmatter and put into
-// the running deck, a camera-only change put in place, a named view saved into
-// its scene file and taken by the other slide that names it, Shift+V's
-// dialog saving a new view in a new scene file, the joint sliders (J) moving
-// the robot and marking the joints P writes, P (pressed on a focused slider)
-// saving the pose into a named pose and into a slide, both put into the
+// the running deck, every other save while VS Code's answer to a view's edit is
+// on its way (held back) told to wait, a camera-only change put in place, a
+// named view saved into its scene file and taken by the other slide that names
+// it, Shift+V's dialog saving a new view in a new scene file, the joint sliders
+// (J) moving the robot and marking the joints P writes, P (pressed on a focused
+// slider) saving the pose into a named pose and into a slide, both put into the
 // running deck (also when the author is on to the next slide, which carries
 // the pose, before its text comes), a second P meanwhile told to wait, a joint
 // moved since P left where it is and its slider keeping the keys, a slide's
@@ -313,6 +314,13 @@ function createHost(lectureDir, lectureText) {
     /** every question the panel asked (lists and inputs), and the answers to give, in turn */
     asks: [],
     answers: [],
+    /** hold back the answers to edits, as a slow VS Code would (the edits are made at once), until release() */
+    holdEdits: false,
+    held: [],
+  }
+  host.release = () => {
+    host.holdEdits = false
+    for (const send of host.held.splice(0)) send()
   }
   const inside = (rel) => {
     const file = resolve(lectureDir, rel)
@@ -365,6 +373,7 @@ function createHost(lectureDir, lectureText) {
         }
       }
       host.edits.push({ message, result })
+      if (host.holdEdits) return new Promise((send) => host.held.push(() => send(reply(result))))
       return reply(result)
     }
     if (message.type === 'lysark:ask') {
@@ -612,6 +621,46 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     // the extension then sends the edited text: only a camera changed, so in place
     const afterSave = await source(host.doc.text)
     if (!(await fromRuntime({ type: 'lysark:shown', seq: afterSave }, 10000))) return fail('the saved view was not put into the running deck')
+
+    // 2a. one save at a time: while VS Code's answer to a view's edit is on its way (held back
+    //     here), V, Shift+V, P, Shift+P and Scene Actions' save are refused, and the panel says so
+    const inFlight = 'A save is still on its way; try again in a moment.'
+    await inPanel((w) => {
+      w.__lysark.sceneLayer.camera.position.x += 0.2
+    })
+    host.holdEdits = true
+    const editsHeld = host.edits.length
+    await toRuntime({ type: 'lysark:request-view' })
+    if (!(await waitFor(async () => host.edits.length > editsHeld, 20, 200))) {
+      return fail(`the camera button never asked the host for an edit (the panel says: ${await banner()})`)
+    }
+    const pressIn = (key, shiftKey = false) =>
+      inPanel((w, [key, shiftKey]) => w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key, shiftKey, bubbles: true })), [key, shiftKey])
+    const seconds = [
+      ['V', () => pressIn('v')],
+      ['Shift+V', () => pressIn('V', true)],
+      ['P', () => pressIn('p')],
+      ['Shift+P', () => pressIn('P', true)],
+      ["Scene Actions' save view", () => toRuntime({ type: 'lysark:request-actions' })],
+    ]
+    for (const [what, press] of seconds) {
+      await markBanner()
+      await press()
+      const said = await waitFor(async () => {
+        const now = await bannerNow()
+        return !now.marked && now.text === inFlight
+      }, 30, 100)
+      if (!said) return fail(`${what} while a view's edit waited for VS Code's answer did not say a save is on its way: ${await banner()}`)
+    }
+    const opened = await inPanel((w) => !!w.document.querySelector('[role="dialog"]'))
+    if (host.edits.length !== editsHeld + 1 || opened) {
+      return fail(`a save while another was on its way went ahead: ${host.edits.length - editsHeld} edits asked for, a dialog ${opened ? '' : 'not '}opened`)
+    }
+    host.release()
+    if (!(await savedSays(/^Camera view saved to slide 1$/))) return fail(`after VS Code's held answer, the panel did not say it saved the view to slide 1: ${await banner()}`)
+    const afterHeld = await source(host.doc.text)
+    if (!(await fromRuntime({ type: 'lysark:shown', seq: afterHeld }, 10000))) return fail('the view saved with its answer held back was not put into the running deck')
+    lines.push(`while a view's edit waited for VS Code's answer, ${seconds.map(([what]) => what).join(', ')} each said "${inFlight}" and saved nothing; then the view was saved`)
 
     // 2b. text that only changes another slide's camera goes into the running
     //     deck without loading afresh, and flying to that slide lands on it
