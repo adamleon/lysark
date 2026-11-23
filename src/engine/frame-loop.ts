@@ -72,10 +72,23 @@ export class FrameLoop {
   }
 
   private reportOnce(error: unknown): void {
-    const key = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    const key = messageOf(error)
     if (this.reported.has(key) || this.reported.size >= MAX_REPORTED) return
     this.reported.add(key)
     this.report(error)
+  }
+}
+
+/**
+ * What tells one error from another. It must not throw itself, or the frame
+ * that threw would stop the loop after all: String() throws on a thrown object
+ * with no prototype, and so can a thrown object's own toString.
+ */
+function messageOf(error: unknown): string {
+  try {
+    return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+  } catch {
+    return '(an error that has no message)'
   }
 }
 

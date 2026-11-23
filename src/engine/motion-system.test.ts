@@ -33,6 +33,26 @@ describe('MotionSystem', () => {
     expect(counter.steps).toBeLessThanOrEqual(Math.ceil(0.25 / MotionSystem.DT))
   })
 
+  it('does not pile up the time a channel that threw left unspent', () => {
+    const motion = new MotionSystem()
+    const counter = motion.add('c', new CountingChannel())
+    let throwing = true
+    motion.add('bad', {
+      step: () => {
+        if (throwing) throw new Error('bad apply')
+      },
+      error: () => 0,
+      velocity: () => 0,
+    })
+    // 10 s of frames that throw in their first substep (the frame loop goes on)
+    for (let i = 0; i < 600; i++) expect(() => motion.step(1 / 60)).toThrow('bad apply')
+    throwing = false
+    const before = counter.steps
+    motion.step(1 / 60)
+    // one frame's substeps, and at most one carried over: not 10 s of them at once
+    expect(counter.steps - before).toBeLessThanOrEqual(Math.ceil(1 / 60 / MotionSystem.DT) + 1)
+  })
+
   it('reports settled only after all channels rest on target for the hold time', () => {
     const motion = new MotionSystem()
     const channel = motion.add(

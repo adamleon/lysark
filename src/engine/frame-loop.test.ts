@@ -116,6 +116,30 @@ describe('FrameLoop', () => {
     expect((reported[0] as Error).message).toBe('no scene manager')
   })
 
+  it('goes on after a frame throws something that has no message', () => {
+    let n = 0
+    const odd = Object.create(null) // String() throws on it
+    const { loop, frame, reported } = setup({
+      frame: () => {
+        n++
+        if (n === 1) throw odd
+        if (n === 2)
+          throw {
+            toString() {
+              throw new Error('no message either')
+            },
+          }
+      },
+      more: () => n < 4,
+    })
+    loop.start()
+    while (frame());
+    expect(n).toBe(4)
+    expect(reported).toHaveLength(1) // neither has a message: one report
+    expect(reported[0]).toBe(odd)
+    expect(loop.running).toBe(false)
+  })
+
   it(`reports at most ${MAX_REPORTED} distinct errors`, () => {
     let n = 0
     const { loop, frame, reported } = setup({

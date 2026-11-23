@@ -150,8 +150,11 @@ export class MotionSystem {
   }
 
   step(elapsed: number): void {
-    // clamp tab-switch gaps so we never spiral through thousands of substeps
-    this.accumulator += Math.min(elapsed, 0.25)
+    // clamp tab-switch gaps so we never spiral through thousands of substeps.
+    // What is carried over is less than one substep, unless a channel threw
+    // part way through (the frame loop goes on, src/engine/frame-loop.ts): then
+    // drop the time it left, or frames of it would pile up and run at once
+    this.accumulator = Math.min(this.accumulator, MotionSystem.DT) + Math.min(elapsed, 0.25)
     while (this.accumulator >= MotionSystem.DT) {
       for (const channel of this.channels.values()) channel.step(MotionSystem.DT)
       this.settledTime = this.allWithinEps() ? this.settledTime + MotionSystem.DT : 0
