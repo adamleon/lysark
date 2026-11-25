@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-11-23)
+## Where the project is (2026-11-25)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -238,6 +238,21 @@ scratch lecture stepped in Chromium and Firefox before and after (a slide per ba
 injected into the frames), and a new section of scripts/check-editor.mjs whose stand-in host
 holds back its answer to an edit (`holdEdits`) while the other saves are pressed.
 
+Step 9a (built 2026-11-25, not yet pushed or tagged), the small change textured models wait for
+(scene-files-proposal.md, "Proposals from step 8"): src/scene/dispose.ts frees every texture a
+material holds (any texture-valued property, and a ShaderMaterial's uniforms) and lines and
+points as well as meshes, each geometry, material and texture once however many share it; and
+`lysark check` (scripts/check-offline.mjs) records three's GPU counts (`renderer.info.memory`,
+geometries and textures) before the first scene, through a setter on `window.__lysark` installed
+before the page's scripts, and after every scene has been shown requires the same counts on a
+slide without a scene. three r185 keeps one texture of its own for the page from the first lit
+frame (`DFG_LUT`, its lighting table, 16 × 16); the check finds it through a lit material's
+uniforms and allows exactly it. The demo ends 0 geometries and 1 texture (that table), and
+Baneplanlegging 0 and 0 (no lit material: the KUKA's Collada materials aren't three's
+physically-based ones). Shown on a scratch copy: with a textured mesh in the stage, the old
+dispose.ts leaves one texture per scene and the check fails ("4 textures … a scene left GPU
+memory behind"); with the new one it passes. No engine release of its own: it lands with step 9.
+
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
   HTML job could skip the install, and the offline check, when `lysark site` has
@@ -424,7 +439,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**490**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**493**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

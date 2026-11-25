@@ -257,14 +257,19 @@ For the future:
   it does for models (and the build a link), so the build and the panel agree and the message
   says what to rename. A lecture with such a path would then stop building, so the course's
   lectures need checking first.
-- **A GPU-memory check in check-offline**, before step 9. On a slide without a scene, after every
-  scene has been shown, three's count of geometries and textures (`renderer.info.memory`) should
-  be what it was before the first one. Today the one-scene rule (lysark-design.md §4.1) rests
-  on `dispose.ts` freeing everything a scene can hold; step 8 keeps to what it frees by refusing
-  the rest, and checks that with a unit test. Textures change that, so this guard comes first,
-  as its own small change.
+- **A GPU-memory check in check-offline**, before step 9. *Built in step 9a (2026-11-25).* On a
+  slide without a scene, after every scene has been shown, three's count of geometries and
+  textures (`renderer.info.memory`) must be what it was before the first one. The one-scene rule
+  (lysark-design.md §4.1) rests on `dispose.ts` freeing everything a scene can hold; this checks
+  it in every student file (`lysark check`, so course CI too). One texture is allowed on top,
+  and only it: three r185's own lighting table (`DFG_LUT`, 16 × 16), which the renderer makes at
+  the first frame with a lit material and keeps for the page, whatever scene comes or goes. A
+  lecture without a slide without a scene isn't checked (the check says so).
 - **`dispose.ts` for more than meshes**: textures with step 9, and lines, points, bones and GPU
   instancing if a later step keeps them in models (today they are taken out or refused).
+  *Textures, lines and points built in step 9a:* every texture a material holds (any
+  texture-valued property, and a ShaderMaterial's uniforms), each geometry, material and texture
+  freed once however many share it. Bones and GPU instancing are still refused.
 - **Step 9's blocker: the released panel's security rules.** Extension 0.3.0's panel page allows
   images from `blob:` addresses (`img-src data: blob:`), but not fetching them (`connect-src` has
   no `blob:`). three.js's glTF loader turns a GLB's images into `blob:` addresses and loads them
