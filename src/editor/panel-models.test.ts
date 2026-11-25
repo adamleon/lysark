@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { modelFormat, type ModelRef } from '../compiler/model-types'
+import { modelFormat, type ModelLook, type ModelRef } from '../compiler/model-types'
 import type { ModelUnit } from '../engine/object-types'
-import { binaryStl, box, glb, glbEdits, lfsPointer } from '../scene/model-test-files.js'
+import { binaryStl, box, glb, glbEdits, lfsPointer, png } from '../scene/model-test-files.js'
 import type { HostFile } from './host'
 import { base64Bytes, loadModels } from './panel-models'
 
 /** a model as the compiler reports it, in scenes/arm.yaml */
-const ref = (object: string, src: string, line: number, unit: ModelUnit = 'm'): ModelRef => ({
+const ref = (object: string, src: string, line: number, unit: ModelUnit = 'm', look: ModelLook = 'default'): ModelRef => ({
   src,
   format: modelFormat(src)!,
   unit,
+  look,
   object,
   file: 'scenes/arm.yaml',
   line,
@@ -146,9 +147,39 @@ describe('loadModels', () => {
     expect(loaded.files).toEqual({ 'models/other.stl': good })
     expect(loaded.problems).toEqual([
       expect.stringMatching(/^scenes\/arm\.yaml, line 20: object 'pointer': the model is a Git LFS pointer, not the model: /),
-      expect.stringMatching(/^scenes\/arm\.yaml, line 26: object 'textured': the model has textures, /),
+      expect.stringMatching(/^scenes\/arm\.yaml, line 26: object 'textured': the model has textures: write material: file to show them/),
       "scenes/arm.yaml, line 38: object 'wrong': the model is 412 m across, read in m. Is the file in millimetres? Write unit: mm",
     ])
+  })
+
+  it("checks a textured GLB for each object's look, as the build does (step 9)", async () => {
+    const texture = (bytes: ArrayBuffer) =>
+      base64(
+        glb({
+          meshes: [{ uvs: true, material: 0 }],
+          materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+          textures: [{ name: 'label', bytes }],
+        }),
+      )
+    const label = texture(png(8, 8))
+    const { read } = host({ 'models/label.glb': { base64: label }, 'models/poster.glb': { base64: texture(png(2049, 1)) } })
+    const loaded = await loadModels(
+      [
+        ref('own', 'models/label.glb', 10, 'm', 'file'),
+        ref('red', 'models/label.glb', 14, 'm', 'preset'),
+        ref('poster', 'models/poster.glb', 18, 'm', 'file'),
+        // a colour leaves the texture out, however large, but the build stops at 'poster' all the same: the file isn't shown
+        ref('grey', 'models/poster.glb', 22, 'm', 'preset'),
+      ],
+      read,
+    )
+    expect(loaded.files).toEqual({ 'models/label.glb': label })
+    expect(loaded.problems).toEqual([
+      "scenes/arm.yaml, line 18: object 'poster': the model's image 'label' is 2049 x 1 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+    ])
+    // no material: line: the object is named, at its line
+    const unchosen = await loadModels([ref('own', 'models/label.glb', 10, 'm', 'file'), ref('plain', 'models/label.glb', 30)], read)
+    expect(unchosen.problems).toEqual([expect.stringMatching(/^scenes\/arm\.yaml, line 30: object 'plain': the model has textures: write material: file/)])
   })
 
   it('asks for nothing when no scene a slide runs has a model', async () => {

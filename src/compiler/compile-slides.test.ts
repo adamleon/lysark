@@ -510,7 +510,7 @@ describe('compileLecture — models (scene-files-proposal.md step 8)', () => {
   const slide = (scene?: string) => `---\n${scene ? `scene: ${scene}` : 'layout: center'}\n---\n# x\n`
 
   it('reports the models of the scenes the slides run, and only those', () => {
-    const part = { src: 'models/part.stl', format: 'stl', unit: 'mm', object: 'part', file: 'scenes/celle.yaml', line: 3 }
+    const part = { src: 'models/part.stl', format: 'stl', unit: 'mm', look: 'default', object: 'part', file: 'scenes/celle.yaml', line: 3 }
     expect(compileLecture(slide('celle'), files).models).toEqual([part])
     // a slide that names the engine scene runs the same scene, with the file's objects
     expect(compileLecture(slide('agilus'), files).models).toEqual([part])

@@ -16,6 +16,8 @@ export type ObjectShape = (typeof OBJECT_SHAPES)[number] | 'point'
 /** the colours a box, cylinder, sphere or model can have, each the CSS token `--object-<name>` (src/styles.css) */
 export const OBJECT_MATERIALS = ['grey', 'white', 'black', 'red', 'yellow', 'green', 'blue', 'wood', 'metal'] as const
 export type ObjectMaterial = (typeof OBJECT_MATERIALS)[number]
+/** `material: file`: a GLB model's own materials and textures, in place of a colour (decision 10 in scene-files-proposal.md) */
+export const MATERIAL_FILE = 'file'
 
 /** what a model's file is measured in (`unit:`), and the axis that is up in it (`up:`) */
 export type ModelUnit = 'mm' | 'cm' | 'm'
@@ -33,8 +35,11 @@ export interface SceneObject {
   at: [number, number, number]
   /** degrees about x, then the turned y, then the turned z (three.js Euler order XYZ) */
   rotate: [number, number, number]
-  /** box, cylinder, sphere and model only (grey when the file gives none); a model's own colours are not used */
-  material?: ObjectMaterial
+  /**
+   * box, cylinder, sphere and model only (grey when the file gives none). A model's own colours are used
+   * only with `file` (MATERIAL_FILE, a GLB only); a colour replaces them
+   */
+  material?: ObjectMaterial | typeof MATERIAL_FILE
   /** an object of the same scene earlier in the list, or an anchor of the base scene; none: the scene itself */
   parent?: string
   /**

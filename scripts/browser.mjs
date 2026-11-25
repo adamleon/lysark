@@ -18,6 +18,13 @@ export async function launchBrowser(name, { headed = false } = {}) {
       // WebGL 2 ("AllowWebgl2:false restricts context creation on this
       // system"); Chromium falls back to software rendering on its own
       ...(name === 'firefox' ? { firefoxUserPrefs: { 'webgl.force-enabled': true } } : {}),
+      // On Windows, headless Chromium's default start renders WebGL with
+      // ANGLE's SwiftShader too, but loses every page's WebGL context once,
+      // in its first seconds, and three.js logs an error for each shader it
+      // links meanwhile, which fails the checks at random (Playwright's
+      // Chromium 1228, an AMD Radeon 890M laptop, 2026-11-25). Naming that
+      // backend gives the same renderer without the loss
+      ...(name === 'chromium' && process.platform === 'win32' ? { args: ['--use-angle=swiftshader'] } : {}),
     })
   } catch (err) {
     // only the missing-browser case gets the friendly hint; any other launch

@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SceneObject } from '../engine/object-types'
-import { binaryStl, cylinder, glb, glbEdits, textStl, UNIT_CUBE, type GlbEdit } from './model-test-files.js'
+import { binaryStl, cylinder, glb, glbEdits, png, textStl, UNIT_CUBE, type GlbEdit } from './model-test-files.js'
 import { decodeBase64, modelLoader, parseModel } from './models'
 
 /** the file as base64, as the student file and the editor host give it */
@@ -176,14 +176,148 @@ describe('models', () => {
         json.materials = [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }]
         json.meshes[0].primitives[0].material = 0
       }
-      await expect(parseModel(glb({ edits: [glbEdits.image(), textured] }), 'glb')).rejects.toThrow(
+      const file = glb({ edits: [glbEdits.image(), textured] })
+      await expect(parseModel(file, 'glb', { ownLook: true })).rejects.toThrow(
         "it asks for another file, 'texture.png': export it as one self-contained .glb",
       )
       expect(error.mock.calls[0]?.[0]).toMatch(/^THREE\.GLTFLoader: Couldn't load texture/)
+      // with a preset, the textures are taken out before the loader reads the file: nothing is asked for
+      error.mockClear()
+      const model = await parseModel(file, 'glb')
+      expect(meshes(model)[0].material).not.toHaveProperty('map', expect.anything())
+      expect(error).not.toHaveBeenCalled()
       expect(fetch).not.toHaveBeenCalled()
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  describe("a GLB's own look (material: file, step 9)", () => {
+    /** a box with a PNG on it, its texture coordinates, and the material using it */
+    const label = png(4, 2, (x) => [x * 60, 0, 0])
+    const textured = (edit?: GlbEdit) =>
+      glb({
+        meshes: [{ name: 'box', uvs: true, material: 0 }, { name: 'plain', material: 1, translation: [2, 0, 0] }],
+        materials: [
+          { name: 'printed', pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } },
+          { name: 'blue', pbrMetallicRoughness: { baseColorFactor: [0, 0, 1, 1], metallicFactor: 0 } },
+        ],
+        textures: [{ name: 'label', bytes: label, sampler: { magFilter: 9728 } }],
+        edits: edit ? [edit] : [],
+      })
+
+    /** an <img> as a browser has it, which loads or fails a moment after its src is set */
+    class FakeImage extends EventTarget {
+      static made: FakeImage[] = []
+      static failing = false
+      private url = ''
+      width = 4
+      height = 2
+      naturalWidth = 4
+      complete = false
+      constructor() {
+        super()
+        FakeImage.made.push(this)
+      }
+      get src(): string {
+        return this.url
+      }
+      set src(url: string) {
+        this.url = url
+        setTimeout(() => {
+          this.complete = true
+          this.dispatchEvent(new Event(FakeImage.failing ? 'error' : 'load'))
+        }, 1)
+      }
+    }
+
+    /**
+     * A browser for the loaders: `document` makes FakeImages, and fetch,
+     * blob: addresses and image bitmaps are watched. createImageBitmap is
+     * there, so GLTFLoader picks its ImageBitmapLoader, as in a browser.
+     */
+    function browser() {
+      FakeImage.made = []
+      FakeImage.failing = false
+      const fetch = vi.fn(() => Promise.reject(new Error('no fetch')))
+      const createObjectURL = vi.fn(() => 'blob:nothing')
+      const createImageBitmap = vi.fn(() => Promise.reject(new Error('no image bitmaps')))
+      vi.stubGlobal('self', globalThis)
+      vi.stubGlobal('fetch', fetch)
+      vi.stubGlobal('createImageBitmap', createImageBitmap)
+      vi.stubGlobal('document', { createElementNS: (_ns: string, name: string) => (name === 'img' ? new FakeImage() : undefined) })
+      vi.spyOn(URL, 'createObjectURL').mockImplementation(createObjectURL)
+      return { fetch, createObjectURL, createImageBitmap }
+    }
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('loads its images from data: addresses through an <img>, with no request, blob: address or image bitmap', async () => {
+      const watched = browser()
+      const model = await parseModel(textured(), 'glb', { ownLook: true })
+      const [box, plain] = meshes(model)
+      const material = box.material as THREE.MeshStandardMaterial
+      expect(material.name).toBe('printed')
+      expect(material.map?.image).toBeInstanceOf(FakeImage)
+      // the image's own bytes, as a data: address
+      expect((material.map!.image as FakeImage).src).toBe(`data:image/png;base64,${base64(label)}`)
+      // and as GLTFLoader sets a glTF texture up: not flipped, its colours sRGB, its sampler's filter
+      expect(material.map!.flipY).toBe(false)
+      expect(material.map!.colorSpace).toBe(THREE.SRGBColorSpace)
+      expect(material.map!.magFilter).toBe(THREE.NearestFilter)
+      expect((plain.material as THREE.MeshStandardMaterial).color.getHexString()).toBe('0000ff')
+      expect(FakeImage.made).toHaveLength(1)
+      expect(watched.fetch).not.toHaveBeenCalled()
+      expect(watched.createObjectURL).not.toHaveBeenCalled()
+      expect(watched.createImageBitmap).not.toHaveBeenCalled()
+      // the texture coordinates stay for the file's materials
+      expect(Object.keys(box.geometry.attributes).sort()).toEqual(['normal', 'position', 'uv'])
+    })
+
+    it('leaves every image unloaded for a preset, and the attributes only the preset uses', async () => {
+      browser()
+      const model = await parseModel(textured(), 'glb')
+      expect(FakeImage.made).toHaveLength(0)
+      expect((meshes(model)[0].material as THREE.MeshStandardMaterial).map).toBeNull()
+      expect(Object.keys(meshes(model)[0].geometry.attributes).sort()).toEqual(['normal', 'position'])
+      // nor does the build's check load them, with the file's materials
+      const checked = await parseModel(textured(), 'glb', { ownLook: true, images: false })
+      expect(FakeImage.made).toHaveLength(0)
+      expect((meshes(checked)[0].material as THREE.MeshStandardMaterial).name).toBe('printed')
+    })
+
+    it("rejects when an image can't be read, naming it, without GLTFLoader's log of the whole data: address", async () => {
+      browser()
+      FakeImage.failing = true
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      await expect(parseModel(textured(), 'glb', { ownLook: true })).rejects.toThrow("its image 'label' couldn't be read: export it again")
+      expect(error).not.toHaveBeenCalled()
+    })
+
+    it("refuses any address but the file's own images", async () => {
+      const watched = browser()
+      vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      // a second image, at an address: the manager refuses it before the <img> gets it
+      const outside: GlbEdit = (json) => {
+        json.images.push({ uri: 'data:image/png;base64,AAAA', mimeType: 'image/png' })
+        json.textures.push({ source: 1 })
+        json.materials[1].pbrMetallicRoughness.baseColorTexture = { index: 1 }
+      }
+      await expect(parseModel(textured(outside), 'glb', { ownLook: true })).rejects.toThrow(
+        "it asks for another file, 'data:image/png;base64,AAAA': export it as one self-contained .glb",
+      )
+      expect(FakeImage.made.map((image) => image.src)).toEqual([`data:image/png;base64,${base64(label)}`])
+      expect(watched.fetch).not.toHaveBeenCalled()
+    })
+
+    it("gives the file's materials creased normals' smooth shading on a mesh without normals", async () => {
+      browser()
+      const model = await parseModel(glb({ meshes: [{ normals: false, material: 0 }], materials: [{ pbrMetallicRoughness: { metallicFactor: 0 } }] }), 'glb', {
+        ownLook: true,
+      })
+      const [mesh] = meshes(model)
+      expect(mesh.geometry.hasAttribute('normal')).toBe(true)
+      expect((mesh.material as THREE.MeshStandardMaterial).flatShading).toBe(false)
+    })
   })
 
   it("loads each model object's model, and never rejects", async () => {

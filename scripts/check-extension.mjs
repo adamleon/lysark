@@ -14,7 +14,10 @@
 // by the runtime's message version:
 //
 //   3  images shown from both folders, and with models (v2.13.0) models from
-//      both folders shown in the scene; saving a scene file sends the files
+//      both folders shown in the scene, and from v2.14.0 those with material:
+//      file in their files' own look, a texture's image loaded from a data:
+//      address with no blob: address asked for (this panel's connect-src has
+//      none); saving a scene file sends the files
 //      again; V and Scene Actions… write the view into slides.md; undoing that
 //      edit reaches the panel; and with an engine that has named views
 //      (v2.5.0), V on a slide that names one writes it into the scene file,
@@ -108,16 +111,27 @@ function knowsModels(editorDir) {
   return buildSays(editorDir, "isn't a file a lecture can show")
 }
 
+/** true if the editor build shows models in their files' own look (engine v2.14.0): the message for a textured model without material: is in its files */
+function knowsTextures(editorDir) {
+  return buildSays(editorDir, 'write material: file to show them')
+}
+
 /** the demo's scene file comment that starts its models, which come last (lectures/demo/scenes/arm.yaml) */
 const MODELS_MARK = /\r?\n[ \t]*# models \(from v2\.13\.0\)[\s\S]*$/
 
 /** the model makeCourse adds from the course's assets/, by its path from the lecture folder */
 const ASSETS_MODEL = '../../assets/bracket.stl'
 
-/** the srcs of the demo lecture's models, as its scene file writes them */
-function demoModels() {
-  const objects = parseYaml(readFileSync(join(ROOT, 'lectures/demo/scenes/arm.yaml'), 'utf8')).objects ?? {}
+/** the srcs of the models in a course's demo lecture, as its scene file writes them */
+function courseModels(course) {
+  const objects = parseYaml(readFileSync(join(course, 'lectures/demo/scenes/arm.yaml'), 'utf8')).objects ?? {}
   return Object.values(objects).flatMap((object) => (typeof object?.model === 'string' ? [object.model] : []))
+}
+
+/** the demo's objects with material: file (from v2.14.0), by name: in an older editor the line is an error */
+function ownLookObjects(arm) {
+  const objects = parseYaml(arm).objects ?? {}
+  return Object.keys(objects).filter((name) => objects[name]?.material === 'file')
 }
 
 /** true if the editor build has Save view as… (engine v2.6.0): its dialog's title is in its files */
@@ -200,7 +214,7 @@ function outlineOf(text) {
 }
 
 /** a course folder whose workspace settings point the extension at `editorUrl` */
-function makeCourse(editorUrl, namedViews, poses, objects, models) {
+function makeCourse(editorUrl, namedViews, poses, objects, models, textures) {
   const dir = mkdtempSync(join(tmpdir(), 'lysark-course-'))
   const lecture = join(dir, 'lectures', 'demo')
   mkdirSync(join(lecture, 'scenes'), { recursive: true })
@@ -216,6 +230,17 @@ function makeCourse(editorUrl, namedViews, poses, objects, models) {
     if (!MODELS_MARK.test(arm)) throw new Error("lectures/demo/scenes/arm.yaml has no '# models (from v2.13.0)' comment to leave its models out at")
     arm = arm.replace(MODELS_MARK, '\n')
   } else {
+    // an editor before v2.14.0 knows no material: file, and refuses a textured model: such an
+    // object is left out, and an untextured one gets the grey preset
+    if (!textures) {
+      const all = parseYaml(arm).objects ?? {}
+      for (const name of ownLookObjects(arm)) {
+        const file = readFileSync(join(ROOT, 'lectures/demo', all[name].model))
+        const json = JSON.parse(file.subarray(20, 20 + file.readUInt32LE(12)).toString('utf8'))
+        const block = new RegExp(`(\\r?\\n  ${name}:[^\\r\\n]*)((?:\\r?\\n {4}[^\\r\\n]*)*)`)
+        arm = arm.replace(block, (_, head, body) => ((json.images ?? []).length > 0 ? '' : head + body.replace(/\r?\n {4}material: file[^\r\n]*/, '')))
+      }
+    }
     // a model from the course's assets/ too: its bytes as they are (the extension reads any file's)
     writeFileSync(join(dir, 'assets/bracket.stl'), readFileSync(join(ROOT, 'lectures/demo/models/bracket.stl')))
     arm = `${arm.replace(/\s*$/, '\n')}  shelf bracket:\n    model: ${ASSETS_MODEL}\n    unit: mm\n    up: z\n    at: [0.12, 0.3, -0.12]\n    parent: table\n`
@@ -586,8 +611,25 @@ async function checkNavigation(page, course, { check, tab, quickOpen }) {
 }
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, models, course, lines) {
+async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, models, textures, course, lines) {
   let ok = true
+  // a blob: address, which extension 0.4.0's panel can't fetch (its connect-src), asked for or
+  // refused, with the frame that asked (VS Code's own workbench and webview host use blob: too)
+  const blobs = []
+  page.on('request', (req) => {
+    if (!req.url().startsWith('blob:')) return
+    let asker = null
+    try {
+      asker = req.frame()
+    } catch {
+      // a service worker's request has no frame: VS Code's
+      return
+    }
+    blobs.push({ url: req.url(), frame: asker })
+  })
+  page.on('console', (msg) => {
+    if (/Refused to [^\n]*blob:/.test(msg.text())) blobs.push({ url: msg.text().split('\n')[0], frame: null })
+  })
   const check = (passed, what) => {
     lines.push(`${passed ? '✓' : '✗'} ${what}`)
     if (!passed) ok = false
@@ -685,12 +727,56 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
           return { files: Object.keys(window.__LYSARK_MODELS__ ?? {}).sort(), meshes }
         }, null, { timeout: 30_000 })
         .then((handle) => handle.jsonValue(), () => null)
-      const expected = [...demoModels(), ASSETS_MODEL].sort()
+      // the course's scene file has the one from assets/ too (makeCourse)
+      const srcs = courseModels(course)
+      const expected = [...new Set(srcs)].sort()
       const built = Object.values(shown?.meshes ?? {})
       check(
-        JSON.stringify(shown?.files) === JSON.stringify(expected) && built.length === expected.length && built.every((n) => n > 0),
+        JSON.stringify(shown?.files) === JSON.stringify(expected) && srcs.includes(ASSETS_MODEL) && built.length === srcs.length && built.every((n) => n > 0),
         `models from the lecture folder and the course's assets/, shown in the scene: ${JSON.stringify(shown)}`,
       )
+      if (textures) {
+        // material: file (v2.14.0): the file's own materials, and a texture's image an <img> from a
+        // data: address, which the released panel's img-src allows; never a blob: address, which
+        // its connect-src doesn't (GLTFLoader's own way would fetch one, and the texture would be missing)
+        const own = ownLookObjects(readFileSync(join(course, 'lectures/demo/scenes/arm.yaml'), 'utf8'))
+        const looks = await frame
+          .waitForFunction((names) => {
+            const L = window.__lysark
+            if (L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm') return null
+            const out = {}
+            for (const name of names) {
+              out[name] = []
+              L.sceneManager.active.anchors[name]?.children.find((child) => child.name === `object:${name}:model`)?.traverse((part) => {
+                if (!part.isMesh) return
+                const image = part.material.map?.image
+                out[name].push({
+                  material: part.material.name,
+                  texture: part.material.map
+                    ? {
+                        img: image instanceof HTMLImageElement,
+                        data: typeof image?.src === 'string' && image.src.startsWith('data:image/'),
+                        size: image instanceof HTMLImageElement && image.complete ? [image.naturalWidth, image.naturalHeight] : null,
+                      }
+                    : null,
+                })
+              })
+            }
+            return Object.values(out).every((parts) => parts.length > 0 && parts.every((p) => !p.texture || p.texture.size)) ? out : null
+          }, own, { timeout: 30_000 })
+          .then((handle) => handle.jsonValue(), () => null)
+        const textured = Object.entries(looks ?? {}).filter(([, parts]) => parts.some((p) => p.texture))
+        const panelBlobs = blobs.filter((b) => b.frame === null || b.frame === frame).map((b) => b.url)
+        check(
+          !!looks &&
+            Object.values(looks).every((parts) => parts.every((p) => p.material !== '')) &&
+            textured.length > 0 &&
+            textured.every(([, parts]) => parts.every((p) => !p.texture || (p.texture.img && p.texture.data && p.texture.size[0] > 0))) &&
+            panelBlobs.length === 0,
+          `models in their files' own look (material: file), textures loaded from data: addresses, no blob: address in the panel: ${JSON.stringify(looks)}` +
+            (panelBlobs.length > 0 ? `; blob: ${JSON.stringify(panelBlobs)}` : ''),
+        )
+      } else lines.push("(models in their files' own look not checked: this editor has none)")
     } else lines.push('(models not checked: this editor has none)')
     await frame.evaluate(() => {
       window.__received = []
@@ -980,7 +1066,8 @@ async function checkExtension(editorDir) {
   const poses = knowsPoses(editorDir)
   const objects = knowsObjects(editorDir)
   const models = knowsModels(editorDir)
-  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews, poses, objects, models)
+  const textures = knowsTextures(editorDir)
+  const course = makeCourse(`http://127.0.0.1:${site.address().port}${EDITOR_PREFIX}`, namedViews, poses, objects, models, textures)
   let stopTestWeb
   let browser
   let ok = false
@@ -990,7 +1077,7 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), models, course, lines)
+    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), models, textures, course, lines)
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

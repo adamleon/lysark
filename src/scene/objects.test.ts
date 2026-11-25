@@ -194,6 +194,30 @@ describe('objects', () => {
     expect((plain.material as THREE.MeshStandardMaterial).color.getHexString()).toBe(new THREE.Color('#808080').getHexString())
   })
 
+  it("keeps a model's own materials with material: file, standing it on at as any model (step 9)", async () => {
+    const file = glb({
+      meshes: [
+        { name: 'tray', material: 0 },
+        { name: 'divider', material: 1, translation: [2, 0, 0] },
+      ],
+      materials: [
+        { name: 'teal', pbrMetallicRoughness: { baseColorFactor: [0, 0.5, 0.5, 1], metallicFactor: 0 } },
+        { name: 'orange', pbrMetallicRoughness: { baseColorFactor: [1, 0.5, 0, 1], metallicFactor: 0 } },
+      ],
+    })
+    // no colour token is read for it: `color` would throw on --object-file
+    const tray = buildObject(modelSpec({ name: 'tray', material: 'file', at: [1, 0, 0] }), color, await parseModel(file, 'glb', { ownLook: true }))
+    const parts = meshesUnder(tray)
+    expect(parts.map((mesh) => (mesh.material as THREE.Material).name)).toEqual(['teal', 'orange'])
+    expect(parts.every((mesh) => mesh.castShadow && mesh.receiveShadow)).toBe(true)
+    nearly(worldBox(tray).min, [-0.5, 0, -0.5])
+    nearly(worldBox(tray).max, [2.5, 1, 0.5])
+    expect(tray.userData.middle).toBeCloseTo(0.5)
+    // a colour replaces them, as before
+    const red = buildObject(modelSpec({ name: 'red', material: 'wood' }), color, await parseModel(file, 'glb'))
+    expect(meshesUnder(red).map((mesh) => (mesh.material as THREE.MeshStandardMaterial).color.getHexString())).toEqual(['a07040', 'a07040'])
+  })
+
   it("hangs objects on a model's node, where they don't count in its box", async () => {
     const scene = { root: new THREE.Group(), anchors: {} as Record<string, THREE.Object3D> }
     addObjects(

@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js'
 import { modelFormat, type ModelFormat } from '../compiler/model-types'
-import type { ModelLoader, SceneObject } from '../engine/object-types'
+import { MATERIAL_FILE, type ModelLoader, type SceneObject } from '../engine/object-types'
 
 /**
  * Models from STL and GLB files (docs/scene-files.md, "Models"). This module
@@ -15,6 +15,14 @@ import type { ModelLoader, SceneObject } from '../engine/object-types'
  * The files have been checked before they get here (model-check.ts), so
  * parsing needs no request, worker or wasm, and leaves only meshes whose GPU
  * memory src/scene/dispose.ts frees (spec §4.1, §9).
+ *
+ * A model shown with material: file keeps the file's materials and textures
+ * (decision 10 in scene-files-proposal.md). Its images are loaded without a
+ * request and without blob: addresses, which the student file's check and
+ * the released editor panel (its connect-src has no blob:) refuse: each
+ * image's bytes in the file become a data: address, and an <img> loads it
+ * (three's TextureLoader), which the panel's img-src allows. GLTFLoader's
+ * own way, a blob: address fetched by ImageBitmapLoader, is never used.
  */
 
 /** creases: smooth across shallow angles, sharp above this, as the KUKA's meshes (src/scenes/agilus.ts) */
@@ -29,6 +37,19 @@ const CREASE_ANGLE = THREE.MathUtils.degToRad(40)
 const CREASE_SIDE = 100
 /** the attributes the preset material uses; a file's colours, texture coordinates and the like would be GPU memory for nothing */
 const KEPT_ATTRIBUTES = new Set(['position', 'normal'])
+/** and those the file's own materials use too: texture coordinates (TEXCOORD_0 to 3), vertex colours and tangents */
+const OWN_LOOK_ATTRIBUTES = new Set([...KEPT_ATTRIBUTES, 'uv', 'uv1', 'uv2', 'uv3', 'color', 'tangent'])
+
+/** how parseModel reads a file */
+export interface ParseOptions {
+  /** the file's own materials and textures (material: file); without, the meshes get no textures, and their materials are for fitModel to replace */
+  ownLook?: boolean
+  /**
+   * with ownLook, load the textures' images (true without). The build's
+   * check in Node has no way to (model-check.ts): it reads their headers instead
+   */
+  images?: boolean
+}
 
 /** a file's bytes from base64, in an ArrayBuffer exactly as long as the file (the loaders read the whole buffer) */
 export function decodeBase64(base64: string): ArrayBuffer {
@@ -40,34 +61,42 @@ export function decodeBase64(base64: string): ArrayBuffer {
 
 /**
  * A model file's meshes, in the file's own units and axes, on a group of
- * their own. Rejects when the loader can't read the file. Only meshes are
- * left: a GLB's lights, cameras, lines and points go (the stage's own lights
- * stay the only ones), and its animations are not used.
+ * their own. Rejects when the loader can't read the file, or one of the
+ * images it loads. Only meshes are left: a GLB's lights, cameras, lines and
+ * points go (the stage's own lights stay the only ones), and its animations
+ * are not used. With `ownLook`, a GLB's meshes keep its materials and
+ * textures; without, they get no textures, and fitModel gives them the preset.
  */
-export async function parseModel(buffer: ArrayBuffer, format: ModelFormat): Promise<THREE.Group> {
+export async function parseModel(buffer: ArrayBuffer, format: ModelFormat, { ownLook = false, images = ownLook }: ParseOptions = {}): Promise<THREE.Group> {
   if (format === 'stl') {
     // CAD programs write flat or zero normals, so every STL gets creased ones
-    const geometry = creased(keepShapeOnly(parseStl(buffer)))
+    const geometry = creased(keepShapeOnly(parseStl(buffer), KEPT_ATTRIBUTES))
     const group = new THREE.Group()
     group.add(new THREE.Mesh(geometry))
     return group
   }
   // the checks refuse a file that asks for another (model-types.ts); in case
   // one slips past, every address the loaders are given throws before any
-  // fetch, blob: or image load starts. FileLoader, ImageLoader and
+  // fetch, blob: or image load starts, but for the file's own images as
+  // data: addresses (fileImages). FileLoader, ImageLoader and
   // ImageBitmapLoader each pass it through the manager first, and GLTFLoader
   // calls them inside a promise, so a buffer's throw rejects the parse.
   // A texture's is only logged, and the loader reads on without it: `asked`
   // rejects the parse then too
   let asked: Error | undefined
+  const own = new Set<string>()
   const manager = new THREE.LoadingManager()
   manager.setURLModifier((url) => {
+    if (own.has(url)) return url
     asked ??= new Error(`it asks for another file, '${shortened(url)}': export it as one self-contained .glb`)
     throw asked
   })
+  const loader = new GLTFLoader(manager)
+  const unread = fileImages(loader, manager, own, ownLook && images)
   // parseAsync, so the loader's own synchronous throws (JSON.parse) reject too
-  const gltf = await new GLTFLoader(manager).parseAsync(buffer, '')
+  const gltf = await loader.parseAsync(buffer, '')
   if (asked) throw asked
+  if (unread.length > 0) throw new Error(`its image ${unread[0]} couldn't be read: export it again`)
   const root = gltf.scene ?? gltf.scenes[0] ?? new THREE.Group()
   meshesOnly(root)
   // a mesh used by several nodes shares its geometry: fix each geometry once
@@ -77,9 +106,13 @@ export async function parseModel(buffer: ArrayBuffer, format: ModelFormat): Prom
     if (!mesh.isMesh) return
     let geometry = fixed.get(mesh.geometry)
     if (!geometry) {
-      geometry = keepShapeOnly(mesh.geometry)
+      geometry = keepShapeOnly(mesh.geometry, ownLook ? OWN_LOOK_ATTRIBUTES : KEPT_ATTRIBUTES)
       // some exporters leave normals out, which would light the model black
-      if (!geometry.hasAttribute('normal')) geometry = creased(geometry)
+      if (!geometry.hasAttribute('normal')) {
+        geometry = creased(geometry)
+        // GLTFLoader gave such a mesh's own material flat shading: the creased normals shade it as an STL's
+        if (ownLook) for (const material of [mesh.material].flat() as THREE.MeshStandardMaterial[]) material.flatShading = false
+      }
       fixed.set(mesh.geometry, geometry)
     }
     mesh.geometry = geometry
@@ -88,12 +121,90 @@ export async function parseModel(buffer: ArrayBuffer, format: ModelFormat): Prom
 }
 
 /**
+ * Lets `loader` have exactly the file's own images, or none. With `load`,
+ * before the loader reads the scene each image's bytes in the file become a
+ * data: address, which `own` then lets through the manager, and the manager
+ * hands every data: address to an image loader of an <img> (three's
+ * TextureLoader) in place of GLTFLoader's ImageBitmapLoader, which would
+ * fetch it (in GLTFLoader's own way, a blob: address). Without `load`, the
+ * materials' textures are taken out of the file before the loader reads it,
+ * so no image is ever asked for: the preset replaces the materials, and the
+ * build's check in Node has no <img>.
+ *
+ * Returns the names of the images that couldn't be read, filled in as the
+ * loader reads: such an image is given an empty texture rather than an
+ * error, which GLTFLoader would log with the whole data: address, and
+ * parseModel rejects after the parse.
+ */
+function fileImages(loader: GLTFLoader, manager: THREE.LoadingManager, own: Set<string>, load: boolean): string[] {
+  const unread: string[] = []
+  const names = new Map<string, string>()
+  const images = new THREE.TextureLoader(manager)
+  const handler = {
+    load(url: string, onLoad: (texture: THREE.Texture) => void): void {
+      images.load(url, onLoad, undefined, () => {
+        unread.push(names.get(url) ?? 'of the file')
+        onLoad(new THREE.Texture())
+      })
+    },
+  }
+  manager.addHandler(/^data:/, handler as unknown as THREE.Loader)
+  loader.register((parser) => ({
+    name: 'lysark_file_images',
+    async beforeRoot() {
+      const json = parser.json as { images?: GltfImage[]; materials?: unknown[] }
+      if (!load) {
+        for (const material of json.materials ?? []) withoutTextures(material)
+        return
+      }
+      for (const [k, image] of (json.images ?? []).entries()) {
+        // the checks refuse an image at an address: the manager refuses it too
+        if (image?.bufferView === undefined) continue
+        const bytes = (await parser.getDependency('bufferView', image.bufferView)) as ArrayBuffer
+        const url = `data:${image.mimeType};base64,${base64Of(bytes)}`
+        own.add(url)
+        names.set(url, typeof image.name === 'string' && image.name !== '' ? `'${image.name}'` : `number ${k + 1}`)
+        image.uri = url
+        delete image.bufferView
+      }
+    },
+  }))
+  return unread
+}
+
+/** an image as a glTF file lists it */
+interface GltfImage {
+  name?: unknown
+  mimeType?: string
+  bufferView?: number
+  uri?: string
+}
+
+/** takes every texture out of a material (a key ending in Texture, as every glTF material texture's does, its extensions' included) */
+function withoutTextures(value: unknown): void {
+  if (typeof value !== 'object' || value === null) return
+  for (const [key, inner] of Object.entries(value)) {
+    if (key.endsWith('Texture') && typeof inner === 'object' && inner !== null && !Array.isArray(inner)) delete (value as Record<string, unknown>)[key]
+    else withoutTextures(inner)
+  }
+}
+
+/** bytes as base64, a part at a time (String.fromCharCode takes only so many arguments) */
+function base64Of(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let text = ''
+  for (let at = 0; at < bytes.length; at += 0x8000) text += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+  return btoa(text)
+}
+
+/**
  * Builds the models of a scene's objects from the lecture's model files, as
  * base64 by the path the scene file writes (the student file's
  * `export const models` from vite-plugin-slides.ts, or the files the editor
  * panel read). Each object parses its own copy, so no two objects share
- * geometry. Never rejects: an object whose file it hasn't got (the build and
- * the panel have said why already) or can't read keeps its empty node.
+ * geometry, materials or textures. Never rejects: an object whose file it
+ * hasn't got (the build and the panel have said why already) or can't read
+ * keeps its empty node.
  */
 export function modelLoader(files: Record<string, string>): ModelLoader {
   return {
@@ -106,7 +217,7 @@ export function modelLoader(files: Record<string, string>): ModelLoader {
         try {
           const format = modelFormat(src)
           if (!format) throw new Error('not an .stl or .glb file')
-          models.set(spec.name, await parseModel(decodeBase64(files[src]), format))
+          models.set(spec.name, await parseModel(decodeBase64(files[src]), format, { ownLook: spec.material === MATERIAL_FILE }))
         } catch (error) {
           // the checks should have caught it; check-offline fails on this error
           console.error(`object '${spec.name}': the model '${src}' couldn't be read: ${firstLine(error)}`)
@@ -162,10 +273,10 @@ function paddedStl(buffer: ArrayBuffer): ArrayBuffer {
   return padded.buffer
 }
 
-/** the geometry with only the attributes the preset material uses */
-function keepShapeOnly(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+/** the geometry with only the attributes its material uses, `kept` */
+function keepShapeOnly(geometry: THREE.BufferGeometry, kept: ReadonlySet<string>): THREE.BufferGeometry {
   for (const name of Object.keys(geometry.attributes)) {
-    if (!KEPT_ATTRIBUTES.has(name)) geometry.deleteAttribute(name)
+    if (!kept.has(name)) geometry.deleteAttribute(name)
   }
   return geometry
 }

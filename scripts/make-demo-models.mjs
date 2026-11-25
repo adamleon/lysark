@@ -1,4 +1,4 @@
-// Writes the demo lecture's two model files (docs/scene-files.md, "Models"),
+// Writes the demo lecture's model files (docs/scene-files.md, "Models"),
 // made from numbers here so they are our own and small: they ship in every
 // course's copy of the engine, and CI shows them under Firefox's software
 // OpenGL. Each is the kind of file a lecturer brings:
@@ -6,8 +6,12 @@
 // - models/bracket.stl: an angle bracket as a CAD program exports it, binary
 //   STL in millimetres with z up (the scene file says unit: mm and up: z);
 // - models/tray.glb: a parts tray as Blender exports it, binary glTF in
-//   metres with y up, two meshes and no materials, its origin at a corner
-//   (the scene file needs neither unit nor up).
+//   metres with y up, two meshes with a colour of their own each and no
+//   textures, its origin at a corner (the scene file needs neither unit nor
+//   up, and shows its colours with material: file);
+// - models/marker.glb: a box with a fiducial marker printed on each face, as
+//   robot vision finds a part by, binary glTF with one PNG texture (the scene
+//   file shows it with material: file).
 //
 // The files are committed; run this again only to change them:
 //
@@ -15,7 +19,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { binaryStl, box, faceNormal, glb } from '../src/scene/model-test-files.js'
+import { binaryStl, box, faceNormal, glb, png } from '../src/scene/model-test-files.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MODELS = join(ROOT, 'lectures/demo/models')
@@ -131,9 +135,16 @@ function bracket() {
 }
 
 /**
+ * A plastic colour as a glTF material: not metallic, so the stage, which has
+ * no reflections, lights it as it lights a preset.
+ * @param {string} name @param {[number, number, number]} linear glTF's colours are linear, not sRGB
+ */
+const plastic = (name, linear) => ({ name, pbrMetallicRoughness: { baseColorFactor: [...linear, 1], metallicFactor: 0, roughnessFactor: 0.6 } })
+
+/**
  * A parts tray, in metres with y up and its origin at a corner, as a model
- * made in Blender may be: an open box 160 by 100 mm and 30 mm high, and a
- * divider on a node of its own, placed by the node's translation.
+ * made in Blender may be: an open box 160 by 100 mm and 30 mm high in teal,
+ * and an orange divider on a node of its own, placed by the node's translation.
  */
 function tray() {
   const [w, h, d, t] = [0.16, 0.03, 0.1, 0.004]
@@ -147,15 +158,45 @@ function tray() {
   const divider = box([-0.002, 0, -(d / 2 - t)], [0.002, 0.022, d / 2 - t])
   return glb({
     meshes: [
-      { name: 'tray', triangles: body },
-      { name: 'divider', triangles: divider, translation: [w / 2, t, d / 2] },
+      { name: 'tray', triangles: body, material: 0 },
+      { name: 'divider', triangles: divider, translation: [w / 2, t, d / 2], material: 1 },
     ],
+    materials: [plastic('tray teal', [0.02, 0.3, 0.25]), plastic('divider orange', [0.9, 0.3, 0.03])],
+  })
+}
+
+/**
+ * A fiducial marker as robot vision reads one: 6 x 6 black and white cells
+ * inside a black border, in a white margin, 8 pixels a cell (80 x 80 pixels).
+ * The pattern is our own, not symmetric, so a face turned or mirrored shows.
+ * @returns {ArrayBuffer} a PNG
+ */
+function markerImage() {
+  const bits = ['100110', '011010', '110001', '001101', '101011', '010100']
+  const cell = 8
+  return png(10 * cell, 10 * cell, (x, y) => {
+    const [cx, cy] = [Math.floor(x / cell), Math.floor(y / cell)]
+    const margin = cx === 0 || cy === 0 || cx === 9 || cy === 9
+    const border = !margin && (cx === 1 || cy === 1 || cx === 8 || cy === 8)
+    const black = border || (!margin && bits[cy - 2][cx - 2] === '1')
+    return black ? [20, 20, 22] : [245, 245, 240]
+  })
+}
+
+/** a 60 mm cube with the marker on each face, standing on its origin, in metres with y up */
+function marker() {
+  return glb({
+    meshes: [{ name: 'marker', triangles: box([-0.03, 0, -0.03], [0.03, 0.06, 0.03]), uvs: true, material: 0 }],
+    materials: [{ name: 'printed marker', pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 0.8 } }],
+    // nearest pixels up close, so the cells stay sharp; smooth mipmaps far away
+    textures: [{ name: 'marker', bytes: markerImage(), sampler: { magFilter: 9728, minFilter: 9987, wrapS: 33071, wrapT: 33071 } }],
   })
 }
 
 const files = {
   'bracket.stl': binaryStl(bracket(), { header: 'lysark demo: angle bracket, millimetres, z up' }),
   'tray.glb': tray(),
+  'marker.glb': marker(),
 }
 mkdirSync(MODELS, { recursive: true })
 for (const [name, bytes] of Object.entries(files)) {

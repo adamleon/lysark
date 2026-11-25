@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { binaryStl, cylinder, glb, glbEdits, lfsPointer } from './src/scene/model-test-files.js'
+import { binaryStl, cylinder, glb, glbEdits, lfsPointer, png } from './src/scene/model-test-files.js'
 import { lectureSceneFiles, resolveFile, resolveImage, slidesPlugin } from './vite-plugin-slides'
 
 let course: string
@@ -262,15 +262,38 @@ describe('models in the build (docs/scene-files.md, "Models")', () => {
     }
   })
 
-  it('refuses what checkModel refuses: an LFS pointer, a textured GLB', async () => {
+  it('refuses what checkModel refuses: an LFS pointer, a textured GLB with no material: line', async () => {
     file(join(m1, 'models', 'lfs.stl'), lfsPointer())
     file(join(m1, 'models', 'painted.glb'), glb({ edits: [glbEdits.image()] }))
     expect(await failure('  pointer:\n    model: models/lfs.stl\n')).toMatch(
       /^scenes\/arm\.yaml, line 4: object 'pointer': the model is a Git LFS pointer, not the model/,
     )
-    expect(await failure('  table:\n    box: [0.4, 0.3, 0.4]\n  painted:\n    model: models/painted.glb\n')).toMatch(
-      /^scenes\/arm\.yaml, line 6: object 'painted': the model has textures, which come in a later step/,
+    expect(await failure('  table:\n    box: [0.4, 0.3, 0.4]\n  painted:\n    model: models/painted.glb\n')).toBe(
+      "scenes/arm.yaml, line 6: object 'painted': the model has textures: write material: file to show them, " +
+        "with the file's own colours, or a colour such as material: grey to colour it all with that",
     )
+  })
+
+  it("checks a textured GLB for each object's look, naming the object whose look it can't have (step 9)", async () => {
+    const labelled = glb({
+      meshes: [{ uvs: true, material: 0 }],
+      materials: [{ name: 'label', pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+      textures: [{ name: 'label', bytes: png(8, 8) }],
+    })
+    file(join(m1, 'models', 'labelled.glb'), labelled)
+    file(join(m1, 'models', 'poster.glb'), glb({ meshes: [{ uvs: true, material: 0 }], materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }], textures: [{ name: 'poster', bytes: png(3000, 1) }] }))
+    // its own look, or a colour: built in once, its bytes as they are
+    objects('  a:\n    model: models/labelled.glb\n    material: file\n  b:\n    model: models/labelled.glb\n    material: red\n')
+    expect(run(await transform(SLIDE, slides)).models).toEqual({ 'models/labelled.glb': base64(labelled) })
+    // the object with no material: line is the one named
+    expect(await failure('  a:\n    model: models/labelled.glb\n    material: file\n  b:\n    model: models/labelled.glb\n')).toMatch(
+      /^scenes\/arm\.yaml, line 7: object 'b': the model has textures: write material: file/,
+    )
+    expect(await failure('  a:\n    model: models/poster.glb\n    material: file\n')).toBe(
+      "scenes/arm.yaml, line 4: object 'a': the model's image 'poster' is 3000 x 1 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+    )
+    // with a colour, the texture is left out, however large
+    expect(await failure('  a:\n    model: models/poster.glb\n    material: grey\n')).toBe('built')
   })
 
   it('refuses wrong capital letters, naming the file on disk', async () => {

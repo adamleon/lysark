@@ -176,7 +176,8 @@ a robot's anchor takes the robot's own frame (see `parent` below).
 - **`material`**: the colour of a box, cylinder, sphere or model: `grey` (without one), `white`,
   `black`, `red`, `yellow`, `green`, `blue`, `wood` or `metal`. They follow the theme: in the
   PDF, `white` is a little greyer, so it shows on the white page, and a frame's axes are darker.
-  A frame has its axis colours, and a point none.
+  A frame has its axis colours, and a point none. A GLB model can also have `material: file`, its
+  own colours and textures from the file (from v2.14.0; see [Models](#models)).
 - **`parent`**: another object in the file, or one of the scene's anchors below. The object then
   sits on its parent and moves with it, and `at` and `rotate` are in the parent's frame. An
   object's own frame has its origin at its `at`, turned by its `rotate`, y up as built: `at: [0,
@@ -236,6 +237,13 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
     model: models/tray.glb
     at: [-0.1, 0.3, -0.1]
     parent: table
+    material: file           # its own colours from the file (from v2.14.0)
+  marker:                    # a GLB with a texture: a box with a printed marker
+    model: models/marker.glb
+    at: [-0.1, 0.3, 0.1]
+    rotate: 20
+    parent: table
+    material: file           # shows the texture; without material:, the build asks which
 ```
 
 - **`model`** is a shape, written where a box writes `box:`, one per object. Everything in
@@ -287,7 +295,9 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
       parent: end_effector
   ```
 - **Colour:** `material`, one preset for the whole model, as for a box (`grey` without one), so
-  models follow the theme and the print PDF. The file's own colours and materials are not used.
+  models follow the theme and the print PDF; the file's own colours, materials and textures are
+  then left out. Or, for a GLB, `material: file`: the file's own look (below). An STL has no
+  colours of its own, so `material: file` on one is an error.
 - **Shading:** an STL's own normals are not used either (CAD programs write flat ones, or none):
   the shading is worked out from the triangles, smooth across edges under 40 degrees and sharp
   above, as for the KUKA, whatever the unit. The same goes for a GLB mesh without normals.
@@ -298,16 +308,16 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
   Each file is built into the student file once, about a third larger than on disk, however
   many objects show it. A lecture without models carries none of the code that reads them.
 - **Refused**, each with a message that says what to do (see
-  [When something is wrong](#when-something-is-wrong)): a GLB with textures or images (textured
-  models are step 9), a `.gltf` or a GLB that keeps its data in another file, a compressed GLB
-  (Draco, meshopt), one with bones (a skin) or GPU instancing, one that needs a glTF extension
-  lysark doesn't read, a file that isn't the STL or binary glTF 2.0 its name says, or has no
-  triangles, and a Git LFS pointer in place of the file (course CI doesn't fetch LFS files: keep
-  models in git itself).
+  [When something is wrong](#when-something-is-wrong)): a GLB with textures and no `material:`
+  line, and with `material: file` what its own look can't be shown with (below); a `.gltf` or a
+  GLB that keeps its data in another file, a compressed GLB (Draco, meshopt), one with bones (a
+  skin) or GPU instancing, one that needs a glTF extension lysark doesn't read, a file that isn't
+  the STL or binary glTF 2.0 its name says, or has no triangles, and a Git LFS pointer in place of
+  the file (course CI doesn't fetch LFS files: keep models in git itself).
 - **Left out without a word:** a GLB's lights and cameras (the scene's own lights stay the only
-  ones), its animations, its lines and points, and its materials, vertex colours and texture
-  coordinates; an STL's colours. Meshes the file hangs under a light, camera, line or points stay,
-  where the file put them.
+  ones), its animations, and its lines and points; without `material: file`, its materials,
+  textures, vertex colours and texture coordinates; an STL's colours. Meshes the file hangs under
+  a light, camera, line or points stay, where the file put them.
 - **In `lysark dev`**, changing a model file reloads the preview, as an image does.
 - **In the editor**, the panel reads the model files through VS Code once the images have come,
   checks them as the build does, and shows the models. M puts each model's ring at its middle, and
@@ -324,6 +334,37 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
   `Bracket.stl` for `bracket.stl`, so the panel shows a model only the build refuses. A path
   whose case is wrong in a folder after `..` (`../../Assets/bracket.stl`) the panel calls outside
   the lecture folder, on any computer, and the build says the case is wrong.
+
+### A GLB's own look: `material: file`
+
+From engine v2.14.0. `material: file` shows a GLB in its own materials, as Blender shows it: its
+colours, and its textures (images painted on it, such as a label or a printed marker).
+
+- **Choosing.** A GLB with textures and no `material:` line stops the build, at its `model:`
+  line: write `material: file` to show them, or a colour (`material: grey`) to colour it all with
+  that. With a colour, the file's materials and textures are left out, whatever they are. A GLB
+  without textures and no `material:` line is grey, as before.
+- **Textures** are PNG or JPEG images inside the `.glb` (Blender's glTF Binary export puts them
+  there), at most 2048 pixels on a side: a 2048 × 2048 texture takes about 22 MB of the graphics
+  card's memory with the smaller copies it is drawn from at a distance. The 5 MB limit per file
+  counts its textures. KTX2 (Basis), WebP and AVIF textures are refused: export the textures as
+  PNG or JPEG. A texture's offset, scale and turn (`KHR_texture_transform`, which Blender writes
+  for a Mapping node) are read.
+- **What the stage can't draw is refused**, each with a message naming the material or mesh: a
+  see-through material (blend mode alpha blend or clip, or transmission), since the stage draws
+  those wrong or not at all; a material more metallic than 0.6 (the `metal` preset's) without a
+  metallic texture, since the stage has no reflections for a metal to show, and it would look near
+  black (glTF counts a material that doesn't say as fully metallic); a mesh without a material,
+  which three.js draws fully metallic; and a textured mesh without texture coordinates (a UV map).
+  A metallic texture's pixels can't be read by the build: where such a texture says fully
+  metallic, the part shows dark. An unlit material (`KHR_materials_unlit`) shows its colour
+  whatever the light.
+- **The theme and the print PDF.** The file's colours don't follow the theme. In the PDF the page
+  is white, so a white part can vanish into it, where the `white` preset is a little greyer:
+  give such a part a colour, or a darker white in the file. Textures print as they show.
+- **Nothing is fetched.** The images are read from the file itself, in the student file and in
+  the panel alike, so they show offline and in github.dev with the released extension.
+- **Each object its own copy.** Two objects showing one textured file hold its textures twice.
 
 ## Saving views in the editor
 
@@ -554,9 +595,23 @@ words (for a file VS Code won't read, its own reason). For example:
 - `scenes/arm.yaml, line 41: object 'bracket': the model is 80 m across, read in m. Is the file in
   millimetres? Write unit: mm` (and the other way round: `the model is 0.16 mm across, read in
   mm. Is the file in metres? Leave out unit`)
-- `scenes/arm.yaml, line 49: object 'tray': the model has textures, which come in a later step.
-  Its colour comes from material: anyway, so export it without materials or textures (or as
-  STL)`
+- `scenes/arm.yaml, line 54: object 'marker': the model has textures: write material: file to show
+  them, with the file's own colours, or a colour such as material: grey to colour it all with
+  that`
+- `scenes/arm.yaml, line 47: object 'bracket' has material: file, but an STL has no materials or
+  textures of its own: give it one of the colours. The colours: grey, …` (a compile error, at the
+  `material:` line)
+- `scenes/arm.yaml, line 54: object 'marker': the model's image 'label' is 4096 x 4096 pixels: a
+  texture may be at most 2048 pixels on a side. Export it smaller`
+- `scenes/arm.yaml, line 54: object 'marker': the model's textures are WebP (EXT_texture_webp),
+  which a lecture can't show: export the textures as PNG or JPEG`
+- `scenes/arm.yaml, line 49: object 'tray': the model's material 'steel' is metallic
+  (metallicFactor 1): the stage has no reflections for a metal to show, so it would look near
+  black. Set its metallic to at most 0.6 in the program that made it, or write a colour such as
+  material: metal`
+- `scenes/arm.yaml, line 49: object 'tray': the model's material 'glass' is see-through (blended,
+  alpha mode BLEND), which the stage draws wrong or not at all: make it opaque in the program that
+  made it, or write a colour such as material: grey`
 - `scenes/arm.yaml, line 41: object 'bracket': the model is 7.3 MB; a model may be at most 5 MB.
   Export it with fewer triangles, or as binary STL rather than text STL (about five times
   smaller)`
@@ -564,8 +619,8 @@ words (for a file VS Code won't read, its own reason). For example:
   course build doesn't fetch LFS files. Keep the file in git itself (git lfs untrack, then commit
   it again)`
 
-When several objects show one file in different units, the message names the first object whose
-unit is wrong, at its own line.
+When several objects show one file in different units, or with different `material:` lines, the
+message names the first object whose unit or look is wrong, at its own line.
 
 **Slide keys are checked too** (from v2.5.0). A misspelled key used to be ignored without a word;
 now `camrea:` stops the build: `slides.md, line 9: slide 3 has the key 'camrea', which a slide
@@ -643,7 +698,8 @@ models gets the code that reads them (`src/scene/models.ts`, with the loaders;
 `vite-plugin-lecture.ts`). When a scene is first shown, the scene manager turns each model
 object's text back into bytes and parses it in memory, then adds the objects
 (`src/scene/objects.ts`): the model on its object, scaled by `unit`, turned for `up`, moved so
-that the middle of its underside is the object's origin, and given the preset's material.
+that the middle of its underside is the object's origin, and given the preset's material, or
+with `material: file` left in its own.
 Nothing is fetched and nothing runs in a worker, so the student file still works from
 `file://`. In the panel, the runtime reads the same paths through VS Code once the images have
 come (`src/editor/panel-models.ts`), runs the same check, and hands the files that pass to the
@@ -656,19 +712,29 @@ file through a link (`resolveInside` in `extension/src/logic.ts`, `noLinks` in
 don't yet: it builds, and the panel leaves it out as outside the lecture folder
 (scene-files-proposal.md, "Proposals from step 8").
 
-Textures wait for step 9 for two reasons. The scene teardown (`src/scene/dispose.ts`) frees a
-scene's geometry and materials but not textures, so a textured model would keep GPU memory after
-its scene is put away, and two scenes' worth could be alive at once. And three.js's glTF loader
-turns a GLB's images into `blob:` addresses and fetches them, which the student-file check
-counts as a request and the released panel doesn't allow. So step 8 refuses textures, and with
-them everything else that would need a request, a worker or wasm (a `.gltf`, Draco and meshopt
-compression) or GPU memory `dispose.ts` doesn't free (bones, GPU instancing). The rest a GLB can
-hold (lights, cameras, lines, points) is taken out before the scene sees it.
+Step 8 refused textures for two reasons, which step 9 (v2.14.0, decision 10 in
+scene-files-proposal.md) settles. The scene teardown (`src/scene/dispose.ts`) freed a scene's
+geometry and materials but not textures; it now frees every texture a material holds, and `lysark
+check` counts three.js's geometries and textures on a slide without a scene, after every scene
+has been shown, against the count before the first one. And three.js's glTF loader turns a GLB's
+images into `blob:` addresses and fetches them, which the student-file check counts as a request
+and the released panel doesn't allow (its `connect-src` has no `blob:`). With `material: file`,
+`parseModel` (`src/scene/models.ts`) instead turns each image's bytes into a `data:` address
+before the loader reads the file, lets the loader's manager pass exactly those addresses (any
+other is still refused), and hands every `data:` address to three.js's `TextureLoader`, which
+loads it into an `<img>` (allowed by the panel's `img-src`); the loader's own `ImageBitmapLoader`
+never sees one. An image that doesn't decode stops the model, named, and the deck logs it, so
+`lysark check` fails on it. Without `material: file`, the materials' textures are taken out of the
+file before the loader reads it, so no image is ever loaded. The build's check runs in Node, which
+has no `<img>`: it reads each image's type and size from its header (`src/compiler/model-types.ts`,
+`pngSize` and `jpegSize`), checks the materials in the file, then parses the file without its
+images and checks what the loader built for a see-through material. Everything else that would
+need a request, a worker or wasm (a `.gltf`, Draco and meshopt compression, KTX2 textures) or GPU
+memory `dispose.ts` doesn't free (bones, GPU instancing) stays refused, and the rest a GLB can hold
+(lights, cameras, lines, points) is taken out before the scene sees it.
 
 ## Not yet
 
-- Textured models, step 9 (see [Models](#models) and
-  [scene-files-proposal.md](scene-files-proposal.md)).
 - Changing an object's size, or turning it about other axes than the vertical, in the panel: type
   those in the scene file.
 - Showing, hiding or moving objects per slide, and objects in `agilus-duo` hanging on a robot.

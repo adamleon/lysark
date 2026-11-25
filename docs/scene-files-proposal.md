@@ -10,9 +10,13 @@ were tried in github.dev on the course lecture the same day: step 3, Save view a
 v2.6.0); step 4, named poses (v2.7.0); step 5 in three parts, as V did across steps 2 and 3: 5a,
 the joint sliders (J) and P (v2.8.0), 5b, Shift+P, "Save pose as…" (v2.9.0), and 5c, dragging the
 tool with inverse kinematics (v2.10.0); step 6, objects written by hand (v2.11.0); step 7, drag
-handles for objects (v2.12.0). Step 8, models from STL and untextured GLB files, is built
-(2026-11-09, engine v2.13.0, no extension change), not yet released; how to write them is in
+handles for objects (v2.12.0). Step 8, models from STL and untextured GLB files, is released
+(2026-11-12, engine v2.13.0, no extension change); how to write them is in
 [scene-files.md](scene-files.md#models). Its proposals are [below](#proposals-from-step-8).
+**Decision 10, textured models, decided 2026-11-25.** Step 9 is built (2026-11-25, engine
+v2.14.0, no extension change), not yet released: `material: file` shows a GLB in its own colours
+and textures ([scene-files.md](scene-files.md#a-glbs-own-look-material-file)). Its proposals are
+[below](#proposals-from-step-9).
 It came from four independent designs (smallest change, editor-first, lecturer-first,
 engine-first), scored by three reviewers and combined; the claims about today's code were
 checked against the code.
@@ -145,13 +149,18 @@ Each step lands on its own, with a note and coverage in the demo lecture, as ste
 9. **Textured models**, only once the engine frees textures when a scene is put away (it doesn't
    today) and they load without a network request, checked in both browsers. The released panel
    blocks the loader's way of loading them; see [Proposals from step 8](#proposals-from-step-8).
+   *Built 2026-11-25 as decided (decision 10), in two parts:* 9a, `dispose.ts` frees textures
+   and `lysark check` checks GPU memory; 9b, `material: file` (engine v2.14.0). The images load
+   from `data:` addresses into `<img>`s, with no request and no `blob:` address, checked in
+   Chromium and Firefox, in the student file, the editor check and the released extension 0.4.0
+   in VS Code for the web.
 
 Left for when a lecture needs them: a start state per scene run, a second robot or a moved robot
 in one scene, showing or moving objects per slide, and scene files shared between lectures.
 
 ## Decisions for the author
 
-Each has a recommendation; the names in 3 and 9 are permanent once lectures use them.
+Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures use them.
 
 1. **How a slide uses a name.** (a) Where values go: `camera: oversikt`, `joints: q0`.
    (b) New keys `view:` and `pose:`, with `camera:`/`joints:` on top. *Recommended: (a).* Today's
@@ -200,6 +209,23 @@ Each has a recommendation; the names in 3 and 9 are permanent once lectures use 
      with `*.stl binary` and `*.glb binary` (with `core.autocrlf` on, a text STL would otherwise
      change size between Windows and CI), and a "Models" paragraph in the README (paths, `unit`
      and `up`, 5 MB, no Git LFS). The engine repo has the same `.gitattributes` from step 8.
+10. **Textured models** (needed before step 9; **decided 2026-11-25**):
+   - *Its own look only when asked.* A model keeps its file's look (its materials: colours and
+     textures) only when the scene file says `material: file`. Without a `material:` line a model
+     gets the preset as before, but a GLB with textures and no `material:` line stops the build,
+     at the scene file's line, saying to write `material: file` to show them or a preset to colour
+     it. `material: file` on an STL is an error (an STL has no materials). On an untextured GLB it
+     keeps the file's own colours (the step-8 proposal "A GLB's own colours"). With a preset
+     written, the file's materials and textures are ignored, as before.
+   - *Size.* A texture larger than 2048 pixels on a side is refused, with a message naming the
+     image and its size. The 5,000,000-byte limit per model file stays; textures count in it.
+   - *Accepted with them:* PNG and JPEG textures only, inside the `.glb` (no files beside it, as
+     step 8 requires); KTX2/Basis (`KHR_texture_basisu`, which needs a decoder in a worker, which
+     the `file://` rule forbids), WebP (`EXT_texture_webp`) and anything else refused with a
+     message. The images load from inside the file without a network request and without `blob:`
+     fetches, so the released panel (extension 0.4.0, `connect-src` without `blob:`) shows them
+     with no extension release, and the student-file check (which fails on `blob:` requests)
+     passes.
 
 ## Also checked
 
@@ -208,8 +234,8 @@ Each has a recommendation; the names in 3 and 9 are permanent once lectures use 
 - Unknown top-level slide keys are ignored today; only keys inside `camera:`, widgets and
   `anchored:` are checked.
 - The camera spring carries forward per key (`src/engine/camera-merge.ts`).
-- The scene teardown frees geometry and materials but not textures (`src/scene/dispose.ts`),
-  which is why textured models wait for step 9.
+- The scene teardown freed geometry and materials but not textures (`src/scene/dispose.ts`),
+  which is why textured models waited for step 9 (it frees them from step 9a).
 
 ## Proposals from step 8
 
@@ -221,7 +247,8 @@ At minimum priority, because they go against confirmed decision 7 (colours as na
 - **A GLB's own colours** (`material: file`). Keep the file's materials instead of a preset. It
   needs checks of its own (a metallic or see-through material that shows black or empty under the
   stage's lights), and the colours would not follow the theme, so the print PDF could show a
-  white part on the white page.
+  white part on the white page. *Decided with decision 10 and built in step 9 (2026-11-25), with
+  those checks; the theme caveat is in scene-files.md.*
 - **The file's own origin** (`origin: file`). Place a model by the origin it has in the file
   instead of the middle of its bounding box's underside. It helps a tool part drawn around its
   flange that isn't symmetric about the tool's axis, which today sits off the axis by that much
@@ -280,3 +307,36 @@ For the future:
   extension release that allows `blob:` in `connect-src`, with the check taught the same. Either
   way also textures in `dispose.ts`, and `parseModel` (`src/scene/models.ts`) must let the
   loader have its images: today its loading manager refuses every address, `blob:` included.
+  *Settled in step 9 the first way, with no extension release (extension 0.4.0 has the same
+  rules):* each image's bytes become a `data:` address before the loader reads the file, the
+  manager lets exactly those through, and three's `TextureLoader` loads them into `<img>`s.
+
+## Proposals from step 9
+
+Not built; each would be its own small change, landed and understood before a lecture uses it.
+
+- **A total of texture memory per model.** Each texture is at most 2048 pixels on a side, about
+  22 MB of GPU memory with its mipmaps, but a flat-coloured PNG of that size compresses to a few
+  kB, so a 5 MB GLB could hold dozens of them, over a gigabyte on the graphics card. Exporters
+  don't write such files (Blender writes one image per texture it uses), so step 9 has only the
+  limit per side. A limit on a file's total texture pixels (say four 2048 × 2048 textures, about
+  90 MB) could be added without changing a lecture under it, read from the same headers.
+- **Reflections for metals.** A file's material more metallic than 0.6 without a metallic texture
+  is refused, because the stage has no environment map: checked on the demo (2026-11-25), the
+  tray at metalness 1 shows near black, at 0.6 dimmer but clear. An environment map made per
+  scene for the file's own materials (three's `RoomEnvironment` through `PMREMGenerator`, freed
+  with the scene, which the GPU check would watch) would let metals look like metal, so the limit
+  could go. It changes how those models look, costs a cube render target per scene, and doesn't
+  follow the theme. A metallic texture's pixels aren't read today: such a part shows dark where
+  its texture says fully metallic.
+- **The panel decodes the images in its check.** The build runs in Node, which can't decode an
+  image, so it reads each image's type and size from its header. An image broken past its header
+  passes the build and the panel's check, and fails only when the deck loads it: the model is
+  left out and the console says why, so `lysark check` (course CI) fails, but the panel shows only
+  an empty node. The panel runs in a browser and could decode each image in its check and name a
+  broken one under "Models not shown:", at the cost of the panel catching what the build can't.
+- **A near-white file colour in print.** The `white` preset is greyer in the print theme so it
+  shows on the white page; a file's own white isn't. The print build could darken near-white file
+  colours a little (changing the file's look), or the build could warn about them.
+- **One parse per file**, again (from step 8): with textures, two objects showing one file hold
+  its textures twice on the GPU too.

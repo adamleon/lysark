@@ -483,9 +483,9 @@ objects:
 
   it("reports each model with its scene file and the line of its path, in the file's order", () => {
     expect(readSceneFiles({ 'scenes/arm.yaml': ARM }).get('arm')!.models).toEqual([
-      { src: '../../assets/bracket.stl', format: 'stl', unit: 'mm', object: 'bracket', file: 'scenes/arm.yaml', line: 8 },
-      { src: 'models/tray.glb', format: 'glb', unit: 'm', object: 'tray', file: 'scenes/arm.yaml', line: 15 },
-      { src: '../../assets/Gripper.STL', format: 'stl', unit: 'cm', object: 'gripper', file: 'scenes/arm.yaml', line: 19 },
+      { src: '../../assets/bracket.stl', format: 'stl', unit: 'mm', look: 'preset', object: 'bracket', file: 'scenes/arm.yaml', line: 8 },
+      { src: 'models/tray.glb', format: 'glb', unit: 'm', look: 'default', object: 'tray', file: 'scenes/arm.yaml', line: 15 },
+      { src: '../../assets/Gripper.STL', format: 'stl', unit: 'cm', look: 'default', object: 'gripper', file: 'scenes/arm.yaml', line: 19 },
     ])
     expect(readSceneFiles({ 'scenes/arm.yaml': 'base: arm\nobjects:\n  b: { box: [1, 1, 1] }\n' }).get('arm')!.models).toEqual([])
     expect(readSceneFiles({ 'scenes/arm.yaml': 'base: arm\n' }).get('arm')!.models).toEqual([])
@@ -591,5 +591,55 @@ objects:
     // a model is a parent and an anchor like any object
     const objects = readSceneFiles({ 'scenes/arm.yaml': 'base: arm\nobjects:\n  cup: { sphere: 0.05, parent: tray }\n  tray: { model: tray.glb }\n' }).get('arm')!.objects
     expect(objects.map((o) => o.name)).toEqual(['tray', 'cup'])
+  })
+})
+
+describe('material: file (scene-files-proposal.md step 9, decision 10)', () => {
+  const problem = (text: string) => {
+    try {
+      readSceneFiles({ 'scenes/arm.yaml': text })
+      return 'no error'
+    } catch (err) {
+      return (err as Error).message
+    }
+  }
+  const one = (body: string) => problem(`base: arm\nobjects:\n  a:\n${body}`)
+  const colours = 'The colours: grey, white, black, red, yellow, green, blue, wood, metal'
+
+  it("keeps a GLB model's own look, and reports where each model's look comes from", () => {
+    const file = readSceneFiles({
+      'scenes/arm.yaml':
+        'base: arm\nobjects:\n  marker:\n    model: models/marker.glb\n    material: file\n' +
+        '  tray:\n    model: models/tray.glb\n    material: blue\n  plain:\n    model: models/tray.glb\n',
+    }).get('arm')!
+    expect(file.objects.find((o) => o.name === 'marker')).toMatchObject({ shape: 'model', material: 'file' })
+    expect(file.models.map(({ object, look, line }) => ({ object, look, line }))).toEqual([
+      { object: 'marker', look: 'file', line: 4 },
+      { object: 'tray', look: 'preset', line: 7 },
+      { object: 'plain', look: 'default', line: 10 },
+    ])
+  })
+
+  it('refuses material: file on an STL, which has no materials, and on a shape, naming the line', () => {
+    expect(one('    model: models/bracket.stl\n    unit: mm\n    material: file\n')).toBe(
+      `scenes/arm.yaml, line 6: object 'a' has material: file, but an STL has no materials or textures of its own: give it one of the colours. ${colours}`,
+    )
+    expect(one('    model: ../../assets/Bracket.STL\n    material: file\n')).toMatch(/^scenes\/arm\.yaml, line 5: object 'a' has material: file, but an STL/)
+    expect(one('    box: [0.1, 0.1, 0.1]\n    material: file\n')).toBe(
+      `scenes/arm.yaml, line 5: object 'a' has material: file, which shows a model's own colours and textures from its file, and a box has no file. ${colours}`,
+    )
+    expect(one('    cylinder: [0.1, 0.1]\n    material: file\n')).toMatch(/line 5: object 'a' has material: file, .* and a cylinder has no file/)
+    // a frame and a point have no material at all, as before
+    expect(one('    frame: 0.1\n    material: file\n')).toMatch(/line 5: object 'a' is a frame, drawn in the axis colours/)
+  })
+
+  it('offers file with the colours for a GLB model, and only there', () => {
+    expect(one('    model: models/tray.glb\n    material: gold\n')).toBe(
+      `scenes/arm.yaml, line 5: object 'a' material 'gold' isn't one of the colours. ${colours}; or file, the model's own colours and textures`,
+    )
+    expect(one('    model: models/tray.glb\n    material: File\n')).toMatch(/material 'File' isn't one of the colours\. Did you mean 'file'\?/)
+    expect(one('    model: models/tray.glb\n    material: fiel\n')).toMatch(/Did you mean 'file'\?/)
+    expect(one('    model: models/bracket.stl\n    material: gold\n')).toBe(`scenes/arm.yaml, line 5: object 'a' material 'gold' isn't one of the colours. ${colours}`)
+    expect(one('    box: [1, 1, 1]\n    material: fiel\n')).not.toMatch(/Did you mean 'file'/)
   })
 })

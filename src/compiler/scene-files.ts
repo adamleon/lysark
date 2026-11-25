@@ -1,6 +1,7 @@
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, visit, type Node, type Pair } from 'yaml'
 import type { CameraTargetSpec } from '../engine/slide-types'
 import {
+  MATERIAL_FILE,
   MAX_METRES,
   OBJECT_MATERIALS,
   OBJECT_SHAPES,
@@ -14,7 +15,7 @@ import { SCENE_ANCHORS } from '../scenes/anchors'
 import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
 import { closest } from './closest'
-import { modelFormat, modelPathProblem, MODEL_UNITS, type ModelRef } from './model-types'
+import { modelFormat, modelPathProblem, MODEL_UNITS, type ModelLook, type ModelRef } from './model-types'
 
 // kept here too, where the editor's handles have always found it
 export { MAX_METRES }
@@ -371,6 +372,7 @@ function readObjects(
     // a model: its file's path, checked as text only (the build and the panel find and
     // check the file), and what the file can't say for itself, its unit and which axis is up
     let model: SceneObject['model']
+    let modelLine = 0
     const unitPair = valueOf('unit')
     const upPair = valueOf('up')
     if (shape === 'model') {
@@ -402,7 +404,7 @@ function readObjects(
         up = value as ModelUp
       }
       model = { src: src as string, unit, up }
-      models.push({ src: src as string, format: modelFormat(src as string)!, unit, object: name, file, line: lineOf(node) })
+      modelLine = lineOf(node)
     } else {
       // a shape is built in metres with y up: only a file needs saying what it is in
       const sized = shape === 'point' ? 'a shape' : `a ${shape}`
@@ -461,7 +463,7 @@ function readObjects(
       }
     }
 
-    let material: ObjectMaterial | undefined
+    let material: ObjectMaterial | typeof MATERIAL_FILE | undefined
     const materialPair = valueOf('material')
     if (materialPair) {
       if (shape === 'frame') fail(materialPair.key, `${where} is a frame, drawn in the axis colours (x red, y green, z blue): it has no material`)
@@ -469,14 +471,27 @@ function readObjects(
         fail(materialPair.key, `${where} has no shape, so it is an invisible point: it has no material. Give it a shape, such as box: [0.1, 0.1, 0.1]`)
       }
       const value = isScalar(materialPair.value) ? materialPair.value.value : undefined
-      if (typeof value !== 'string' || !(OBJECT_MATERIALS as readonly string[]).includes(value)) {
-        const guess = typeof value === 'string' ? closest(value, OBJECT_MATERIALS) : undefined
-        fail(
-          materialPair.value ?? materialPair.key,
-          `${where} material '${String(value)}' isn't one of the colours.${guess ? ` Did you mean '${guess}'?` : ''} The colours: ${OBJECT_MATERIALS.join(', ')}`,
-        )
+      const node = materialPair.value ?? materialPair.key
+      const colours = `The colours: ${OBJECT_MATERIALS.join(', ')}`
+      // a GLB model's own materials and textures (decision 10 in scene-files-proposal.md)
+      if (value === MATERIAL_FILE) {
+        if (shape !== 'model') {
+          fail(node, `${where} has material: file, which shows a model's own colours and textures from its file, and a ${shape} has no file. ${colours}`)
+        }
+        if (modelFormat(model!.src) === 'stl') {
+          fail(node, `${where} has material: file, but an STL has no materials or textures of its own: give it one of the colours. ${colours}`)
+        }
+      } else if (typeof value !== 'string' || !(OBJECT_MATERIALS as readonly string[]).includes(value)) {
+        const words: readonly string[] = shape === 'model' ? [...OBJECT_MATERIALS, MATERIAL_FILE] : OBJECT_MATERIALS
+        const guess = typeof value === 'string' ? closest(value, words) : undefined
+        const own = shape === 'model' && model && modelFormat(model.src) === 'glb' ? `; or file, the model's own colours and textures` : ''
+        fail(node, `${where} material '${String(value)}' isn't one of the colours.${guess ? ` Did you mean '${guess}'?` : ''} ${colours}${own}`)
       }
-      material = value as ObjectMaterial
+      material = value as ObjectMaterial | typeof MATERIAL_FILE
+    }
+    if (model) {
+      const look: ModelLook = material === MATERIAL_FILE ? 'file' : material ? 'preset' : 'default'
+      models.push({ src: model.src, format: modelFormat(model.src)!, unit: model.unit, look, object: name, file, line: modelLine })
     }
 
     let parent: string | undefined

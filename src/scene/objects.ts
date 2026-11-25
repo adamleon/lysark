@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { MODEL_UNITS } from '../compiler/model-types'
-import type { ObjectMaterial, SceneObject } from '../engine/object-types'
+import { MATERIAL_FILE, type ObjectMaterial, type SceneObject } from '../engine/object-types'
 import type { SceneInstance } from '../engine/scene-types'
 import { themeColor } from '../theme'
 
@@ -83,7 +83,9 @@ export function buildObject(spec: SceneObject, color: (token: string) => string 
   }
   if (spec.shape === 'point') return node
   if (spec.shape === 'model') {
-    if (model && spec.model) node.userData.middle = fitModel(node, model, spec.model, presetMaterial(spec, color))
+    // with material: file, the model keeps the materials and textures it was parsed with (src/scene/models.ts)
+    const material = spec.material === MATERIAL_FILE ? undefined : presetMaterial(spec, color)
+    if (model && spec.model) node.userData.middle = fitModel(node, model, spec.model, material)
     return node
   }
   let geometry: THREE.BufferGeometry
@@ -112,9 +114,9 @@ export function buildObject(spec: SceneObject, color: (token: string) => string 
   return node
 }
 
-/** the object's colour preset as a material, its token read now, when the object is built (src/theme.ts) */
+/** the object's colour preset as a material, its token read now, when the object is built (src/theme.ts); grey for material: file on a shape, which the compiler refuses */
 function presetMaterial(spec: SceneObject, color: (token: string) => string): THREE.MeshStandardMaterial {
-  const material = spec.material ?? 'grey'
+  const material = spec.material === undefined || spec.material === MATERIAL_FILE ? 'grey' : spec.material
   return new THREE.MeshStandardMaterial({ color: color(`--object-${material}`), ...SURFACE[material] })
 }
 
@@ -123,10 +125,11 @@ function presetMaterial(spec: SceneObject, color: (token: string) => string): TH
  * middle of the underside of the model's bounding box, measured after `unit`
  * and `up` and before `rotate`, which turns the node (decision 7 in
  * scene-files-proposal.md); the file's own origin is not used. Every mesh
- * gets the object's one preset material in place of the file's own. Returns
- * how high the model's middle is.
+ * gets the object's one preset `material` in place of the file's own, or,
+ * without one (material: file), keeps the file's. Returns how high the
+ * model's middle is.
  */
-function fitModel(node: THREE.Object3D, model: THREE.Object3D, { unit, up }: NonNullable<SceneObject['model']>, material: THREE.Material): number {
+function fitModel(node: THREE.Object3D, model: THREE.Object3D, { unit, up }: NonNullable<SceneObject['model']>, material?: THREE.Material): number {
   // the model on a node of its own, so the node keeps only at and rotate, and
   // objects hung on the node (added after this) never count in the box
   const inner = new THREE.Group()
@@ -146,8 +149,8 @@ function fitModel(node: THREE.Object3D, model: THREE.Object3D, { unit, up }: Non
   inner.traverse((part) => {
     const mesh = part as THREE.Mesh
     if (!mesh.isMesh) return
-    // one material for all of them, as a frame's axes share theirs: dispose.ts may free it more than once
-    mesh.material = material
+    // one material for all of them, as a frame's axes share theirs: dispose.ts frees it once
+    if (material) mesh.material = material
     mesh.castShadow = true
     mesh.receiveShadow = true
   })

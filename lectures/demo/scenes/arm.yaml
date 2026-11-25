@@ -49,3 +49,10 @@ objects:                     # things in the scene (from v2.11.0), in metres and
     model: models/tray.glb
     at: [-0.1, 0.3, -0.1]
     parent: table
+    material: file           # its own colours from the file (from v2.14.0)
+  marker:                    # a GLB with a texture: a box with a printed marker
+    model: models/marker.glb
+    at: [-0.1, 0.3, 0.1]
+    rotate: 20
+    parent: table
+    material: file           # shows the texture; without material:, the build asks which

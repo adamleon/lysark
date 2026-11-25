@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { modelBytesProblem } from '../compiler/model-types'
-import { binaryStl, box, glb, glbEdits, lfsPointer, textStl, UNIT_CUBE } from './model-test-files.js'
+import { binaryStl, box, glb, glbEdits, jpeg, lfsPointer, png, textStl, UNIT_CUBE } from './model-test-files.js'
 import { checkModel } from './model-check'
 
 // the bytes' check as it is, but one a test can make pass a file it refuses
@@ -79,6 +79,43 @@ describe('checkModel', () => {
     const instanced = glb({ edits: [glbEdits.instancedNode()] })
     vi.mocked(modelBytesProblem).mockReturnValueOnce(null)
     expect(await checkModel(instanced, 'glb', ['m'])).toBe('the model uses GPU instancing: export it without GPU instances')
+  })
+
+  describe('with material: file (step 9)', () => {
+    const textured = () =>
+      glb({
+        meshes: [{ name: 'box', uvs: true, material: 0 }],
+        materials: [{ name: 'label', pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+        textures: [{ name: 'label', bytes: png(4, 4) }],
+      })
+
+    it('checks a textured GLB without loading its images, which Node has no <img> for, and asks how it looks without a material: line', async () => {
+      expect(await checkModel(textured(), 'glb', ['m'], 'file')).toBeNull()
+      expect(await checkModel(textured(), 'glb', ['m'], 'preset')).toBeNull()
+      expect(await checkModel(textured(), 'glb', ['m'])).toMatch(/^the model has textures: write material: file to show them/)
+      // the image's size is read from its header: one too large is refused before the parse
+      const large = glb({
+        meshes: [{ uvs: true, material: 0 }],
+        materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+        textures: [{ name: 'photo', bytes: jpeg(3000, 2000), mimeType: 'image/jpeg' }],
+      })
+      expect(await checkModel(large, 'glb', ['m'], 'file')).toBe(
+        "the model's image 'photo' is 3000 x 2000 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+      )
+    })
+
+    it('refuses a see-through material in what the loader built, whatever the JSON says', async () => {
+      const glass = glb({ meshes: [{ name: 'pane', material: 0 }], materials: [{ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }] })
+      expect(await checkModel(glass, 'glb', ['m'], 'file')).toMatch(/^the model's material 'glass' is see-through \(blended/)
+      // made to pass the bytes' check, the built material is refused
+      vi.mocked(modelBytesProblem).mockReturnValueOnce(null)
+      expect(await checkModel(glass, 'glb', ['m'], 'file')).toBe(
+        "the model's material 'glass' is see-through, which the stage draws wrong or not at all: " +
+          'make it opaque in the program that made it, or write a colour such as material: grey',
+      )
+      // with a preset the file's materials are replaced
+      expect(await checkModel(glass, 'glb', ['m'], 'preset')).toBeNull()
+    })
   })
 
   it('never rejects: what throws after the parse is a file that couldn\'t be read (B13)', async () => {

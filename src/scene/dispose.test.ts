@@ -101,6 +101,22 @@ describe('disposeSceneGraph', () => {
     expect([...count.values()]).toEqual([1, 1, 1, 1, 1])
   })
 
+  it("frees a model's own materials and textures (material: file), each once", async () => {
+    // as GLTFLoader gives a GLB whose two meshes share a textured material, and a third with a colour of its own
+    const label = new THREE.DataTexture(new Uint8Array(4), 1, 1)
+    const printed = new THREE.MeshStandardMaterial({ name: 'printed', map: label, normalMap: label })
+    const teal = new THREE.MeshStandardMaterial({ name: 'teal' })
+    const parsed = new THREE.Group()
+    const geometry = new THREE.BoxGeometry()
+    parsed.add(new THREE.Mesh(geometry, printed), new THREE.Mesh(geometry, printed), new THREE.Mesh(new THREE.BoxGeometry(), teal))
+    const root = new THREE.Group()
+    root.add(buildObject({ ...model('marker', 'models/marker.glb'), material: 'file' }, color, parsed))
+    const count = disposals(label, printed, teal, geometry)
+
+    disposeSceneGraph(root)
+    expect([...count.values()]).toEqual([1, 1, 1, 1])
+  })
+
   it('frees lines and points as it frees meshes, and shadow maps', () => {
     const lineGeometry = new THREE.BufferGeometry()
     const lineMaterial = new THREE.LineBasicMaterial({ map: new THREE.DataTexture(new Uint8Array(4), 1, 1) })

@@ -66,6 +66,9 @@ function unreadProblem(src: string, error: string, fix: string | undefined): str
   return `the model '${src}': ${error}${hint}`
 }
 
+/** how an object reads its model file, for the checks: its unit and its look */
+const readWay = (ref: ModelRef) => `${ref.unit} ${ref.look}`
+
 /**
  * What is wrong with a file's base64 for the objects that show it, named at
  * the first object it is wrong for; null if all of them can show it.
@@ -76,11 +79,12 @@ async function contentProblem(base64: string, uses: ModelRef[]): Promise<string 
   if (size) return `${modelWhere(uses[0])}: ${size}`
   try {
     const buffer = decodeBase64(base64)
-    // each object reads the file in its own unit: a problem names the first
-    // object with the unit it is about, at its own line, as the build does
-    for (const unit of new Set(uses.map((ref) => ref.unit))) {
-      const user = uses.find((ref) => ref.unit === unit)!
-      const problem = await checkModel(buffer, user.format, [unit])
+    // each object reads the file in its own unit and with its own look (its
+    // material: line): a problem names the first object with the unit and look
+    // it is about, at its own line, as the build does
+    for (const way of new Set(uses.map(readWay))) {
+      const user = uses.find((ref) => readWay(ref) === way)!
+      const problem = await checkModel(buffer, user.format, [user.unit], user.look)
       if (problem) return `${modelWhere(user)}: ${problem}`
     }
     return null

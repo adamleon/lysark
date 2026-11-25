@@ -1,8 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { binaryStl, box, glb, glbChunk, glbEdits, lfsPointer, textStl, withExtraByte, withGlbTail } from '../scene/model-test-files.js'
 import {
+  binaryStl,
+  box,
+  glb,
+  glbChunk,
+  glbEdits,
+  jpeg,
+  lfsPointer,
+  png,
+  textStl,
+  withExtraByte,
+  withGlbTail,
+  type GlbEdit,
+  type GlbMesh,
+  type GlbTexture,
+} from '../scene/model-test-files.js'
+import {
+  jpegSize,
+  MAX_FILE_METALNESS,
+  MAX_TEXTURE_PIXELS,
   MIN_MODEL_METRES,
   MODEL_MAX_BYTES,
+  MODEL_TEXTURES_UNCHOSEN,
   MODEL_UNITS,
   modelBytesProblem,
   modelExtentProblem,
@@ -10,7 +29,18 @@ import {
   modelPathProblem,
   modelSizeProblem,
   modelWhere,
+  pngSize,
 } from './model-types'
+
+/** a box with one texture on it, as an exporter writes one: texture coordinates, a material using the texture, a PNG */
+function textureBox(texture: Partial<GlbTexture> = {}, edit?: GlbEdit): ArrayBuffer {
+  return glb({
+    meshes: [{ name: 'box', uvs: true, material: 0 }],
+    materials: [{ name: 'label', pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+    textures: [{ name: 'label', bytes: png(4, 4), ...texture }],
+    edits: edit ? [edit] : [],
+  })
+}
 
 describe('model files (scene-files-proposal.md step 8)', () => {
   it('knows a model by its extension, in any case', () => {
@@ -228,25 +258,22 @@ describe('modelSizeProblem and modelBytesProblem: the file (B1-B9)', () => {
     expect(modelBytesProblem(glb({ edits: [(json) => delete json.bufferViews[0].buffer] }), 'glb')).toBe(message)
   })
 
-  it('refuses textures (B5)', () => {
+  it('asks how a GLB with textures looks when its object has no material: line (B5, decision 10)', () => {
     const message =
-      'the model has textures, which come in a later step. Its colour comes from material: anyway, so export it without materials or textures (or as STL)'
-    expect(modelBytesProblem(glb({ edits: [glbEdits.image()] }), 'glb')).toBe(message)
-    expect(
-      modelBytesProblem(
-        glb({
-          edits: [
-            (json) => {
-              json.textures = [{}]
-            },
-          ],
-        }),
-        'glb',
-      ),
-    ).toBe(message)
-    for (const name of ['KHR_texture_basisu', 'EXT_texture_webp', 'EXT_texture_avif']) {
-      expect(modelBytesProblem(glb({ edits: [glbEdits.extension(name, false)] }), 'glb')).toBe(message)
-    }
+      "the model has textures: write material: file to show them, with the file's own colours, or a colour such as material: grey to colour it all with that"
+    expect(MODEL_TEXTURES_UNCHOSEN).toBe(message)
+    const textured = [
+      glb({ edits: [glbEdits.image()] }),
+      glb({ edits: [(json) => (json.textures = [{}])] }),
+      ...['KHR_texture_basisu', 'EXT_texture_webp', 'EXT_texture_avif'].map((name) => glb({ edits: [glbEdits.extension(name, false)] })),
+      textureBox(),
+    ]
+    for (const file of textured) expect(modelBytesProblem(file, 'glb')).toBe(message)
+    // with a preset, its materials and textures are left out, whatever they are
+    for (const file of textured) expect(modelBytesProblem(file, 'glb', 'preset')).toBeNull()
+    expect(modelBytesProblem(glb({ edits: [glbEdits.extension('KHR_texture_basisu')] }), 'glb', 'preset')).toBeNull()
+    // and a GLB without textures has no need to say
+    expect(modelBytesProblem(glb({ materials: [{ pbrMetallicRoughness: { metallicFactor: 1 } }] }), 'glb')).toBeNull()
   })
 
   it('refuses data outside the file (B6)', () => {
@@ -287,6 +314,176 @@ describe('modelSizeProblem and modelBytesProblem: the file (B1-B9)', () => {
     }
     // only used, not required: the loader does without it
     expect(modelBytesProblem(glb({ edits: [glbEdits.extension('EXT_structural_metadata', false)] }), 'glb')).toBeNull()
+  })
+})
+
+describe('material: file, a GLB in its own colours and textures (step 9, decision 10)', () => {
+  const notGlb = "the model isn't a binary glTF 2.0 file. Export it again as glTF Binary (.glb)"
+  const own = (file: ArrayBuffer) => modelBytesProblem(file, 'glb', 'file')
+  /** a box with one material, its own colour, as an exporter writes it */
+  const coloured = (material: Record<string, unknown>, mesh: Partial<GlbMesh> = {}) => glb({ meshes: [{ material: 0, ...mesh }], materials: [material] })
+
+  it('passes a textured box in PNG or JPEG, up to 2048 pixels on a side, and one in its own colours', () => {
+    expect(MAX_TEXTURE_PIXELS).toBe(2048)
+    expect(own(textureBox())).toBeNull()
+    expect(own(textureBox({ bytes: jpeg(16, 16), mimeType: 'image/jpeg' }))).toBeNull()
+    expect(own(textureBox({ bytes: png(2048, 1) }))).toBeNull()
+    expect(own(textureBox({ bytes: png(1, 2048) }))).toBeNull()
+    expect(own(textureBox({ bytes: jpeg(2048, 2048), mimeType: 'image/jpeg' }))).toBeNull()
+    expect(own(coloured({ name: 'blue', pbrMetallicRoughness: { baseColorFactor: [0, 0, 1, 1], metallicFactor: 0 } }))).toBeNull()
+    // one image used by two textures, and a texture by two materials
+    const shared = textureBox({}, (json) => {
+      json.textures.push({ source: 0 })
+      json.materials.push({ pbrMetallicRoughness: { baseColorTexture: { index: 1 }, metallicFactor: 0 }, normalTexture: { index: 0 } })
+      json.meshes[0].primitives.push({ ...json.meshes[0].primitives[0], material: 1 })
+    })
+    expect(own(shared)).toBeNull()
+  })
+
+  it('refuses an image over 2048 pixels on a side, naming it and its size', () => {
+    expect(own(textureBox({ name: 'label', bytes: png(2049, 1) }))).toBe(
+      "the model's image 'label' is 2049 x 1 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+    )
+    // the size from a JPEG's frame header, a progressive one's too; an image without a name by its place
+    expect(own(textureBox({ name: '', bytes: jpeg(4096, 3072, { frame: 0xc2 }), mimeType: 'image/jpeg' }))).toBe(
+      "the model's image number 1 is 4096 x 3072 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+    )
+  })
+
+  it('refuses an image that is not a PNG or JPEG, or not the one it says', () => {
+    const only = 'a lecture shows PNG and JPEG textures only. Export the textures as PNG or JPEG'
+    expect(own(textureBox({ name: 'label', mimeType: 'image/webp' }))).toBe(`the model's image 'label' is 'image/webp': ${only}`)
+    expect(own(textureBox({ name: 'label', mimeType: 'image/ktx2' }))).toBe(`the model's image 'label' is 'image/ktx2': ${only}`)
+    expect(own(textureBox({ name: 'label' }, (json) => delete json.images[0].mimeType))).toBe(`the model's image 'label' is of no type it says: ${only}`)
+    expect(own(textureBox({ name: 'label', mimeType: 'image/jpeg' }))).toBe("the model's image 'label' isn't the JPEG the file says it is: export it again")
+    expect(own(textureBox({ name: 'label', bytes: jpeg(8, 8) }))).toBe("the model's image 'label' isn't the PNG the file says it is: export it again")
+    expect(own(textureBox({ name: 'label', bytes: new Uint8Array(64).buffer }))).toMatch(/isn't the PNG the file says it is/)
+  })
+
+  it("refuses a texture kept as something else, named, whether extensionsUsed lists it or the texture only", () => {
+    for (const [name, kind] of [
+      ['KHR_texture_basisu', 'KTX2'],
+      ['EXT_texture_webp', 'WebP'],
+      ['EXT_texture_avif', 'AVIF'],
+    ]) {
+      const message = `the model's textures are ${kind} (${name}), which a lecture can't show: export the textures as PNG or JPEG`
+      expect(own(textureBox({}, glbEdits.extension(name)))).toBe(message)
+      expect(own(textureBox({}, (json) => (json.textures[0].extensions = { [name]: { source: 0 } })))).toBe(message)
+    }
+  })
+
+  it('refuses an image outside the file, and a texture or material pointing at nothing', () => {
+    expect(own(textureBox({ name: 'label' }, (json) => (json.images[0] = { name: 'label', uri: 'label.png' })))).toBe(
+      "the model keeps its image 'label' outside the .glb (in another file or a data: address): export it as one self-contained .glb",
+    )
+    expect(own(textureBox({}, (json) => (json.images[0].uri = 'data:image/png;base64,AAAA')))).toMatch(/keeps its image 'label' outside the \.glb/)
+    expect(own(textureBox({}, (json) => (json.textures[0].source = 3)))).toBe("the model's texture number 1 has no image in the file: export it again")
+    expect(own(textureBox({}, (json) => (json.materials[0].pbrMetallicRoughness.baseColorTexture.index = 2)))).toBe(
+      "the model's material 'label' uses a texture the file doesn't have: export it again",
+    )
+    // an extension's texture too
+    expect(own(textureBox({}, (json) => (json.materials[0].extensions = { KHR_materials_clearcoat: { clearcoatTexture: { index: 9 } } })))).toMatch(
+      /material 'label' uses a texture the file doesn't have/,
+    )
+    // an image's bytes past the end of the file's data
+    expect(own(textureBox({}, (json) => (json.bufferViews[json.images[0].bufferView].byteLength += 1000)))).toBe(notGlb)
+    expect(own(textureBox({}, (json) => (json.images[0].bufferView = 99)))).toBe(notGlb)
+  })
+
+  it('refuses a see-through material, which the stage draws wrong or not at all', () => {
+    const opaque = 'make it opaque in the program that made it, or write a colour such as material: grey'
+    expect(own(coloured({ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBe(
+      `the model's material 'glass' is see-through (blended, alpha mode BLEND), which the stage draws wrong or not at all: ${opaque}`,
+    )
+    expect(own(coloured({ name: 'leaf', alphaMode: 'MASK', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBe(
+      `the model's material 'leaf' is see-through (cut out, alpha mode MASK), which the stage draws wrong or not at all: ${opaque}`,
+    )
+    for (const name of ['KHR_materials_transmission', 'KHR_materials_volume', 'KHR_materials_dispersion', 'KHR_materials_diffuse_transmission']) {
+      expect(own(coloured({ name: 'glass', pbrMetallicRoughness: { metallicFactor: 0 }, extensions: { [name]: {} } }))).toBe(
+        `the model's material 'glass' is see-through (${name}), which the stage can't draw: ${opaque}`,
+      )
+    }
+    expect(own(coloured({ name: 'paint', alphaMode: 'OPAQUE', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBeNull()
+  })
+
+  it('refuses a material more metallic than the metal preset without a metallic texture: the stage has no reflections', () => {
+    expect(MAX_FILE_METALNESS).toBe(0.6)
+    const advice =
+      'the stage has no reflections for a metal to show, so it would look near black. Set its metallic to at most 0.6 in the program that made it, ' +
+      'or write a colour such as material: metal'
+    expect(own(coloured({ name: 'steel', pbrMetallicRoughness: { metallicFactor: 0.9 } }))).toBe(
+      `the model's material 'steel' is metallic (metallicFactor 0.9): ${advice}`,
+    )
+    // glTF's own metallicFactor is 1
+    expect(own(coloured({ name: 'plain' }))).toBe(`the model's material 'plain' is metallic (metallicFactor 1, glTF's own when a material doesn't say): ${advice}`)
+    expect(own(coloured({ pbrMetallicRoughness: {} }))).toMatch(/^the model's material number 1 is metallic \(metallicFactor 1, glTF's own/)
+    // as metallic as the preset, unlit, or with a texture saying how metallic each point is (which isn't read here)
+    expect(own(coloured({ pbrMetallicRoughness: { metallicFactor: 0.6 } }))).toBeNull()
+    expect(own(coloured({ extensions: { KHR_materials_unlit: {} } }))).toBeNull()
+    expect(own(textureBox({}, (json) => (json.materials[0].pbrMetallicRoughness = { metallicRoughnessTexture: { index: 0 } })))).toBeNull()
+  })
+
+  it('refuses a mesh without a material, which three.js draws fully metallic', () => {
+    expect(own(glb({ meshes: [{ name: 'tray' }] }))).toBe(
+      "the model's mesh 'tray' has no material, which three.js draws fully metallic, near black on the stage: " +
+        'give it a material in the program that made it, or write a colour such as material: grey',
+    )
+    // lines and points are left out, material or not
+    expect(own(glb({ meshes: [{ material: 0 }, { mode: 1 }, { mode: 0 }], materials: [{ pbrMetallicRoughness: { metallicFactor: 0 } }] }))).toBeNull()
+    expect(own(coloured({ pbrMetallicRoughness: { metallicFactor: 0 } }, { material: 4 }))).toBe(notGlb)
+  })
+
+  it('refuses a textured mesh without the texture coordinates its textures use', () => {
+    const unwrap = 'unwrap it in the program that made it, or write a colour such as material: grey'
+    expect(own(textureBox({}, (json) => delete json.meshes[0].primitives[0].attributes.TEXCOORD_0))).toBe(
+      `the model's mesh 'box' has a texture but not the texture coordinates it uses (TEXCOORD_0, a UV map): ${unwrap}`,
+    )
+    expect(own(textureBox({}, (json) => (json.materials[0].normalTexture = { index: 0, texCoord: 1 })))).toMatch(/\(TEXCOORD_1, a UV map\)/)
+    // KHR_texture_transform may name the coordinates in place of the texture
+    const transformed = (texCoord: number) =>
+      textureBox({}, (json) => {
+        json.extensionsUsed = ['KHR_texture_transform']
+        json.materials[0].pbrMetallicRoughness.baseColorTexture.extensions = { KHR_texture_transform: { scale: [2, 2], texCoord } }
+      })
+    expect(own(transformed(1))).toMatch(/\(TEXCOORD_1, a UV map\)/)
+    expect(own(transformed(0))).toBeNull()
+  })
+
+  it("refuses a required extension GLTFLoader doesn't read into the file's look, and allows those it does", () => {
+    for (const name of ['KHR_materials_clearcoat', 'KHR_materials_emissive_strength', 'KHR_materials_unlit', 'KHR_texture_transform', 'EXT_materials_bump']) {
+      expect(own(textureBox({}, glbEdits.extension(name))), name).toBeNull()
+    }
+    expect(own(textureBox({}, glbEdits.extension('KHR_materials_pbrSpecularGlossiness')))).toBe(
+      "the model needs the glTF extension 'KHR_materials_pbrSpecularGlossiness', which lysark doesn't read: export it without it",
+    )
+    // with a preset, any material extension is replaced
+    expect(modelBytesProblem(textureBox({}, glbEdits.extension('KHR_materials_pbrSpecularGlossiness')), 'glb', 'preset')).toBeNull()
+  })
+})
+
+describe('pngSize and jpegSize: an image size from its header', () => {
+  const bytes = (buffer: ArrayBuffer) => new Uint8Array(buffer)
+
+  it("reads a PNG's IHDR", () => {
+    expect(pngSize(bytes(png(80, 40)))).toEqual({ width: 80, height: 40 })
+    expect(pngSize(bytes(jpeg(8, 8)))).toBeUndefined()
+    expect(pngSize(bytes(png(80, 40)).subarray(0, 23))).toBeUndefined()
+  })
+
+  it("reads a JPEG's frame header past other segments and fill bytes", () => {
+    expect(jpegSize(bytes(jpeg(640, 480)))).toEqual({ width: 640, height: 480 })
+    expect(jpegSize(bytes(jpeg(33, 17, { frame: 0xc2 })))).toEqual({ width: 33, height: 17 })
+    // fill bytes before a marker
+    const plain = bytes(jpeg(16, 8))
+    const filled = new Uint8Array(plain.length + 2)
+    filled.set(plain.subarray(0, 2))
+    filled.set([0xff, 0xff], 2)
+    filled.set(plain.subarray(2), 4)
+    expect(jpegSize(filled)).toEqual({ width: 16, height: 8 })
+    expect(jpegSize(bytes(png(8, 8)))).toBeUndefined()
+    // the image's data before any frame header
+    expect(jpegSize(new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0, 2, 0xff, 0xd9]))).toBeUndefined()
+    expect(jpegSize(plain.subarray(0, 30))).toBeUndefined()
   })
 })
 

@@ -331,12 +331,15 @@ async function readModels(
     // exactly the file's bytes: a small file's Buffer is a view into a shared
     // pool, whose whole ArrayBuffer would be read as a different file
     const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-    // each object reads the file in its own unit: a problem names the first
-    // object with the unit it is about, so a wrong unit points at its own line.
-    // A second unit parses the file again, which only a file shown in two units costs.
-    for (const unit of new Set(uses.map((ref) => ref.unit))) {
-      const user = uses.find((ref) => ref.unit === unit)!
-      const problem = await checkModel(buffer, user.format, [unit])
+    // each object reads the file in its own unit and with its own look (its
+    // material: line): a problem names the first object with the unit and look
+    // it is about, so a wrong unit or a missing material: points at its own
+    // line. Another unit or look parses the file again, which only a file
+    // shown two ways costs.
+    const way = (ref: ModelRef) => `${ref.unit} ${ref.look}`
+    for (const key of new Set(uses.map(way))) {
+      const user = uses.find((ref) => way(ref) === key)!
+      const problem = await checkModel(buffer, user.format, [user.unit], user.look)
       if (problem) throw new Error(`${modelWhere(user)}: ${problem}`)
     }
     out.push({ base64: bytes.toString('base64'), srcs: [...new Set(uses.map((ref) => ref.src))] })

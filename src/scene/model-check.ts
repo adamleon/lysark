@@ -1,5 +1,12 @@
 import * as THREE from 'three'
-import { MODEL_BONES_PROBLEM, MODEL_INSTANCING_PROBLEM, modelBytesProblem, modelExtentProblem, type ModelFormat } from '../compiler/model-types'
+import {
+  MODEL_BONES_PROBLEM,
+  MODEL_INSTANCING_PROBLEM,
+  modelBytesProblem,
+  modelExtentProblem,
+  type ModelFormat,
+  type ModelLook,
+} from '../compiler/model-types'
 import type { ModelUnit } from '../engine/object-types'
 import { firstLine, parseModel } from './models'
 
@@ -39,6 +46,29 @@ function builtProblem(model: THREE.Object3D): string | null {
   return skinned ? MODEL_BONES_PROBLEM : instanced ? MODEL_INSTANCING_PROBLEM : null
 }
 
+/**
+ * With material: file, a see-through material in what the loader built
+ * (blended, cut out, or transmission), or null: the bytes' check reads them
+ * from the JSON as glTF lays them out, and this is what GLTFLoader made of it.
+ */
+function builtLookProblem(model: THREE.Object3D): string | null {
+  let problem: string | null = null
+  model.traverse((node) => {
+    const mesh = node as THREE.Mesh
+    if (problem !== null || !mesh.isMesh) return
+    for (const material of [mesh.material].flat() as THREE.MeshPhysicalMaterial[]) {
+      if (material.transparent || material.alphaTest > 0 || (material.transmission ?? 0) > 0) {
+        const name = material.name ? `'${material.name}'` : `of the mesh '${mesh.name}'`
+        problem =
+          `the model's material ${name} is see-through, which the stage draws wrong or not at all: ` +
+          `make it opaque in the program that made it, or write a colour such as material: grey`
+        return
+      }
+    }
+  })
+  return problem
+}
+
 /** true when STLLoader reads the file as text: its length doesn't fit a binary STL, and 'solid' starts within its first 5 bytes */
 function readAsText(buffer: ArrayBuffer): boolean {
   const bytes = new Uint8Array(buffer)
@@ -49,18 +79,24 @@ function readAsText(buffer: ArrayBuffer): boolean {
 /**
  * What is wrong with a model file, or null. `buffer` holds exactly the
  * file's bytes; `units` are those of every object that shows it, as each
- * reads the file in its own unit. Never rejects: what three.js throws on is
- * a file that couldn't be read.
+ * reads the file in its own unit; `look` is where its look comes from (its
+ * object's material: line). Never rejects: what three.js throws on is a
+ * file that couldn't be read.
+ *
+ * With material: file, the textures' images are not loaded here (the build
+ * runs in Node, which has no <img>): their type and size are read from their
+ * headers (model-types.ts), and an image that is broken past its header
+ * fails when the deck loads it, which `lysark check` catches.
  */
-export async function checkModel(buffer: ArrayBuffer, format: ModelFormat, units: readonly ModelUnit[]): Promise<string | null> {
-  const bytes = modelBytesProblem(buffer, format)
+export async function checkModel(buffer: ArrayBuffer, format: ModelFormat, units: readonly ModelUnit[], look: ModelLook = 'default'): Promise<string | null> {
+  const bytes = modelBytesProblem(buffer, format, look)
   if (bytes) return bytes
   let largest: number
   // all of it in the try: a file laid out as no exporter writes it can make
   // three.js throw anywhere, and the build and the panel still get a message
   try {
-    const model = await parseModel(buffer, format)
-    const built = builtProblem(model)
+    const model = await parseModel(buffer, format, { ownLook: look === 'file', images: false })
+    const built = builtProblem(model) ?? (look === 'file' ? builtLookProblem(model) : null)
     if (built) return built
     if (triangleCount(model) === 0) {
       // a binary STL whose header starts with 'solid' and gives the wrong triangle count is read as text, and has none

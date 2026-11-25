@@ -212,7 +212,7 @@ vitest and by a new first section of `scripts/check-extension.mjs` (which also t
 between two), with this engine's editor and v2.12.0's. Released by uploading the `.vsix` that
 engine CI's extension job built to the Marketplace.
 
-Engine v2.13.2 (built 2026-11-23, not yet pushed or tagged), three small fixes v2.13.1 left as
+Engine v2.13.2 (2026-11-23, pushed and tagged on 101d204), three small fixes v2.13.1 left as
 proposals, each its own commit; no format change, no extension change. Channel names: a name
 every JavaScript object has (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `__proto__`)
 in a slide's `joints:`, a slider's or plot's `bind:`, `idle:`, a trajectory or an anchored
@@ -238,7 +238,9 @@ scratch lecture stepped in Chromium and Firefox before and after (a slide per ba
 injected into the frames), and a new section of scripts/check-editor.mjs whose stand-in host
 holds back its answer to an edit (`holdEdits`) while the other saves are pressed.
 
-Step 9a (built 2026-11-25, not yet pushed or tagged), the small change textured models wait for
+**Step 9, textured models, is built (2026-11-25), not yet pushed or tagged:** engine v2.14.0, no
+extension change, in two commits. The author decided it the same day (decision 10 in
+scene-files-proposal.md). 9a, the small change textured models wait for
 (scene-files-proposal.md, "Proposals from step 8"): src/scene/dispose.ts frees every texture a
 material holds (any texture-valued property, and a ShaderMaterial's uniforms) and lines and
 points as well as meshes, each geometry, material and texture once however many share it; and
@@ -252,6 +254,49 @@ Baneplanlegging 0 and 0 (no lit material: the KUKA's Collada materials aren't th
 physically-based ones). Shown on a scratch copy: with a textured mesh in the stage, the old
 dispose.ts leaves one texture per scene and the check fails ("4 textures … a scene left GPU
 memory behind"); with the new one it passes. No engine release of its own: it lands with step 9.
+
+9b, `material: file` (scene-files.md, "A GLB's own look"): a model keeps its file's materials and
+textures only with `material: file` on its object; without a `material:` line a GLB with textures
+stops the build at its `model:` line (write `material: file`, or a colour); on an STL it is a
+compile error; with a colour the file's look is left out, as before. The compiler reports each
+model's look (`ModelRef.look`: file, preset or default) and the build and the panel check a file
+once per unit and look (vite-plugin-slides.ts `readModels`, panel-models.ts). With
+`material: file`, src/compiler/model-types.ts (`ownLookProblem`) requires PNG or JPEG images
+inside the file, at most 2048 px a side (read from the PNG's IHDR or the JPEG's frame header,
+`pngSize`/`jpegSize`, in Node without decoding), refuses KTX2, WebP and AVIF, an image at an
+address, a see-through material (BLEND, MASK, transmission and what builds on it), a material
+more metallic than 0.6 without a metallic texture (the stage has no environment map: at
+metalness 1 the demo's tray shows near black), a mesh without a material (three's default is
+fully metallic), a texture the file lacks, and a textured mesh without the texture coordinates
+it uses; a required extension must be one GLTFLoader reads. src/scene/model-check.ts parses the
+file without its images (Node has no `<img>`) and checks what was built for a see-through
+material too. The route that never fetches (src/scene/models.ts, `fileImages`): a GLTFLoader
+plugin's `beforeRoot` turns each image's bufferView into a `data:` address in the parser's JSON,
+the loading manager lets exactly those addresses through (`own`; anything else still throws
+"asks for another file") and hands every `data:` address to a TextureLoader (an `<img>`), so
+GLTFLoader's ImageBitmapLoader (which would fetch a `blob:` address) never runs; an image that
+doesn't decode rejects the parse with its name rather than GLTFLoader's console line with the
+whole address. With a preset (and in the build's check), the plugin takes the materials'
+textures out first, so no image is asked for. Own-look meshes keep `uv`…`uv3`, `color` and
+`tangent`; objects.ts `fitModel` leaves their materials. The demo: models/tray.glb now has its
+own colours (teal, an orange divider) and models/marker.glb is a 6 cm box with an 80 × 80 PNG
+fiducial marker on each face (scripts/make-demo-models.mjs, with `png()` and `jpeg()` added to
+src/scene/model-test-files.js), both `material: file` on the objects slide. One check-infra fix
+came with it: on Windows, headless Chromium's default GPU start lost every page's WebGL context
+once in its first seconds, and with the marker the first scene's shaders linked in that window,
+so check:demo failed on three's shader errors; scripts/browser.mjs now names ANGLE's SwiftShader
+on Windows (`--use-angle=swiftshader`, the renderer it used anyway), and the loss is gone. Checked:
+vitest (522, from 493), tsc, the extension's build and tsc, check-editor in Chromium and Firefox (the
+marker's texture an `<img>` from a `data:` address, no `blob:` request; the marker without its
+`material:` line named in "Models not shown:"), check-extension with this editor and v2.12.0's
+(the released extension 0.4.0's panel shows the texture), build:demo and check:demo (0 requests,
+GPU memory back to 0 geometries and 1 texture), the student file in Firefox, Baneplanlegging, and
+the PDF (the objects page shows the marker's texture and the teal tray). In the student file the
+marker's texture leaves the GPU when the arm scene is put away and is uploaded again when it
+comes back (Chromium and Firefox); on a scratch copy whose dispose.ts doesn't free textures,
+check:demo fails ("2 textures … a scene left GPU memory behind"). Next: push, let engine CI pass,
+tag v2.14.0, and move the course with Update engine; the author can then try a textured GLB from
+Blender in github.dev. Step 9's proposals are in scene-files-proposal.md, "Proposals from step 9".
 
 Proposals (not built):
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
@@ -403,8 +448,8 @@ keep it green.
   their data type is `src/engine/object-types.ts`), **models** (parses STL and GLB files
   for model objects; holds three's loaders, so only decks with models import it),
   model-check (the model file check the build and the panel share; the checks that need no
-  parse are `src/compiler/model-types.ts`), model-test-files.js (model files as bytes, for
-  tests and the demo's files).
+  parse are `src/compiler/model-types.ts`), model-test-files.js (model files as bytes, PNGs and
+  JPEGs too, for tests and the demo's files).
 - `src/scenes/` — `arm` (exposes `ik` from v2.10.0), `pendulum`, `agilus` (+ `parseAgilusRobot`, exposes `ik`),
   `agilus-duo` (two robots). One scene's GPU alive at a time. `joints.ts` and `anchors.ts`:
   each scene's joints and anchors for the compiler, which can't load the scenes.
@@ -439,7 +484,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**493**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**522**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
@@ -484,6 +529,12 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
   `xvfb-run` (Mesa software OpenGL) with `webgl.force-enabled` (scripts/browser.mjs,
   build.yml). CI logs need a GitHub sign-in to read; the editor check also writes its
   failure as a public annotation (readable with the API, no token).
+- **Headless Chromium on Windows** (seen 2026-11-25, Playwright's Chromium 1228, an AMD Radeon
+  890M laptop): with no flags it renders WebGL with ANGLE's SwiftShader but loses every page's
+  context once in its first seconds, and three.js logs `Shader Error … VALIDATE_STATUS false` for
+  each program linked meanwhile, so a check fails or not by timing. scripts/browser.mjs passes
+  `--use-angle=swiftshader` on Windows, the same renderer without the loss. To see it, load a
+  student file with `chromium.launch()` alone and listen for `webglcontextlost`.
 
 - **Preview tab rAF pause**: the Claude preview tab is backgrounded → `rAF` paused,
   render loop looks frozen, `preview_screenshot` times out. NOT a bug. Verify via

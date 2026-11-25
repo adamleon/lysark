@@ -513,7 +513,7 @@ HTTPS server.
   moved to v2.12.0, and the author tried them in github.dev on Baneplanlegging the same day: they
   work. A preview opened before Publish lectures had finished kept the old engine until the page
   was reloaded. Next: step 8, models from `assets/`.
-- Scene files, step 8 (built 2026-11-09, not yet released): `model: <path>` makes an object a
+- Scene files, step 8 (built 2026-11-09, released 2026-11-12): `model: <path>` makes an object a
   part from an STL file (binary or text) or a GLB without textures, with `unit: mm|cm|m` and
   `up: y|z` for what the file can't say. The path is from the lecture folder, as for images, and
   the file is in the lecture folder or the course's `assets/`, at most 5 MB (decision 9, section
@@ -523,6 +523,18 @@ HTTPS server.
   after the images, with the same checks, and names a model it can't show under "Models not
   shown:". The demo shows a bracket (STL, millimetres, z up) and a tray (GLB) on the table.
   Engine v2.13.0, no extension change. [scene-files.md](scene-files.md#models).
+- Scene files, step 9 (built 2026-11-25, not yet released; decision 10, decided 2026-11-25):
+  `material: file` shows a GLB model in its own colours and textures. A GLB with textures and no
+  `material:` line stops the build at its line, asking for `material: file` or a colour; on an
+  STL it is an error; a colour leaves the file's look out, as before. Textures are PNG or JPEG
+  inside the `.glb`, at most 2048 pixels on a side (5 MB per file still); KTX2, WebP and AVIF, a
+  see-through material, one more metallic than the `metal` preset without a metallic texture, and
+  a mesh without a material are refused with a message. The images load from the file itself
+  into `<img>`s through `data:` addresses, with no request and no `blob:` address, so the
+  released extension 0.4.0 shows them, and `dispose.ts` frees textures; `lysark check` now
+  checks that every scene's GPU memory is freed (step 9a). The demo shows a textured marker box
+  and the tray in its own colours. Engine v2.14.0, no extension change.
+  [scene-files.md](scene-files.md#a-glbs-own-look-material-file).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).
@@ -652,6 +664,19 @@ Confirmed by the author on 2026-11-09, all as recommended in
 - A model file is at most 5,000,000 bytes on disk; no total per lecture for now.
 - The course repo gets a small commit of its own once it runs v2.13.0: `.gitattributes` (`*.stl`
   and `*.glb` binary) and a README paragraph on models.
+
+Decided by the author on 2026-11-25 (decision 10 in
+[scene-files-proposal.md](scene-files-proposal.md), textured models, before step 9):
+
+- A model keeps its file's look (its materials: colours and textures) only with
+  `material: file`. Without a `material:` line a model gets the preset, and a GLB with textures
+  stops the build, saying to write `material: file` or a preset. `material: file` on an STL is an
+  error; on an untextured GLB it keeps the file's colours. A preset leaves the file's look out.
+- A texture larger than 2048 pixels on a side is refused, naming the image and its size; the
+  5,000,000-byte limit per model file stays, textures included.
+- Accepted with it: PNG and JPEG textures inside the `.glb` only (KTX2, WebP and anything else
+  refused), loaded without a network request or a `blob:` fetch, so the released panel shows
+  them with no extension release.
 
 ## 9. Open questions
 

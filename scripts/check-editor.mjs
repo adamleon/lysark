@@ -38,9 +38,12 @@
 // inverse kinematics, marked, and P saves them), Space on the panel's × not
 // changing the slide, a new text
 // accepted and shown after a reload, the scene file's objects moved with M, the
-// models among them standing on their at with M's rings at their middle, a typed
-// new place for one put in place, a new unit loading the panel afresh, a model
-// file that isn't there named in the banner with its line, a broken text
+// models among them standing on their at with M's rings at their middle, those
+// with material: file in their files' own materials, a texture an <img> loaded
+// from a data: address with no blob: request, a typed new place for one put in
+// place, a new unit loading the panel afresh, a textured model without a
+// material: line and a model file that isn't there each named in the banner
+// with its line, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
 // course-style build in Chromium and Firefox.
@@ -430,6 +433,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
 
   const errors = []
   const lines = []
+  const blobRequests = []
   let allowCspReports = false
   let browser
   try {
@@ -448,6 +452,8 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
     })
     page.on('request', (req) => {
       const url = new URL(req.url())
+      // the released panel can't fetch a blob: address (extension 0.4.0's connect-src): models' textures must not ask for one
+      if (url.protocol === 'blob:') blobRequests.push(req.url())
       if (url.protocol === 'data:' || url.protocol === 'blob:') return
       const local = url.hostname === '127.0.0.1' && (url.port === String(sitePort) || url.port === String(hostPort))
       if (!local) errors.push(`request outside the site: ${req.url()}`)
@@ -1762,6 +1768,59 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
               .join('; '),
         )
 
+        // material: file (scene-files step 9): a model in its file's own look keeps the file's
+        // materials, not the grey preset, and a texture's image is an <img> loaded from a data:
+        // address, with no request and no blob: address (extension 0.4.0's panel can't fetch one)
+        const ownLook = modelled.filter((n) => armObjects[n].material === 'file')
+        let textured = []
+        if (ownLook.length > 0) {
+          const looks = await waitFor(() =>
+            inPanel((w, all) => {
+              const L = w.__lysark
+              if (!L || L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm') return null
+              const grey = w.getComputedStyle(w.document.documentElement).getPropertyValue('--object-grey').trim().toLowerCase()
+              const out = {}
+              for (const name of all) {
+                out[name] = []
+                L.sceneManager.active.anchors[name].children.find((c) => c.name === `object:${name}:model`)?.traverse((part) => {
+                  if (!part.isMesh) return
+                  const image = part.material.map?.image
+                  out[name].push({
+                    name: part.material.name,
+                    grey: !part.material.map && `#${part.material.color.getHexString()}` === grey,
+                    map: part.material.map
+                      ? {
+                          img: image instanceof w.HTMLImageElement,
+                          data: typeof image?.src === 'string' && image.src.startsWith('data:image/'),
+                          size: image instanceof w.HTMLImageElement && image.complete ? [image.naturalWidth, image.naturalHeight] : null,
+                        }
+                      : null,
+                  })
+                })
+              }
+              // every image decoded
+              return Object.values(out).every((parts) => parts.every((m) => !m.map || m.map.size)) ? out : null
+            }, ownLook),
+          )
+          if (!looks) return fail(`the models with material: file ${JSON.stringify(ownLook)} never showed with every texture loaded (the panel says: ${await banner()})`)
+          const preset = ownLook.find((n) => looks[n].length === 0 || looks[n].some((m) => m.grey))
+          if (preset) return fail(`'${preset}' has material: file, but shows ${JSON.stringify(looks[preset])}: the grey preset, not the file's own look`)
+          const wrong = ownLook.find((n) => looks[n].some((m) => m.map && !(m.map.img && m.map.data && m.map.size[0] > 0)))
+          if (wrong) return fail(`'${wrong}''s texture isn't an <img> loaded from a data: address: ${JSON.stringify(looks[wrong])}`)
+          if (blobRequests.length > 0) return fail(`the panel asked for blob: addresses: ${blobRequests.join(', ')}`)
+          textured = ownLook.filter((n) => looks[n].some((m) => m.map))
+          lines.push(
+            `material: file: ${ownLook.map((n) => `'${n}' in its file's ${[...new Set(looks[n].map((m) => (m.name ? `'${m.name}'` : 'unnamed')))].join(', ')}`).join('; ')}; ` +
+              (textured.length > 0
+                ? `the texture${textured.length === 1 ? '' : 's'} of ${textured.map((n) => `'${n}'`).join(', ')} applied, ` +
+                  `${textured.map((n) => looks[n].filter((m) => m.map).map((m) => m.map.size.join(' x ')).join(', ')).join('; ')} px, ` +
+                  `each an <img> from a data: address; no blob: or network request`
+                : 'no textured model, so textures were not checked'),
+          )
+        } else {
+          lines.push('(no model has material: file, so a file\'s own look was not checked)')
+        }
+
         // M: each model's ring where the middle of its fitted model is on screen
         await waitFor(() => inPanel((w) => !w.__lysark.cameraCtl.active || null), 20, 250)
         await page.waitForTimeout(300)
@@ -1849,6 +1908,38 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
           lines.push(`unit: ${unit} for '${scaled}' (was ${unitWas}) loaded the panel afresh, which read the model files again: it is ${Number(grew.toFixed(4))} times as tall`)
         } else {
           lines.push(`(no other unit keeps '${scaled}' between 1 mm and 10 m across, so a new unit was not checked)`)
+        }
+
+        // a textured GLB without a material: line: the panel refuses it as the build does, named in
+        // the banner at its model: line, and its object stays an empty node (scene-files step 9)
+        const unchosen = textured[0]
+        if (unchosen) {
+          const plain = parseDocument(host.docs.get(armPath).text)
+          plain.deleteIn(['objects', unchosen, 'material'])
+          host.docs.set(armPath, { text: plain.toString(), version: host.docs.get(armPath).version + 1 })
+          const plainSeq = await source(added)
+          if (!(await fromRuntime({ type: 'lysark:accepted', seq: plainSeq }))) return fail(`'${unchosen}' without material: did not load the panel afresh`)
+          if (!(await render(36))) return fail('the runtime did not say ready after a material: line went')
+          await toRuntime({ type: 'lysark:source', files: host.files(added), seq: plainSeq, slide: objectSlide, protocol: EDITOR_PROTOCOL })
+          if (!(await fromRuntime({ type: 'lysark:shown', seq: plainSeq }))) return fail(`the text with '${unchosen}' without material: was not shown`)
+          const modelLine = host.docs.get(armPath).text.split(/\r?\n/).findIndex((l) => l.trim() === `model: ${armObjects[unchosen].model}`) + 1
+          const expectedPlain = `${armPath}, line ${modelLine}: object '${unchosen}': the model has textures: write material: file to show them`
+          const saidPlain = await waitFor(async () => {
+            const text = await banner()
+            return text.includes('Models not shown') ? text : null
+          }, 20, 250)
+          if (!saidPlain?.includes(`Models not shown:\n${expectedPlain}`)) {
+            return fail(`for a textured model without material: the panel said ${JSON.stringify(saidPlain ?? (await banner()))}, expected it to name "${expectedPlain}…"`)
+          }
+          const leftPlain = await waitFor(fitted)
+          if (!leftPlain || leftPlain[unchosen].meshes !== 0) return fail(`without material:, '${unchosen}' should be an empty node: ${JSON.stringify(leftPlain)}`)
+          lines.push(`'${unchosen}' without its material: line: the banner names "${expectedPlain}…", and it stays an empty node`)
+          // its line back, for what follows
+          const back = parseDocument(host.docs.get(armPath).text)
+          back.setIn(['objects', unchosen, 'material'], 'file')
+          host.docs.set(armPath, { text: back.toString(), version: host.docs.get(armPath).version + 1 })
+        } else {
+          lines.push('(no textured model with material: file, so one without a material: line was not checked)')
         }
 
         // a model file that isn't there: the banner names it at its line, and its object stays an empty node
