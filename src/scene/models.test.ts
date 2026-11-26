@@ -309,6 +309,30 @@ describe('models', () => {
       expect(watched.fetch).not.toHaveBeenCalled()
     })
 
+    it("loads a cut-out material (alpha mode MASK) with its cutoff as alphaTest, opaque, and its colour's alpha in the test, as the shadow tests it", async () => {
+      browser()
+      const material = async (changes: Record<string, unknown>) => {
+        const file = textured((json) => Object.assign(json.materials[0], { alphaMode: 'MASK' }, changes))
+        return meshes(await parseModel(file, 'glb', { ownLook: true }))[0].material as THREE.MeshStandardMaterial
+      }
+      const colour = (alpha: number) => ({ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, baseColorFactor: [1, 1, 1, alpha], metallicFactor: 0 } })
+      const sticker = await material({ alphaCutoff: 0.4 })
+      expect(sticker.alphaTest).toBeCloseTo(0.4)
+      expect(sticker.transparent).toBe(false)
+      expect(sticker.map?.image).toBeInstanceOf(FakeImage)
+      expect((await material({})).alphaTest).toBe(0.5)
+      // the shadow map's depth material tests the texture's alpha alone (three r185): texture × 0.8 under 0.4 is texture under 0.5
+      const faded = await material({ alphaCutoff: 0.4, ...colour(0.8) })
+      expect([faded.alphaTest, faded.opacity, faded.visible]).toEqual([0.5, 1, true])
+      // a colour whose alpha alone is under the cutoff leaves nothing to draw, nor a shadow
+      const gone = await material({ alphaCutoff: 0.4, ...colour(0.3) })
+      expect([gone.visible, gone.opacity]).toEqual([false, 1])
+      // an opaque material's alpha is left as the file has it (three draws it opaque)
+      const opaque = await material({ alphaMode: 'OPAQUE', ...colour(0.3) })
+      expect(opaque.alphaTest).toBe(0)
+      expect(opaque.opacity).toBeCloseTo(0.3)
+    })
+
     it("gives the file's materials creased normals' smooth shading on a mesh without normals", async () => {
       browser()
       const model = await parseModel(glb({ meshes: [{ normals: false, material: 0 }], materials: [{ pbrMetallicRoughness: { metallicFactor: 0 } }] }), 'glb', {

@@ -111,6 +111,10 @@ describe('model test files', () => {
     expect(await inflated(chunks.IDAT)).toEqual([0, 0, 0, 7, 10, 0, 7, 20, 0, 7, 0, 0, 20, 7, 10, 20, 7, 20, 20, 7])
     // larger than one stored block (the IDAT data: after the signature, IHDR and its own length and type; before its CRC and IEND)
     expect(await inflated(new Uint8Array(png(300, 100)).subarray(41, -16))).toHaveLength(100 * (1 + 900))
+    // with alpha: colour type 6, RGBA, opaque where the pixel gives no alpha
+    const cut = new Uint8Array(png(2, 1, (x) => (x === 0 ? [1, 2, 3, 0] : [4, 5, 6]), { alpha: true }))
+    expect(cut[25]).toBe(6)
+    expect(await inflated(cut.subarray(41, -16))).toEqual([0, 1, 2, 3, 0, 4, 5, 6, 255])
   })
 
   it('writes a GLB with texture coordinates, materials and its images in the binary chunk, which GLTFLoader reads', async () => {

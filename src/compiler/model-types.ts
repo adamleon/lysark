@@ -12,8 +12,8 @@ import { MAX_METRES, type ModelUnit } from '../engine/object-types'
  * scene's GPU resources alive at a time (§4.1). With material: file, so would
  * a texture that isn't a PNG or JPEG inside the file, is larger than 2048
  * pixels on a side, or takes the file's textures past four such in all; and a
- * material the stage would draw black or not at all is refused too (decision
- * 10 in scene-files-proposal.md).
+ * material the stage would draw wrong, black or not at all is refused too
+ * (decision 10 in scene-files-proposal.md).
  */
 
 /** the model files, by extension (any case): STL, binary or text, and binary glTF */
@@ -273,14 +273,28 @@ export const MODEL_TEXTURES_UNCHOSEN =
   `or a colour such as material: grey to colour it all with that`
 
 /**
- * What to do about a see-through material, with material: file. Blender's
- * glTF export writes a material as blended whenever anything is linked to
- * the Principled BSDF's Alpha, or it is under 1 (Blender 4.2 and later have
- * no blend mode of their own); model-check.ts says it too.
+ * What to do about a see-through material, with material: file: a
+ * transmission one (glass), and with MODEL_BLEND_ADVICE a blended one.
+ * Blender's glTF export writes a material as blended whenever the Principled
+ * BSDF's Alpha is under 1 or has anything linked to it, but for alpha clip
+ * (Blender 4.2 and later have no blend mode of their own); model-check.ts
+ * says it too.
  */
 export const MODEL_OPAQUE_ADVICE =
   `make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), ` +
   `or write a colour such as material: grey`
+
+/**
+ * What to do about a blended material (alpha mode BLEND), with material:
+ * file: make it opaque, or cut its transparent parts out instead (alpha
+ * clip, alpha mode MASK), which the stage draws, its shadow included. Blender
+ * exports alpha clip for a Math node set to Round between the alpha and the
+ * Principled BSDF's Alpha (or 1 - (alpha < cutoff) for another cutoff than 0.5).
+ */
+export const MODEL_BLEND_ADVICE =
+  `make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), ` +
+  `or for a transparent surround, such as a sticker's, use alpha clip (in Blender, a Math node set to Round between ` +
+  `the texture's Alpha and the Principled BSDF's Alpha); or write a colour such as material: grey`
 
 /**
  * What a GLB whose textures are kept as KTX2, WebP or AVIF gets, or null:
@@ -485,8 +499,9 @@ export function jpegSize(data: Uint8Array): { width: number; height: number } | 
  * Its textures must be PNG or JPEG images in the file, at most
  * MAX_TEXTURE_PIXELS on a side and MAX_TEXTURE_TOTAL_PIXELS in all, read
  * from their headers here. Its materials mustn't be what the stage draws
- * black or not at all: see-through (blended, cut out, or transmission),
- * metallic beyond MAX_FILE_METALNESS without a metallic texture (the stage
+ * wrong, black or not at all: see-through (blended, or transmission; a
+ * cut-out material, alpha mode MASK, is drawn in the opaque pass and
+ * allowed), metallic beyond MAX_FILE_METALNESS without a metallic texture (the stage
  * has no reflections), or missing on a mesh, which three gives a fully
  * metallic default; and a textured mesh must have the texture coordinates
  * its textures use. `src` is the model's path, for the message about all
@@ -576,10 +591,14 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
     if (missing) return `the model's material ${name} uses a texture the file doesn't have: export it again`
     coordinates.push(read)
     const extensions = asJson(material?.extensions) ?? {}
-    if (material?.alphaMode === 'BLEND' || material?.alphaMode === 'MASK') {
-      const how = material.alphaMode === 'BLEND' ? 'blended' : 'cut out'
-      return `the model's material ${name} is see-through (${how}, alpha mode ${material.alphaMode}), which the stage draws wrong or not at all: ${MODEL_OPAQUE_ADVICE}`
+    if (material?.alphaMode === 'BLEND') {
+      return `the model's material ${name} is see-through (blended, alpha mode BLEND), which the stage draws wrong or not at all: ${MODEL_BLEND_ADVICE}`
     }
+    // cut out (Blender's alpha clip): drawn where its alpha is at least the
+    // cutoff, as three's alphaTest. GLTFLoader hands three whatever the file
+    // says, and glTF allows no cutoff under 0
+    const cutoff = material?.alphaCutoff
+    if (material?.alphaMode === 'MASK' && cutoff !== undefined && (typeof cutoff !== 'number' || cutoff < 0)) return notGlb
     const through = SEE_THROUGH_EXTENSIONS.find((extension) => extensions[extension] !== undefined)
     if (through) return `the model's material ${name} is see-through (${through}), which the stage can't draw: ${MODEL_OPAQUE_ADVICE}`
     // an unlit material shows its colour whatever the light; a metallic texture's pixels can't be read here

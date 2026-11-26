@@ -11,7 +11,10 @@
 //   up, and shows its colours with material: file);
 // - models/marker.glb: a box with a fiducial marker printed on each face, as
 //   robot vision finds a part by, binary glTF with one PNG texture (the scene
-//   file shows it with material: file).
+//   file shows it with material: file);
+// - models/sign.glb: a warning sign, one flat square whose PNG texture's
+//   surround is transparent and cut out (alpha mode MASK, Blender's alpha
+//   clip), so the sign and its shadow are a triangle.
 //
 // The files are committed; run this again only to change them:
 //
@@ -193,10 +196,66 @@ function marker() {
   })
 }
 
+/**
+ * A warning sign as an RGBA image, 64 x 64 pixels: a yellow triangle standing
+ * on the image's bottom edge, with a black border and a black exclamation
+ * mark. Its surround is transparent, and black, the colour the triangle's
+ * edge blends into when the texture is filtered.
+ * @returns {ArrayBuffer} a PNG
+ */
+function signImage() {
+  const size = 64
+  /** @type {Array<[number, number]>} the corners, in pixels from the top left: the apex, then the base on the bottom edge */
+  const corners = [
+    [32, 10],
+    [63, 64],
+    [1, 64],
+  ]
+  /** how far inside the edge from corner a to corner b the point is, in pixels (negative outside) */
+  const inside = (/** @type {[number, number]} */ a, /** @type {[number, number]} */ b, /** @type {number} */ x, /** @type {number} */ y) =>
+    ((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])) / Math.hypot(b[0] - a[0], b[1] - a[1])
+  const border = 5
+  return png(
+    size,
+    size,
+    (px, py) => {
+      const [x, y] = [px + 0.5, py + 0.5]
+      const depth = Math.min(...corners.map((a, k) => inside(a, corners[(k + 1) % 3], x, y)))
+      if (depth < 0) return [0, 0, 0, 0]
+      const mark = px >= 30 && px <= 33 && ((py >= 27 && py <= 47) || (py >= 51 && py <= 55))
+      return depth < border || mark ? [20, 20, 22, 255] : [250, 196, 0, 255]
+    },
+    { alpha: true },
+  )
+}
+
+/**
+ * A warning sign 80 mm wide, standing on its origin, in metres with y up: one
+ * square facing +z, seen from both sides, its texture's transparent surround
+ * cut out (alpha mode MASK, at glTF's own cutoff, 0.5, as Blender writes alpha
+ * clip from a Math node set to Round).
+ */
+function sign() {
+  const [half, height] = [0.04, 0.08]
+  return glb({
+    meshes: [{ name: 'sign', triangles: quad([-half, 0, 0], [half, 0, 0], [half, height, 0], [-half, height, 0], [0, 0, 1]), uvs: true, material: 0 }],
+    materials: [
+      {
+        name: 'warning sign',
+        alphaMode: 'MASK',
+        doubleSided: true,
+        pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 0.6 },
+      },
+    ],
+    textures: [{ name: 'warning', bytes: signImage() }],
+  })
+}
+
 const files = {
   'bracket.stl': binaryStl(bracket(), { header: 'lysark demo: angle bracket, millimetres, z up' }),
   'tray.glb': tray(),
   'marker.glb': marker(),
+  'sign.glb': sign(),
 }
 mkdirSync(MODELS, { recursive: true })
 for (const [name, bytes] of Object.entries(files)) {

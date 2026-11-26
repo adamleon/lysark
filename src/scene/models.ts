@@ -116,8 +116,32 @@ export async function parseModel(buffer: ArrayBuffer, format: ModelFormat, { own
       fixed.set(mesh.geometry, geometry)
     }
     mesh.geometry = geometry
+    if (ownLook) for (const material of [mesh.material].flat()) shadowedCutOut(material)
   })
   return root
+}
+
+/**
+ * A cut-out material (alpha mode MASK, Blender's alpha clip) as the stage's
+ * shadow can follow it. three draws it in the opaque pass and leaves out each
+ * point whose alpha, its base colour texture's times its colour's own
+ * (opacity), is under its alphaTest (the file's cutoff). The shadow map draws
+ * the mesh with a depth material that has the texture and the alphaTest but
+ * not the opacity (WebGLShadowMap, getDepthMaterial, three r185), so its
+ * shadow is cut out by the texture's alpha alone. Moving the colour's alpha
+ * into the test makes the two agree: texture × opacity < cutoff is texture <
+ * cutoff / opacity. A colour whose alpha alone is under the cutoff leaves
+ * nothing, so the mesh isn't drawn at all, shadow included. A vertex
+ * colour's alpha, which three multiplies in too, can't be moved so: a part
+ * cut out by alpha painted on its vertices casts its whole shadow
+ * (docs/scene-files.md). A material several meshes share comes here more
+ * than once: from the second time its opacity is 1, and nothing changes.
+ */
+function shadowedCutOut(material: THREE.Material): void {
+  if (material.alphaTest <= 0 || material.opacity >= 1) return
+  if (material.opacity < material.alphaTest) material.visible = false
+  else material.alphaTest /= material.opacity
+  material.opacity = 1
 }
 
 /**

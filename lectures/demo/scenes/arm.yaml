@@ -56,3 +56,9 @@ objects:                     # things in the scene (from v2.11.0), in metres and
     rotate: 20
     parent: table
     material: file           # shows the texture; without material:, the build asks which
+  sign:                      # a flat square whose texture's surround is cut out (alpha clip)
+    model: models/sign.glb
+    at: [0.11, 0.3, -0.1]
+    rotate: -20
+    parent: table
+    material: file           # a triangle, and so is its shadow

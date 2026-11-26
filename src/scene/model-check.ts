@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import {
+  MODEL_BLEND_ADVICE,
   MODEL_BONES_PROBLEM,
   MODEL_INSTANCING_PROBLEM,
   MODEL_OPAQUE_ADVICE,
@@ -49,8 +50,10 @@ function builtProblem(model: THREE.Object3D): string | null {
 
 /**
  * With material: file, a see-through material in what the loader built
- * (blended, cut out, or transmission), or null: the bytes' check reads them
- * from the JSON as glTF lays them out, and this is what GLTFLoader made of it.
+ * (blended, or transmission), or null: the bytes' check reads them from the
+ * JSON as glTF lays them out, and this is what GLTFLoader made of it. A
+ * cut-out material (alphaTest, from alpha mode MASK) is drawn in the opaque
+ * pass, and allowed.
  */
 function builtLookProblem(model: THREE.Object3D): string | null {
   let problem: string | null = null
@@ -58,9 +61,10 @@ function builtLookProblem(model: THREE.Object3D): string | null {
     const mesh = node as THREE.Mesh
     if (problem !== null || !mesh.isMesh) return
     for (const material of [mesh.material].flat() as THREE.MeshPhysicalMaterial[]) {
-      if (material.transparent || material.alphaTest > 0 || (material.transmission ?? 0) > 0) {
+      if (material.transparent || (material.transmission ?? 0) > 0) {
         const name = material.name ? `'${material.name}'` : `of the mesh '${mesh.name}'`
-        problem = `the model's material ${name} is see-through, which the stage draws wrong or not at all: ${MODEL_OPAQUE_ADVICE}`
+        const advice = material.transparent ? MODEL_BLEND_ADVICE : MODEL_OPAQUE_ADVICE
+        problem = `the model's material ${name} is see-through, which the stage draws wrong or not at all: ${advice}`
         return
       }
     }

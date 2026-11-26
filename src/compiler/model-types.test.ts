@@ -506,15 +506,15 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
     expect(own(textureBox({}, (json) => (json.images[0].bufferView = 99)))).toBe(notGlb)
   })
 
-  it('refuses a see-through material, which the stage draws wrong or not at all', () => {
+  it('refuses a see-through material, which the stage draws wrong or not at all, and says how to cut a surround out instead', () => {
     const opaque =
       "make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), " +
       'or write a colour such as material: grey'
     expect(own(coloured({ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBe(
-      `the model's material 'glass' is see-through (blended, alpha mode BLEND), which the stage draws wrong or not at all: ${opaque}`,
-    )
-    expect(own(coloured({ name: 'leaf', alphaMode: 'MASK', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBe(
-      `the model's material 'leaf' is see-through (cut out, alpha mode MASK), which the stage draws wrong or not at all: ${opaque}`,
+      "the model's material 'glass' is see-through (blended, alpha mode BLEND), which the stage draws wrong or not at all: " +
+        "make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), " +
+        "or for a transparent surround, such as a sticker's, use alpha clip (in Blender, a Math node set to Round between " +
+        "the texture's Alpha and the Principled BSDF's Alpha); or write a colour such as material: grey",
     )
     for (const name of ['KHR_materials_transmission', 'KHR_materials_volume', 'KHR_materials_dispersion', 'KHR_materials_diffuse_transmission']) {
       expect(own(coloured({ name: 'glass', pbrMetallicRoughness: { metallicFactor: 0 }, extensions: { [name]: {} } }))).toBe(
@@ -522,6 +522,20 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
       )
     }
     expect(own(coloured({ name: 'paint', alphaMode: 'OPAQUE', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBeNull()
+  })
+
+  it('passes a cut-out material (alpha mode MASK, Blender\'s alpha clip), with its cutoff or without (the author, 2026-11-26)', () => {
+    const sticker = (material: Record<string, unknown>) => textureBox({}, (json) => Object.assign(json.materials[0], material))
+    expect(own(sticker({ alphaMode: 'MASK' }))).toBeNull()
+    expect(own(sticker({ alphaMode: 'MASK', alphaCutoff: 0.3 }))).toBeNull()
+    expect(own(sticker({ alphaMode: 'MASK', alphaCutoff: 0 }))).toBeNull()
+    expect(own(coloured({ name: 'leaf', alphaMode: 'MASK', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBeNull()
+    // a cutoff three would take for a number, or one glTF doesn't allow, is a broken file
+    for (const cutoff of ['0.5', -0.1, null, [0.5]]) {
+      expect(own(sticker({ alphaMode: 'MASK', alphaCutoff: cutoff })), JSON.stringify(cutoff)).toBe(notGlb)
+    }
+    // the cutoff only counts with MASK, as GLTFLoader reads it
+    expect(own(sticker({ alphaCutoff: '0.5' }))).toBeNull()
   })
 
   it('refuses a material more metallic than the metal preset without a metallic texture: the stage has no reflections', () => {

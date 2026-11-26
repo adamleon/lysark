@@ -512,25 +512,29 @@ function joined(parts) {
 const u32 = (value) => new Uint8Array([value >>> 24, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff])
 
 /**
- * A PNG file: 8-bit RGB, `pixel(x, y)` giving each pixel's [r, g, b]. Stored
- * without compression (deflate's stored blocks), which every PNG reader takes
- * and needs no zlib, so Node and browsers make the same bytes.
+ * A PNG file: 8-bit RGB, `pixel(x, y)` giving each pixel's [r, g, b], or
+ * with `alpha` RGBA, [r, g, b, a] (a 255, opaque, when it gives three).
+ * Stored without compression (deflate's stored blocks), which every PNG
+ * reader takes and needs no zlib, so Node and browsers make the same bytes.
  * @param {number} width
  * @param {number} height
- * @param {(x: number, y: number) => [number, number, number]} [pixel] mid-grey without
+ * @param {(x: number, y: number) => number[]} [pixel] mid-grey without
+ * @param {{ alpha?: boolean }} [options]
  * @returns {ArrayBuffer}
  */
-export function png(width, height, pixel = () => [128, 128, 128]) {
+export function png(width, height, pixel = () => [128, 128, 128], { alpha = false } = {}) {
+  const channels = alpha ? 4 : 3
   // each row: filter type 0, then its pixels
-  const raw = new Uint8Array(height * (1 + 3 * width))
+  const raw = new Uint8Array(height * (1 + channels * width))
   let at = 0
   for (let y = 0; y < height; y++) {
     raw[at++] = 0
     for (let x = 0; x < width; x++) {
-      const [r, g, b] = pixel(x, y)
+      const [r, g, b, a = 255] = pixel(x, y)
       raw[at++] = r
       raw[at++] = g
       raw[at++] = b
+      if (alpha) raw[at++] = a
     }
   }
   // zlib: a header, stored blocks of at most 65535 bytes, then the Adler-32 of the data
@@ -553,8 +557,8 @@ export function png(width, height, pixel = () => [128, 128, 128]) {
     const typed = joined([ascii(type), data])
     return joined([u32(data.length), typed, u32(crc32(typed))])
   }
-  // IHDR: the size, 8 bits per channel, colour type 2 (RGB), no interlace
-  const header = joined([u32(width), u32(height), 8, 2, 0, 0, 0])
+  // IHDR: the size, 8 bits per channel, colour type 2 (RGB) or 6 (RGBA), no interlace
+  const header = joined([u32(width), u32(height), 8, alpha ? 6 : 2, 0, 0, 0])
   return exact(joined([0x89, ascii('PNG\r\n\x1a\n'), chunk('IHDR', header), chunk('IDAT', joined(zlib)), chunk('IEND', new Uint8Array(0))]))
 }
 

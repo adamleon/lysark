@@ -39,7 +39,8 @@
 // changing the slide, a new text
 // accepted and shown after a reload, the scene file's objects moved with M, the
 // models among them standing on their at with M's rings at their middle, those
-// with material: file in their files' own materials, a texture an <img> loaded
+// with material: file in their files' own materials, a cut-out one (alpha mode
+// MASK) with its cutoff as alphaTest, a texture an <img> loaded
 // from a data: address with no blob: request, a typed new place for one put in
 // place, a new unit loading the panel afresh, a textured model without a
 // material: line (while another object showing its file in grey still shows
@@ -66,6 +67,14 @@ const ISOLATED = { 'cross-origin-opener-policy': 'same-origin', 'cross-origin-em
 
 // the model files a scene file can name (MODEL_FORMATS in src/compiler/model-types.ts)
 const MODEL_FILE = /\.(stl|glb)$/i
+
+/** the materials a GLB file lists in its JSON chunk, or none for any other file */
+function glbMaterials(file) {
+  const bytes = readFileSync(file)
+  if (bytes.length < 20 || bytes.readUInt32LE(0) !== 0x46546c67) return []
+  const materials = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8')).materials
+  return Array.isArray(materials) ? materials : []
+}
 
 // VS Code's pre/fake.html: an empty page the panel's HTML is written into
 const FAKE_HTML = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Fake</title></head><body></body></html>'
@@ -1788,6 +1797,8 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
                   const image = part.material.map?.image
                   out[name].push({
                     name: part.material.name,
+                    alphaTest: part.material.alphaTest,
+                    visible: part.material.visible,
                     grey: !part.material.map && `#${part.material.color.getHexString()}` === grey,
                     map: part.material.map
                       ? {
@@ -1809,6 +1820,25 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
           const wrong = ownLook.find((n) => looks[n].some((m) => m.map && !(m.map.img && m.map.data && m.map.size[0] > 0)))
           if (wrong) return fail(`'${wrong}''s texture isn't an <img> loaded from a data: address: ${JSON.stringify(looks[wrong])}`)
           if (blobRequests.length > 0) return fail(`the panel asked for blob: addresses: ${blobRequests.join(', ')}`)
+          // a cut-out material (alpha mode MASK, Blender's alpha clip) loads with the file's cutoff
+          // (0.5 without) as alphaTest, its colour's alpha moved into it (src/scene/models.ts), and
+          // drawn opaque; any other material with none. Matched by name to the GLB's own list
+          const cutOut = []
+          for (const n of ownLook) {
+            const listed = new Map(glbMaterials(resolve(dirname(resolve(slidesFile)), armObjects[n].model)).map((m) => [m?.name, m]))
+            for (const m of looks[n]) {
+              const def = listed.get(m.name)
+              if (!m.name || !def) continue
+              const cutoff = def.alphaMode === 'MASK' ? (def.alphaCutoff ?? 0.5) : 0
+              const alpha = def.pbrMetallicRoughness?.baseColorFactor?.[3] ?? 1
+              const expected = cutoff > 0 && alpha < 1 ? (alpha < cutoff ? null : cutoff / alpha) : cutoff
+              const off = expected === null ? m.visible !== false : !m.visible || Math.abs(m.alphaTest - expected) > 1e-6
+              if (off) {
+                return fail(`'${n}''s material '${m.name}' (alpha mode ${def.alphaMode ?? 'OPAQUE'}) loaded with alphaTest ${m.alphaTest}, visible ${m.visible}; expected ${expected === null ? 'not drawn' : `alphaTest ${expected}`}`)
+              }
+              if (cutoff > 0) cutOut.push(`'${n}''s '${m.name}' with alphaTest ${m.alphaTest}`)
+            }
+          }
           textured = ownLook.filter((n) => looks[n].some((m) => m.map))
           lines.push(
             `material: file: ${ownLook.map((n) => `'${n}' in its file's ${[...new Set(looks[n].map((m) => (m.name ? `'${m.name}'` : 'unnamed')))].join(', ')}`).join('; ')}; ` +
@@ -1817,6 +1847,11 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
                   `${textured.map((n) => looks[n].filter((m) => m.map).map((m) => m.map.size.join(' x ')).join(', ')).join('; ')} px, ` +
                   `each an <img> from a data: address; no blob: or network request`
                 : 'no textured model, so textures were not checked'),
+          )
+          lines.push(
+            cutOut.length > 0
+              ? `cut out (alpha mode MASK): ${cutOut.join(', ')}, the file's cutoff; the other materials with none`
+              : '(no material: file model has a cut-out material, so alpha clip was not checked)',
           )
         } else {
           lines.push('(no model has material: file, so a file\'s own look was not checked)')

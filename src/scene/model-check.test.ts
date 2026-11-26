@@ -125,10 +125,24 @@ describe('checkModel', () => {
       expect(await checkModel(glass, 'glb', ['m'], 'file')).toBe(
         "the model's material 'glass' is see-through, which the stage draws wrong or not at all: " +
           "make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), " +
-          'or write a colour such as material: grey',
+          "or for a transparent surround, such as a sticker's, use alpha clip (in Blender, a Math node set to Round between " +
+          "the texture's Alpha and the Principled BSDF's Alpha); or write a colour such as material: grey",
       )
+      // transmission isn't a surround to cut out
+      const clear = glb({ meshes: [{ material: 0 }], materials: [{ name: 'clear', pbrMetallicRoughness: { metallicFactor: 0 }, extensions: { KHR_materials_transmission: { transmissionFactor: 1 } } }] })
+      vi.mocked(modelBytesProblem).mockReturnValueOnce(null)
+      expect(await checkModel(clear, 'glb', ['m'], 'file')).toMatch(/^the model's material 'clear' is see-through, which the stage draws wrong or not at all: make it opaque .*Alpha at 1, with nothing linked to it\), or write a colour/)
       // with a preset the file's materials are replaced
       expect(await checkModel(glass, 'glb', ['m'], 'preset')).toBeNull()
+    })
+
+    it('passes a cut-out material (alpha mode MASK), which three draws in the opaque pass', async () => {
+      const sticker = glb({
+        meshes: [{ name: 'sticker', uvs: true, material: 0 }],
+        materials: [{ name: 'sticker', alphaMode: 'MASK', alphaCutoff: 0.4, pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+        textures: [{ bytes: png(4, 4, () => [200, 30, 30, 0], { alpha: true }) }],
+      })
+      expect(await checkModel(sticker, 'glb', ['m'], 'file')).toBeNull()
     })
   })
 

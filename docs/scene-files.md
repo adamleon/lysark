@@ -362,8 +362,8 @@ colours, and its textures (images painted on it, such as a label or a printed ma
   WebP copies: leave it off). A texture's offset, scale and turn (`KHR_texture_transform`, which
   Blender writes for a Mapping node) are read.
 - **What the stage can't draw is refused**, each with a message naming the material or mesh: a
-  see-through material (alpha blend or clip, or transmission), since the stage draws those wrong
-  or not at all; a material more metallic than 0.6 (the `metal` preset's) without a metallic
+  see-through material (alpha blend, or transmission), since the stage draws those wrong or not
+  at all; a material more metallic than 0.6 (the `metal` preset's) without a metallic
   texture, since the stage has no reflections for a metal to show, and it would look near black
   (glTF reads a material that doesn't say as fully metallic, and Blender leaves it out at
   Metallic 1); a mesh without a material, which three.js draws fully metallic; and a textured mesh
@@ -371,10 +371,17 @@ colours, and its textures (images painted on it, such as a label or a printed ma
   where such a texture says fully metallic, the part shows dark. An unlit material
   (`KHR_materials_unlit`) shows its colour whatever the light.
 - **Opaque in Blender.** Blender 4.2 and later have no blend mode of their own: the glTF export
-  writes a material as blended whenever anything is linked to the Principled BSDF's Alpha, or it
-  is under 1. Unlink it and set it to 1. A texture's transparent pixels then show the colour they
-  hold (often white or black), so a sticker or decal with a transparent surround shows as a
-  square: paint it onto the part's own texture instead.
+  writes a material as blended whenever the Principled BSDF's Alpha is under 1 or has anything
+  linked to it, but for alpha clip (below). Unlink it and set it to 1. A texture's transparent
+  pixels then show the colour they hold (often white or black).
+- **Cut out: alpha clip.** A sticker, a sign or a decal with a transparent surround is cut out
+  instead (from engine v2.14.0, the author's answer of 2026-11-26): each point of the texture
+  either shows or is left out, never half see-through, so the stage draws it with the solid parts
+  (glTF's alpha mode MASK). In Blender, put a Math node set to Round between the image texture's
+  Alpha and the Principled BSDF's Alpha: the export writes it as alpha clip, leaving out what is
+  under half opaque (for another cutoff, Math nodes for 1 - (alpha < cutoff)). Its shadow is cut
+  out the same, but not by alpha painted on the mesh's vertices: a part cut out by that casts its
+  whole shadow. The demo's sign (`models/sign.glb`) is one square, cut out to a triangle.
 - **The theme and the print PDF.** The file's colours don't follow the theme. In the PDF the page
   is white, so a white part can vanish into it, where the `white` preset is a little greyer:
   give such a part a colour, or a darker white in the file. Textures print as they show.
@@ -637,8 +644,10 @@ words (for a file VS Code won't read, its own reason). For example:
   `(metallicFactor left out, which glTF reads as 1; Blender leaves it out at Metallic 1)`)
 - `scenes/arm.yaml, line 49: object 'tray': the model's material 'glass' is see-through (blended,
   alpha mode BLEND), which the stage draws wrong or not at all: make it opaque in the program that
-  made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), or write a
-  colour such as material: grey`
+  made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), or for a
+  transparent surround, such as a sticker's, use alpha clip (in Blender, a Math node set to Round
+  between the texture's Alpha and the Principled BSDF's Alpha); or write a colour such as
+  material: grey` (for a transmission material, the same without alpha clip)
 - `scenes/arm.yaml, line 41: object 'bracket': the model is 7.3 MB; a model may be at most 5 MB.
   Export it with fewer triangles, or as binary STL rather than text STL (about five times
   smaller)`; for a GLB, `a model may be at most 5 MB, its textures included. Export it with fewer
@@ -759,7 +768,12 @@ file before the loader reads it, so no image is ever loaded. The build's check r
 has no `<img>`: it reads each image's type and size from its header (`src/compiler/model-types.ts`,
 `pngSize` and `jpegSize`), adds up the pixels of the images the materials use (each once), checks
 the materials in the file, then parses the file without its
-images and checks what the loader built for a see-through material. `jpegSize` walks a JPEG's
+images and checks what the loader built for a see-through material. A cut-out material (MASK)
+is drawn in the opaque pass, with the file's cutoff as three's `alphaTest`, and three's shadow map
+draws its mesh with a depth material that has the texture and the `alphaTest`, so the shadow is
+cut out too; that depth material leaves out the colour's own alpha, so `parseModel` moves it into
+the `alphaTest` (`shadowedCutOut`: texture × alpha under the cutoff is texture under cutoff /
+alpha). `jpegSize` walks a JPEG's
 markers as libjpeg, the browsers' decoder, does, and refuses a file where the two could read
 different frame headers (`FF 00` read as a marker) or that libjpeg refuses, so a larger image
 can't pass under a smaller frame header. In the panel, a file is checked once for each way the

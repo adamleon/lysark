@@ -156,9 +156,9 @@ anchored:
 The table, the workpiece and the two coordinate frames are written by hand in
 the lecture's `scenes/arm.yaml`, under `objects:`: boxes, cylinders, spheres,
 frames and invisible points, each placed with `at` and turned with `rotate`.
-The bracket, the tray and the marker are models from files: the bracket in a
-colour of the deck's, the tray and the marker in their files' own colours and
-texture (`material: file`).
+The bracket, the tray, the marker and the sign are models from files: the
+bracket in a colour of the deck's, the others in their files' own look
+(`material: file`), the sign's square cut out to a triangle.
 
 <!-- pause -->
 Each object is an anchor, as the arm's `end_effector` is: the camera looks at `grip`,
