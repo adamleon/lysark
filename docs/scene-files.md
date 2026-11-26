@@ -81,6 +81,9 @@ poses:                       # q in radians
 - **`objects`** (from v2.11.0): boxes, cylinders, spheres, coordinate frames and invisible points
   in the scene; see [Objects](#objects). From v2.13.0 also models from STL and GLB files; see
   [Models](#models).
+- **`limits: off`** (from v2.14.0): lifts the size limits on this file's models, for a
+  presentation that isn't a lecture; see
+  [limits: off](#limits-off-for-presentations-that-arent-lectures).
 - **View and pose names** can be any word, Norwegian letters included. Comments (`#`) are fine
   anywhere, and the editor keeps them.
 - **The file's name** is lower-case letters, digits and dashes, starting with a letter, and ends in
@@ -308,7 +311,9 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
   Material, Images: JPEG Format). The model's largest side, read in its `unit`, must be between 1 mm
   and 10 m: anything else is a file read in the wrong unit, and the build says what to change.
   Each file is built into the student file once, about a third larger than on disk, however
-  many objects show it. A lecture without models carries none of the code that reads them.
+  many objects show it. A lecture without models carries none of the code that reads them. (A
+  presentation that isn't a lecture can lift the size limits: see
+  [limits: off](#limits-off-for-presentations-that-arent-lectures).)
 - **Refused**, each with a message that says what to do (see
   [When something is wrong](#when-something-is-wrong)): a GLB with textures and no `material:`
   line, and with `material: file` what its own look can't be shown with (below); a `.gltf` or a
@@ -329,8 +334,8 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
   too, but a file overwritten in place (a new export from the CAD program, a `git pull`)
   doesn't: press ▷ (Open Lysark Preview) in the editor's title bar, as for an image.
 
-  A model the panel can't show (a file that isn't there, too large, or refused) is drawn as an
-  empty node, still an anchor and a parent, and a banner lists each under **Models not shown:**
+  A model the panel can't show (a file that isn't there, too large, or refused; VS Code's editor
+  reads at most 32 MB of a file, whatever the scene file says) is drawn as an empty node, still an anchor and a parent, and a banner lists each under **Models not shown:**
   (after **Images not shown:**, if any), with the scene file, the line, the object and the build's
   words. A file refused only for how one object reads it, its `unit` or its `material:` line (a
   textured GLB without `material:`, say), still shows on the objects that read it in another unit
@@ -393,6 +398,46 @@ colours, and its textures (images painted on it, such as a label or a printed ma
 - **Nothing is fetched.** The images are read from the file itself, in the student file and in
   the panel alike, so they show offline and in github.dev with the released extension.
 - **Each object its own copy.** Two objects showing one textured file hold its textures twice.
+
+### `limits: off`: for presentations that aren't lectures
+
+From engine v2.14.0 (decision 11 in scene-files-proposal.md, the author's of 2026-11-26). A scene
+file for a talk, a demo or a test, not a lecture, can lift the size limits on its models:
+
+```yaml
+limits: off                  # not a lecture: no size limits on this file's models
+base: arm
+objects:
+  cell:
+    model: models/cell.glb
+    material: file
+```
+
+- **What it turns off:** the three size limits on the models of this file's objects, and only
+  those: 5 MB per file, 2048 pixels on a texture's side, and 16,777,216 pixels of textures per
+  file.
+- **What stays on:** every check that a model can be shown right and offline: PNG and JPEG
+  textures inside the file, their headers read (a broken or crafted image is still refused);
+  nothing fetched; no see-through material, nothing more metallic than the `metal` preset
+  without a metallic texture; no compression, bones or GPU instancing; `unit` and the model's
+  size between 1 mm and 10 m (that catches a unit mistake, not a large file); and `lysark
+  check`'s check that every scene's GPU memory is freed.
+- **Lectures keep the limits.** They keep the student file small enough to download and open on
+  a student's laptop, and the panel quick in github.dev. For a lecture's model, export it
+  smaller instead (Size, under [Models](#models)).
+- **Only `off`.** Anything else (`on`, `true`, a number, a list) is an error at its line; to keep
+  the limits, leave the line out. The line is for its own file: another scene file that shows
+  the same model keeps the limits, and the build refuses the model at that file's line.
+- **VS Code reads at most 32 MB of a file** (the Lysark extension's own limit, which the engine
+  can't lift), so the preview can't show a larger model, however the scene file is written.
+  The panel shows the rest and names the model under **Models not shown:**, for example
+  `scenes/arm.yaml, line 6: object 'cell': the model 'models/cell.glb' is larger than 32 MB: VS
+  Code's editor reads at most 32 MB per file, so the preview can't show it. The lecture still
+  builds, because its scene file says limits: off`. A model under 32 MB shows in the preview.
+- **The student file** holds each model about a third larger than on disk: a 40 MB model makes a
+  55 MB student file, which builds, passes `lysark check` and shows from `file://`.
+- **In the editor**, adding or removing the line loads the panel afresh, which checks the models
+  again.
 
 ## Saving views in the editor
 
@@ -584,7 +629,10 @@ The build (and the panel) names the file, the line and what to do. For example:
   this file nor an anchor of 'arm'. Did you mean 'table'? The parent is another object in this
   file, or an anchor of 'arm' (base, end_effector)`
 - `scenes/agilus.yaml, line 2: unknown key 'object'. Did you mean 'objects'? A scene file has
-  'base', 'views', 'poses' and 'objects'`
+  'base', 'views', 'poses', 'objects' and 'limits'`
+- `scenes/arm.yaml, line 1: limits is 'on', but its one value is off: limits: off lifts the size
+  limits on the models in this file (5 MB per file, 2048 pixels on a texture's side and
+  16,777,216 pixels of textures per file). To keep the limits, leave the line out`
 
 For models, what the text alone shows is a compile error, as above (the panel keeps showing the
 last good version), and the build fails on anything about the file itself. The panel then draws
@@ -661,6 +709,11 @@ words (for a file VS Code won't read, its own reason). For example:
   smaller)`; for a GLB, `a model may be at most 5 MB, its textures included. Export it with fewer
   triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data >
   Material, Images: JPEG Format) or smaller`
+- In the panel only, for a file over the 32 MB VS Code reads: `scenes/arm.yaml, line 41: object
+  'bracket': the model 'models/bracket.stl' is larger than 32 MB: VS Code's editor reads at most
+  32 MB per file, so the preview can't show it. The lecture doesn't build with it either: a model
+  may be at most 5 MB. Export it …` (with `limits: off`, `… The lecture still builds, because its
+  scene file says limits: off`)
 - `scenes/arm.yaml, line 49: object 'tray': the model is a Git LFS pointer, not the model: the
   course build doesn't fetch LFS files. Keep the file in git itself (git lfs untrack, then commit
   it again)`
@@ -795,6 +848,26 @@ so: `loadModels` names them (`leftOut`, by scene file and object name), and
 need a request, a worker or wasm (a `.gltf`, Draco and meshopt compression, KTX2 textures) or GPU
 memory `dispose.ts` doesn't free (bones, GPU instancing) stays refused, and the rest a GLB can hold
 (lights, cameras, lines, points) is taken out before the scene sees it.
+
+`limits: off` (decision 11) is one flag on each model. The compiler reads the line
+(`readLimits` in `src/compiler/scene-files.ts`) from the word as written, so a file that starts
+`%YAML 1.1`, where a bare off reads as false, is still off, and it puts `limits: 'off'` on every
+model of the file's objects (`ModelRef.limits`; `'on'` without the line). The three limits are
+checked in one place, `src/compiler/model-types.ts`: `modelSizeProblem` for the bytes and
+`ownLookProblem` for a texture's side and the total, both through `modelBytesProblem`, which
+`checkModel` calls. Each takes the flag last, and a caller that doesn't pass it keeps the limits.
+So the build, `lysark check` (which checks the built file, its GPU memory included) and the panel
+can't disagree; the deck's own loader (`modelLoader`) checks no sizes. The build and the panel
+check a file once for each way its objects read it, unit, look and limits (`modelReadWay`), and
+name a problem at the first object that reads it that way: a file shared with a scene file that
+keeps the limits is refused at that file's line, and the panel still shows it to the objects of
+the file with `limits: off`. The panel puts new text whose objects differ at most in their places
+into the running deck in place, without checking the models again, and a change to the line
+alone changes no object; so `updateInPlace` (`src/editor/runtime.ts`) loads the panel afresh when
+`limitsChanged` (`src/editor/panel-models.ts`) sees the line change in a scene file with models.
+VS Code's 32 MB is the extension's own (`MAX_READ_BYTES` in `extension/src/extension.ts`), which
+answers `larger than 32 MB` without the size; the panel words it (`unreadProblem`). No extension
+change.
 
 ## Not yet
 

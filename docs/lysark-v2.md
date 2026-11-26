@@ -538,7 +538,13 @@ HTTPS server.
   checks that every scene's GPU memory is freed (step 9a). The demo shows a textured marker box,
   a warning sign cut out to a triangle, and the tray in its own colours. Engine v2.14.0, no
   extension change.
-  [scene-files.md](scene-files.md#a-glbs-own-look-material-file).
+  [scene-files.md](scene-files.md#a-glbs-own-look-material-file). With it, decision 11 (the
+  author, 2026-11-26): `limits: off` at the top of a scene file lifts the three size limits on
+  its models (5 MB per file, 2048 pixels on a texture's side, the texture total), for
+  presentations that aren't lectures, in the build, the panel and `lysark check` alike; every
+  correctness check stays. The panel names a model over VS Code's own 32 MB per file read, and
+  says whether the lecture still builds.
+  [scene-files.md](scene-files.md#limits-off-for-presentations-that-arent-lectures).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
   line and what to change (what tripped the author up trying step 2).
@@ -695,6 +701,18 @@ Confirmed by the author on 2026-11-26, with answers to step 9's questions (decis
   too; blended ones (BLEND) stay refused, with a message that names alpha clip.
 - A mesh without a material is grey, the `grey` preset, as Blender shows it.
 - `--use-angle=swiftshader` for headless Chromium on Windows (scripts/browser.mjs) is approved.
+
+Decided by the author on 2026-11-26 (decision 11 in
+[scene-files-proposal.md](scene-files-proposal.md), "a config which disables all size limits? its
+not useful for lectures, but could be used for other types of presentations or just testing";
+then "go for a, limits: off"):
+
+- A scene file may say `limits: off` at its top. It turns off the three resource limits for the
+  models of that file's objects (5,000,000 bytes per file, 2048 pixels on a texture's side,
+  16,777,216 texture pixels per file) and nothing else: every correctness check stays, the
+  model's size between 1 mm and 10 m included. `off` is the only value; anything else is an error
+  at its line. The build, `lysark check`, the panel and course CI share the one rule. Lectures
+  keep the limits.
 
 ## 9. Open questions
 

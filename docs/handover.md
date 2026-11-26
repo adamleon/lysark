@@ -346,7 +346,8 @@ GLTFLoader's `parser.associations`) with `userData[WITHOUT_FILE_MATERIAL]` (obje
 `fitModel` gives it the grey preset, made only then; check-editor requires grey exactly there.
 The author also approved scripts/browser.mjs's `--use-angle=swiftshader` on Windows (Gotchas,
 below), and asked for a switch that lifts the size limits for other kinds of presentations or
-testing: a proposal in scene-files-proposal.md, "Proposals from step 9", not built. Checked:
+testing: first a proposal, then decided the same day and built (decision 11, `limits: off`,
+below). Checked:
 vitest (539, from 528), tsc, the extension's build and tsc, check-editor in Chromium and Firefox
 (the sign's material with alphaTest 0.5, its texture an `<img>` from a `data:` address),
 check-extension with this editor and v2.12.0's (extension 0.4.0's panel shows the sign's
@@ -384,10 +385,47 @@ bare box grey and the other red; with `parseModel`'s marker taken out, it fails.
 paragraph above now states the current checks (it listed MASK and a mesh without a material
 among the refusals). Checked: vitest (543, from 539), tsc, the extension's build and tsc,
 check-editor in Chromium and Firefox, check-extension with this editor and v2.12.0's,
-build:demo and check:demo, Baneplanlegging, and the PDF. Next: once the author has seen how the
-total is counted, push, let engine CI pass, tag v2.14.0, and move the course with Update engine
-(the course has no `model:` lines, so the new stop for a textured GLB without `material:`
-breaks nothing); the author can then try a textured GLB from Blender in github.dev.
+build:demo and check:demo, Baneplanlegging, and the PDF.
+
+**`limits: off` (decision 11), built 2026-11-26** in four more local commits, not pushed (engine
+still 2.14.0, unreleased; no extension change). The author asked for a switch that lifts the size
+limits ("its not useful for lectures, but could be used for other types of presentations or
+just testing") and chose `limits: off`. A scene file may say it at its top. The compiler
+(`readLimits` in scene-files.ts) takes exactly the word off as written, also in a `%YAML 1.1`
+file, where a bare off reads as false, and refuses anything else at its line, naming the one
+value; the unknown-key message lists 'limits', and 'limit' gets the did-you-mean. Each `ModelRef`
+carries `limits: 'on' | 'off'` (a string rather than a boolean: it reads as the scene file writes
+it, and as the checks' last argument `'off'` says what it does where `true` wouldn't).
+`modelSizeProblem`, `modelBytesProblem` (`ownLookProblem`) and `checkModel` take it last, `'on'`
+when not given, and with `'off'` skip only the 5 MB, the 2048 px side and the texture total;
+every correctness check stays. The build (`readModels`) and the panel (`contentProblems`) check a
+file once per `modelReadWay` (unit, look, limits), so a file shared with a scene file that keeps
+the limits is refused at that file's line and still shown for the other (`leftOut`). Found while
+building it: text that changes only the `limits:` line changes no object, so the panel would have
+put it into the running deck in place without checking the models again; `updateInPlace` now
+loads afresh when `limitsChanged` (panel-models.ts) says so, and check-editor fails without it.
+For a file over the 32 MB VS Code's editor reads (extension 0.4.0 answers only "larger than 32
+MB"), the banner says `the model '…' is larger than 32 MB: VS Code's editor reads at most 32 MB
+per file, so the preview can't show it.`, then `The lecture still builds, because its scene file
+says limits: off`, or without the line `The lecture doesn't build with it either:` and the
+build's size advice. The messages for the three limits don't mention the line (lectures keep the
+limits; scene-files.md documents it). The editor's saves keep the line (a test per save path).
+check-editor adds a 5,000,134-byte STL it makes (`overLimitStl` in model-test-files.js) and a
+model its stand-in host answers as too large, without and with the line (about 3 s more).
+Checked: vitest (570, from 543), tsc, the extension's build and tsc (extension/src unchanged),
+check-editor in Chromium and Firefox, check-extension with this editor and v2.12.0's,
+build:demo and check:demo (0 requests, GPU memory back to 0 geometries and 1 texture),
+Baneplanlegging (build and check, 0 and 0), and the PDF (12 pages, as before). Hands-on, on
+scratch lectures: a 40,145,808-byte GLB (557,568 triangles)
+under `limits: off` builds (a 54.7 MB student file), passes `lysark check` (0 requests, GPU memory
+back to 0 geometries and 1 texture) and shows from `file://` in Chromium and Firefox; without the
+line the build stops at its line ("the model is 40.1 MB"); in VS Code for the web with extension
+0.4.0 (check-extension's pinned build, a one-off run), the panel shows a 6 MB STL of the same
+lecture and names the 40 MB GLB with the new words. Next: once the author has seen how the total
+is counted (decision 10), push, let engine CI pass, tag v2.14.0, and move the course with Update
+engine (the course has no `model:` lines, so the new stop for a textured GLB without `material:`
+breaks nothing); the author can then try a textured GLB from Blender in github.dev, and
+`limits: off` on a presentation that isn't a lecture.
 
 Proposals (not built):
 - From step 9's hands-on test: entering the pendulum scene logs about 45 `THREE.WebGLShadowMap:
@@ -579,7 +617,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**543**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**570**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

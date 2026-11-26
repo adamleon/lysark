@@ -17,7 +17,10 @@ handles for objects (v2.12.0). Step 8, models from STL and untextured GLB files,
 answers to step 9's questions. Step 9 is built (2026-11-25, and the answers 2026-11-26, engine
 v2.14.0, no extension change), not yet released: `material: file` shows a GLB in its own colours
 and textures ([scene-files.md](scene-files.md#a-glbs-own-look-material-file)). Its proposals are
-[below](#proposals-from-step-9).
+[below](#proposals-from-step-9). **Decision 11, `limits: off`, decided by the author 2026-11-26**
+and built the same day with step 9 (engine v2.14.0, no extension change), lifts the size limits
+on a scene file's models for presentations that aren't lectures
+([scene-files.md](scene-files.md#limits-off-for-presentations-that-arent-lectures)).
 It came from four independent designs (smallest change, editor-first, lecturer-first,
 engine-first), scored by three reviewers and combined; the claims about today's code were
 checked against the code.
@@ -160,14 +163,15 @@ Each step lands on its own, with a note and coverage in the demo lecture, as ste
    `lysark check` waits for a slow scene before looking for three's lighting table. After the
    author's answers (2026-11-26, decision 10): a file's textures may have at most 16,777,216
    pixels in all, cut-out materials (alpha clip) are shown, their shadows cut out too, and a mesh
-   without a material is grey.
+   without a material is grey. With them, decision 11: `limits: off` in a scene file lifts the
+   three size limits on its models (built 2026-11-26).
 
 Left for when a lecture needs them: a start state per scene run, a second robot or a moved robot
 in one scene, showing or moving objects per slide, and scene files shared between lectures.
 
 ## Decisions for the author
 
-Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures use them.
+Each has a recommendation; the names in 3, 9, 10 and 11 are permanent once lectures use them.
 
 1. **How a slide uses a name.** (a) Where values go: `camera: oversikt`, `joints: q0`.
    (b) New keys `view:` and `pose:`, with `camera:`/`joints:` on top. *Recommended: (a).* Today's
@@ -263,6 +267,34 @@ Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures 
    - *A mesh without a material* (the author's answer, 2026-11-26) is grey, the `grey` preset,
      which follows the theme, as Blender shows such a mesh; the file's own materials show on the
      rest. It was refused, as three.js gives it a fully metallic default, near black on the stage.
+11. **`limits: off`** (**decided by the author 2026-11-26**, from the step-9 proposal "A switch
+    for the size limits"; built the same day, engine v2.14.0). The author asked: "a config which
+    disables all size limits? its not useful for lectures, but could be used for other types of
+    presentations or just testing", and chose the recommended key: "go for a, limits: off".
+   - *The words.* A scene file may have a top-level line `limits: off`. It turns off the three
+     resource limits for the models of that file's objects: 5,000,000 bytes per file, 2048 pixels
+     on a texture's side, and 16,777,216 texture pixels per file (counted as the copies the
+     graphics card holds). `off` is the only value: anything else (`on`, `true`, `false`, a
+     number, a list) is an error at its line that names it. The compiler takes the word as
+     written, so a file that starts `%YAML 1.1`, where a bare off reads as false, is still off.
+     The unknown-key message lists `limits`, and `limit` gets "Did you mean 'limits'?".
+   - *Only the size limits.* Every correctness check stays on: nothing fetched and no address
+     outside the file, PNG and JPEG textures only, their headers checked (a crafted header is
+     still refused as broken), no see-through material (BLEND, transmission), the cut-out (MASK)
+     rules, the metallic rule, compression, bones and GPU instancing refused, the model's size
+     between 1 mm and 10 m (a unit mistake, not a resource limit), the GPU-memory check in
+     `lysark check`, and the `file://` rules.
+   - *One rule everywhere.* The compiler puts the flag on each model it reports
+     (`ModelRef.limits`, `'on'` or `'off'`), and the shared checks (`checkModel`,
+     `modelBytesProblem`) skip the three limits for it, so the build, `lysark check`, the panel
+     and course CI agree; a command-line flag would have let `lysark build` pass a file the panel
+     refuses. A model file shown by objects in a scene file with the line and in one without is
+     checked once for each, and refused at the line of the one without.
+   - *VS Code's 32 MB stays.* The extension reads at most 32 MB per file and isn't changed: the
+     panel names such a model under "Models not shown:", saying that VS Code's editor reads at
+     most 32 MB per file, and, with `limits: off`, that the lecture still builds.
+   - *Lectures keep the limits.* The messages for the three limits don't mention the line; it is
+     documented in scene-files.md, for presentations that aren't lectures.
 
 ## Also checked
 
@@ -353,17 +385,8 @@ For the future:
 Not built; each would be its own small change, landed and understood before a lecture uses it.
 The author answered step 9's questions on 2026-11-26 (decision 10).
 
-- **A switch for the size limits** (asked by the author, 2026-11-26: of no use for lectures,
-  but for other kinds of presentations, or for testing). The limits on a model are 5,000,000
-  bytes per file, 2048 pixels on a texture's side and 16,777,216 texture pixels per file; the
-  model's size between 1 mm and 10 m is not one (it catches a file read in the wrong `unit`), and
-  VS Code's own 32 MB per file read is the extension's, which the panel can't lift.
-  *Recommended:* a key in the text the compiler reads, so the build, the panel and course CI
-  agree: `limits: off` at the top of a scene file, for the models in it. The compiler would
-  report it with each model, as it reports its look, and `checkModel` would skip the three
-  limits for those. A command-line flag instead would let `lysark build` pass a file the panel
-  refuses. Not built: a new key, the author's to name, and it lets a student file hold more
-  than a student's laptop may manage.
+- **A switch for the size limits** (asked by the author, 2026-11-26). *Decided and built the
+  same day as recommended: decision 11, `limits: off`, above.*
 - **The build names slides.md for a model problem** (from before step 9). A model problem stops
   the build with Vite's trailer `file: …/slides.md`, though the problem is in a scene file, and a
   compile error starts with "Could not load virtual:lysark-deck (imported by …/src/main.ts)". The
