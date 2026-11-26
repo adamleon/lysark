@@ -700,6 +700,30 @@ describe('limits: off (decision 11, the author, 2026-11-26)', () => {
     expect(problem('base: arm\nsizes: off\n')).toBe(`scenes/arm.yaml, line 2: unknown key 'sizes'. ${keys}`)
   })
 
+  it("is an error in a file without models while another with the same base has the objects, and their models keep the limits", () => {
+    const read = (files: Record<string, string>) => {
+      try {
+        readSceneFiles(files)
+        return 'no error'
+      } catch (err) {
+        return (err as Error).message
+      }
+    }
+    const views = 'base: arm\nviews:\n  close:\n    lookAt: [0, 0, 0]\n    offset: [1, 1, 1]\nlimits: off\n'
+    const arm = (top: string, objects = '  big:\n    model: models/big.stl\n') => `base: arm\n${top}objects:\n${objects}`
+    // slides with scene: talk run arm.yaml's objects, which keep the limits: the line lifts nothing
+    expect(read({ 'scenes/talk.yaml': views, 'scenes/arm.yaml': arm('') })).toBe(
+      "scenes/talk.yaml, line 6: limits: off lifts the size limits on the models in this file, and it has none. " +
+        "The objects of 'arm' are in scenes/arm.yaml, with their models: put the line there",
+    )
+    // where it lifts nothing that isn't lifted, or there is nothing to lift: no error
+    expect(read({ 'scenes/talk.yaml': views, 'scenes/arm.yaml': arm('limits: off\n') })).toBe('no error')
+    expect(read({ 'scenes/talk.yaml': views, 'scenes/arm.yaml': arm('', '  table:\n    box: [0.4, 0.3, 0.4]\n') })).toBe('no error')
+    expect(read({ 'scenes/talk.yaml': views })).toBe('no error')
+    // another base's objects are another running scene
+    expect(read({ 'scenes/talk.yaml': views, 'scenes/agilus.yaml': 'base: agilus\nobjects:\n  big:\n    model: models/big.stl\n' })).toBe('no error')
+  })
+
   it('belongs to the scene file it is in: another file with the same model keeps the limits', () => {
     const scenes = readSceneFiles({
       'scenes/arm.yaml': 'base: arm\nlimits: off\nobjects:\n  big:\n    model: ../../assets/big.stl\n',

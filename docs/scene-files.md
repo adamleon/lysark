@@ -427,7 +427,9 @@ objects:
   smaller instead (Size, under [Models](#models)).
 - **Only `off`.** Anything else (`on`, `true`, a number, a list) is an error at its line; to keep
   the limits, leave the line out. The line is for its own file: another scene file that shows
-  the same model keeps the limits, and the build refuses the model at that file's line.
+  the same model keeps the limits, and the build refuses the model at that file's line. In a
+  file without models, such as one with only views, while another file with the same `base` has
+  the objects and their models keep the limits, the line is an error that names that file.
 - **VS Code reads at most 32 MB of a file** (the Lysark extension's own limit, which the engine
   can't lift), so the preview can't show a larger model, however the scene file is written.
   The panel shows the rest and names the model under **Models not shown:**, for example
@@ -634,6 +636,9 @@ The build (and the panel) names the file, the line and what to do. For example:
 - `scenes/arm.yaml, line 1: limits is 'on', but its one value is off: limits: off lifts the size
   limits on the models in this file (5 MB per file, 2048 pixels on a texture's side and
   16,777,216 pixels of textures per file). To keep the limits, leave the line out`
+- `scenes/talk.yaml, line 6: limits: off lifts the size limits on the models in this file, and
+  it has none. The objects of 'arm' are in scenes/arm.yaml, with their models: put the line
+  there`
 
 For models, what the text alone shows is a compile error, as above (the panel keeps showing the
 last good version), and the build fails on anything about the file itself. The panel then draws
@@ -854,7 +859,9 @@ memory `dispose.ts` doesn't free (bones, GPU instancing) stays refused, and the 
 `limits: off` (decision 11) is one flag on each model. The compiler reads the line
 (`readLimits` in `src/compiler/scene-files.ts`) from the word as written, so a file that starts
 `%YAML 1.1`, where a bare off reads as false, is still off, and it puts `limits: 'off'` on every
-model of the file's objects (`ModelRef.limits`; `'on'` without the line). The three limits are
+model of the file's objects (`ModelRef.limits`; `'on'` without the line). `readSceneFiles`
+refuses the line in a file without models while another file of its base has the objects, with
+models that keep the limits, as it would lift nothing there. The three limits are
 checked in one place, `src/compiler/model-types.ts`: `modelSizeProblem` for the bytes and
 `ownLookProblem` for a texture's side and the total, both through `modelBytesProblem`, which
 `checkModel` calls. Each takes the flag last, and a caller that doesn't pass it keeps the limits.

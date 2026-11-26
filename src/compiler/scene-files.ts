@@ -86,6 +86,8 @@ const isVec3 = (v: unknown): v is [number, number, number] => Array.isArray(v) &
 /** the scene files among `files` (other paths are left alone), checked; throws on the first problem */
 export function readSceneFiles(files: Record<string, string>): Map<string, SceneFile> {
   const out = new Map<string, SceneFile>()
+  /** where each file, by name, says limits: off */
+  const limitsLines = new Map<string, number>()
   for (const [path, text] of Object.entries(files).sort(([a], [b]) => (a < b ? -1 : 1))) {
     const m = SCENE_FILE.exec(path)
     if (!m) continue
@@ -99,10 +101,11 @@ export function readSceneFiles(files: Record<string, string>): Map<string, Scene
           `(with git mv: renaming only the letter case in Explorer is invisible to git).`,
       )
     }
-    const file = readSceneFile(path, m[1], text)
+    const { file, limitsLine } = readSceneFile(path, m[1], text)
     const twin = out.get(file.name)
     if (twin) throw new Error(`${twin.path} and ${path} are both scene '${file.name}'; keep one of them`)
     out.set(file.name, file)
+    limitsLines.set(file.name, limitsLine)
   }
   // scene files with the same base are one running scene, with one set of objects
   const withObjects = new Map<string, SceneFile>()
@@ -117,6 +120,17 @@ export function readSceneFiles(files: Record<string, string>): Map<string, Scene
     }
     withObjects.set(file.base, file)
   }
+  // limits: off is for the models of its own file's objects. In a file without
+  // models, while another file with the same base has the objects, with models
+  // that keep the limits, it lifts nothing: it was meant for that file
+  for (const file of out.values()) {
+    const owner = withObjects.get(file.base)
+    if (file.limits !== 'off' || file.models.length > 0 || !owner || owner.models.length === 0 || owner.limits === 'off') continue
+    throw new Error(
+      `${file.path}, line ${limitsLines.get(file.name)}: limits: off lifts the size limits on the models in this file, and it has none. ` +
+        `The objects of '${file.base}' are in ${owner.path}, with their models: put the line there`,
+    )
+  }
   return out
 }
 
@@ -127,7 +141,8 @@ export function lectureObjects(scenes: Map<string, SceneFile>): Record<string, S
   return out
 }
 
-function readSceneFile(path: string, name: string, text: string): SceneFile {
+/** a scene file, checked, and the line of its limits: key (0 without one) */
+function readSceneFile(path: string, name: string, text: string): { file: SceneFile; limitsLine: number } {
   const lines = new LineCounter()
   const doc = parseDocument(text.replace(/^﻿/, ''), { lineCounter: lines })
   const lineOf = (node: unknown): number => {
@@ -266,9 +281,10 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
       poses.set(poseName as string, { joints: set, line: lineOf(p.key) })
     }
   }
-  const limits = readLimits(pair(root, 'limits'), fail)
+  const limitsPair = pair(root, 'limits')
+  const limits = readLimits(limitsPair, fail)
   const { objects, models } = readObjects(pair(root, 'objects'), base as SceneName, fail, lineOf, path, limits)
-  return { path, name, base: base as string, views, poses, objects, models, limits }
+  return { file: { path, name, base: base as string, views, poses, objects, models, limits }, limitsLine: limitsPair ? lineOf(limitsPair.key) : 0 }
 }
 
 type Fail = (node: unknown, message: string) => never
