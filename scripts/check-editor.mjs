@@ -46,7 +46,10 @@
 // place, a new unit loading the panel afresh, a textured model without a
 // material: line (while another object showing its file in grey still shows
 // it) and a model file that isn't there each named in the banner
-// with its line, a broken text
+// with its line, a model over 5 MB (made by the check) refused at its line
+// and shown once the scene file says limits: off (a line that loads the
+// panel afresh), a model VS Code won't read (over 32 MB) named with the
+// words for each case, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
 // course-style build in Chromium and Firefox.
@@ -63,7 +66,7 @@ import { fileURLToPath } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 import { EDITOR_PREFIX, serveEditor, stopServer } from './editor-server.mjs'
 import { EDITOR_PROTOCOL, editorAssets, editorProtocol, panelPage } from '../src/editor/panel-page.js'
-import { box, glb } from '../src/scene/model-test-files.js'
+import { box, glb, overLimitStl } from '../src/scene/model-test-files.js'
 
 const ISOLATED = { 'cross-origin-opener-policy': 'same-origin', 'cross-origin-embedder-policy': 'require-corp' }
 
@@ -75,6 +78,11 @@ const MODEL_FILE = /\.(stl|glb)$/i
 // no material, which material: file shows grey (WITHOUT_FILE_MATERIAL in src/engine/object-types.ts)
 const BARE_MODEL = 'models/lysark-check-bare.glb'
 const BARE_MATERIAL = 'check red'
+// limits: off (decision 11): a model the check makes just over the 5 MB a model may be without it
+// (overLimitStl: 100,001 triangles, a plate 100 mm across), and one the stand-in host answers as
+// too large to read, as VS Code's editor does for a file over 32 MB
+const BIG_MODEL = 'models/lysark-check-big.stl'
+const HUGE_MODEL = 'models/lysark-check-huge.glb'
 function bareModel() {
   return glb({
     meshes: [
@@ -339,6 +347,8 @@ function createHost(lectureDir, lectureText) {
     modelReads: {},
     /** files the check makes, by path in the lecture folder: their bytes, read as if they were there */
     made: new Map(),
+    /** paths in the lecture folder the host answers as too large to read, as extension 0.4.0 does for a file over 32 MB (MAX_READ_BYTES) */
+    tooLarge: new Set(),
     /** the next edit finds the document changed meanwhile (typing between read and edit) */
     typeBeforeNextEdit: false,
     /** paths asked for outside the lecture folder */
@@ -369,6 +379,7 @@ function createHost(lectureDir, lectureText) {
       for (const rel of message.paths) {
         const file = inside(rel)
         if (docs.has(rel) && message.as === 'text') files[rel] = { ...docs.get(rel) }
+        else if (file && host.tooLarge.has(rel) && message.as === 'bytes') files[rel] = { error: 'larger than 32 MB' }
         else if (file && host.made.has(rel) && message.as === 'bytes') {
           files[rel] = { base64: Buffer.from(host.made.get(rel)).toString('base64') }
           host.modelReads[rel] = (host.modelReads[rel] ?? 0) + 1
@@ -2056,6 +2067,89 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
           host.docs.set(armPath, { text: back.toString(), version: host.docs.get(armPath).version + 1 })
         } else {
           lines.push('(no textured model with material: file, so one without a material: line was not checked)')
+        }
+
+        // limits: off (decision 11): two objects added, one showing a model over 5 MB (made by the
+        // check, BIG_MODEL) and one a model the host won't read (HUGE_MODEL, "larger than 32 MB").
+        // Without the line, the first is refused at its line in the build's words, and the second
+        // named with VS Code's limit and lysark's advice. With limits: off put at the top, which
+        // changes no object, the panel loads afresh (the models are checked again only then): the
+        // first is shown, and the second named with VS Code's limit and that the lecture still builds
+        {
+          const bigObject = 'lysark-check-big'
+          const hugeObject = 'lysark-check-huge'
+          host.made.set(BIG_MODEL, new Uint8Array(overLimitStl()))
+          host.tooLarge.add(HUGE_MODEL)
+          const withBig = parseDocument(host.docs.get(armPath).text)
+          withBig.setIn(['objects', bigObject], withBig.createNode({ model: BIG_MODEL, at: [0.3, 0, 0.6] }))
+          withBig.setIn(['objects', hugeObject], withBig.createNode({ model: HUGE_MODEL, at: [-0.3, 0, 0.6] }))
+          const limited = withBig.toString()
+          /** the banner's model lines once the panel has shown `text` after loading afresh as page `n` */
+          const showFresh = async (text, n, what) => {
+            host.docs.set(armPath, { text, version: host.docs.get(armPath).version + 1 })
+            const seq = await source(added)
+            if (!(await fromRuntime({ type: 'lysark:accepted', seq }))) return fail(`${what} did not load the panel afresh`)
+            if (!(await render(n))) return fail(`the runtime did not say ready after ${what}`)
+            await toRuntime({ type: 'lysark:source', files: host.files(added), seq, slide: objectSlide, protocol: EDITOR_PROTOCOL })
+            if (!(await fromRuntime({ type: 'lysark:shown', seq }))) return fail(`the text with ${what} was not shown`)
+            const said = await waitFor(async () => {
+              const text = await banner()
+              return text.includes('Models not shown') ? text : null
+            }, 20, 250)
+            return { said: said ?? (await banner()) }
+          }
+          /** the meshes and triangles under an object's node, once the arm scene shows */
+          const partsOf = (name) =>
+            waitFor(() =>
+              inPanel((w, n) => {
+                const L = w.__lysark
+                if (!L || L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm' || !L.sceneManager.active.anchors[n]) return null
+                let meshes = 0
+                let triangles = 0
+                L.sceneManager.active.anchors[n].children.find((c) => c.name === `object:${n}:model`)?.traverse((part) => {
+                  if (!part.isMesh) return
+                  meshes += 1
+                  triangles += (part.geometry.index ?? part.geometry.attributes.position).count / 3
+                })
+                return { meshes, triangles }
+              }, name),
+            )
+          const lineOf = (text, src) => text.split(/\r?\n/).findIndex((l) => l.trim() === `model: ${src}`) + 1
+          const tooLarge = `the model '${HUGE_MODEL}' is larger than 32 MB: VS Code's editor reads at most 32 MB per file, so the preview can't show it.`
+
+          const kept = await showFresh(limited, 37, 'a model over 5 MB and one over 32 MB')
+          if (kept.ok === false) return kept
+          const bigRefused = `${armPath}, line ${lineOf(limited, BIG_MODEL)}: object '${bigObject}': the model is 5.0001 MB; a model may be at most 5 MB. Export it with fewer triangles`
+          const hugeLimited = `${armPath}, line ${lineOf(limited, HUGE_MODEL)}: object '${hugeObject}': ${tooLarge} The lecture doesn't build with it either: a model may be at most 5 MB, its textures included.`
+          if (!kept.said.includes(`Models not shown:\n`) || !kept.said.includes(bigRefused) || !kept.said.includes(hugeLimited)) {
+            return fail(`without limits: off the panel said ${JSON.stringify(kept.said)}, expected it to name "${bigRefused}…" and "${hugeLimited}…"`)
+          }
+          const bigKept = await partsOf(bigObject)
+          if (!bigKept || bigKept.meshes !== 0) return fail(`without limits: off, '${bigObject}' (over 5 MB) should be an empty node: ${JSON.stringify(bigKept)}`)
+          lines.push(`without limits: off: the banner names "${bigRefused}…" and "${hugeLimited}…", and '${bigObject}' stays an empty node`)
+
+          const lifted = `limits: off   # added by the check\n${limited}`
+          const off = await showFresh(lifted, 38, 'limits: off at the top of the scene file')
+          if (off.ok === false) return off
+          const hugeOff = `${armPath}, line ${lineOf(lifted, HUGE_MODEL)}: object '${hugeObject}': ${tooLarge} The lecture still builds, because its scene file says limits: off`
+          if (!off.said.includes(hugeOff) || off.said.includes(`object '${bigObject}'`)) {
+            return fail(`with limits: off the panel said ${JSON.stringify(off.said)}, expected it to name "${hugeOff}" and not '${bigObject}'`)
+          }
+          const bigShown = await partsOf(bigObject)
+          if (!bigShown || bigShown.meshes === 0 || bigShown.triangles !== 100_001) {
+            return fail(`with limits: off, '${bigObject}' (a 5,000,134-byte STL of 100,001 triangles) should be shown: ${JSON.stringify(bigShown)} (the panel says: ${off.said})`)
+          }
+          lines.push(
+            `limits: off added at the top loaded the panel afresh: '${bigObject}' (5,000,134 bytes) shows ${bigShown.triangles} triangles, ` +
+              `and the banner names "${hugeOff}"`,
+          )
+          // the objects and the line gone, for what follows
+          const back = parseDocument(host.docs.get(armPath).text.replace(/^limits: off {3}# added by the check\r?\n/, ''))
+          back.deleteIn(['objects', bigObject])
+          back.deleteIn(['objects', hugeObject])
+          host.made.delete(BIG_MODEL)
+          host.tooLarge.delete(HUGE_MODEL)
+          host.docs.set(armPath, { text: back.toString(), version: host.docs.get(armPath).version + 1 })
         }
 
         // a model file that isn't there: the banner names it at its line, and its object stays an empty node
