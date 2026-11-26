@@ -93,18 +93,26 @@ export async function checkOffline(file) {
 
     // step through every slide so scene builds/boundaries/scene-less all execute —
     // that is where a mesh/texture fetch would fire if one existed
+    // three's lighting table is looked for once the slide's scene is built: a
+    // large scene can take longer than the waits below, and until it is built
+    // there is no scene to look in (goTo starts the transition at once)
+    const lookForThreeLut = async () => {
+      await page.waitForFunction(() => !window.__lysark.sceneManager.busy, null, { timeout: 15000 })
+      await page.evaluate(findThreeLut)
+    }
     const slideCount = await page.evaluate(() => window.__lysark.engine.slideCount)
     const sceneless = []
     for (let i = 0; i < slideCount; i++) {
       await page.evaluate((n) => window.__lysark.engine.goTo(n, 'forward'), i)
       await page.waitForTimeout(450) // transition + a few frames
       if (await page.evaluate(() => window.__lysark.engine.current.scene === undefined)) sceneless.push(i)
-      else await page.evaluate(findThreeLut)
+      else await lookForThreeLut()
     }
     // and back across every boundary (suspend/restore paths)
     for (let i = slideCount - 2; i >= 0; i--) {
       await page.evaluate((n) => window.__lysark.engine.goTo(n, 'backward'), i)
       await page.waitForTimeout(300)
+      await lookForThreeLut()
     }
 
     // KaTeX font integrity: a broken CSS inline pass drops fonts WITHOUT any
