@@ -261,15 +261,16 @@ stops the build at its `model:` line (write `material: file`, or a colour); on a
 compile error; with a colour the file's look is left out, as before. The compiler reports each
 model's look (`ModelRef.look`: file, preset or default) and the build and the panel check a file
 once per unit and look (vite-plugin-slides.ts `readModels`, panel-models.ts). With
-`material: file`, src/compiler/model-types.ts (`ownLookProblem`) requires PNG or JPEG images
-inside the file, at most 2048 px a side (read from the PNG's IHDR or the JPEG's frame header,
-`pngSize`/`jpegSize`, in Node without decoding), refuses KTX2, WebP and AVIF, an image at an
-address, a see-through material (BLEND, MASK, transmission and what builds on it; MASK allowed
-since the author's answers, below), a material more metallic than 0.6 without a metallic
-texture (the stage has no environment map: at metalness 1 the demo's tray shows near black), a
-mesh without a material (three's default is fully metallic; grey since the answers, below), a
-texture the file lacks, and a textured mesh without the texture coordinates it uses; a required
-extension must be one GLTFLoader reads. src/scene/model-check.ts parses the
+`material: file`, src/compiler/model-types.ts (`ownLookProblem`) now (with the answers and
+their review, below) requires PNG or JPEG images inside the file, at most 2048 px a side (read
+from the PNG's IHDR or the JPEG's frame header, `pngSize`/`jpegSize`, in Node without decoding)
+and 16,777,216 pixels in all, counted as the copies the graphics card holds; it refuses KTX2,
+WebP and AVIF, an image at an address, a see-through material (BLEND, transmission and what
+builds on it; a cut-out MASK material is shown), a material more metallic than 0.6 without a
+metallic texture (the stage has no environment map: at metalness 1 the demo's tray shows near
+black), a texture the file lacks, and a textured mesh without the texture coordinates it uses;
+a required extension must be one GLTFLoader reads. A mesh without a material is shown grey
+(three's default would be fully metallic). src/scene/model-check.ts parses the
 file without its images (Node has no `<img>`) and checks what was built for a see-through
 material too. The route that never fetches (src/scene/models.ts, `fileImages`): a GLTFLoader
 plugin's `beforeRoot` turns each image's bufferView into a `data:` address in the parser's JSON,
@@ -325,8 +326,9 @@ The author answered step 9's questions on 2026-11-26 (decision 10 in scene-files
 and three more local commits build the answers, still not pushed. "Refuse textures" meant
 textures over 2048 pixels, as built. A file's textures may have at most 16,777,216 pixels in all,
 four 2048 × 2048 (the review had packed 290 flat 2048-pixel PNGs, about 6.5 GB of GPU memory, into
-a GLB that passed): model-types.ts (`ownLookProblem`, `MAX_TEXTURE_TOTAL_PIXELS`) counts each
-image a material's texture uses once, from the same headers, and the message names the file, so
+a GLB that passed): model-types.ts (`ownLookProblem`, `MAX_TEXTURE_TOTAL_PIXELS`) counted each
+image a material's texture uses once (each copy since the review, below), from the same
+headers, and the message names the file, so
 `checkModel` and `modelBytesProblem` now take the path, which vite-plugin-slides.ts and
 panel-models.ts pass. Cut-out materials (MASK, Blender's alpha clip) are allowed and BLEND stays
 refused, its message (`MODEL_BLEND_ADVICE`) now naming alpha clip: a Math node set to Round
@@ -357,10 +359,35 @@ sticker's Alpha goes through a Math node set to Round exports as MASK (cutoff le
 and shows the sticker cut out to a disc, its shadow round; of the hands-on test's exports,
 crate-nomat.glb (a cylinder without a material) now builds and shows grey, crate-decal.glb
 (BLEND) gets the new message, and the review's 290-texture file is refused by the total
-(1,216,348,160 pixels). Next: push, let engine CI pass, tag
-v2.14.0, and move the course with Update engine (the course has no `model:` lines, so the new stop
-for a textured GLB without `material:` breaks nothing); the author can then try a textured GLB
-from Blender in github.dev.
+(1,216,348,160 pixels).
+
+The answers then had a review (2026-11-26), and three more local commits fix what it found,
+still not pushed. The total counted each image once, but three uploads an image again for each filter
+and wrap its textures read it with (GLTFLoader keeps a texture per image and sampler index and
+sets its filters and wraps from the sampler; WebGLTextures uploads once per filter, wrap and
+colour space), and again without sRGB where data such as a normal map reads it through a texture
+of its own. A 228 kB GLB reading one flat 2048-pixel PNG through 108 samplers passed and would
+hold about 2.4 GB; in Chromium a 1024-pixel one read through 40 samplers held 40 WebGL textures
+of one image. `ownLookProblem` now counts a copy for each image, sampler settings as GLTFLoader
+reads them (`samplerSettings`: a value it doesn't know as glTF's default, a name from Object's
+prototype as itself) and colour space; data counts as sRGB only where it reads, uncopied, the
+very texture a colour (`COLOUR_TEXTURES`) sets sRGB on. On crafted files in Chromium and Firefox
+the count matched three's WebGL textures in eight cases and was one over in the ninth (a normal
+map through a turned copy of the base colour's texture, which three happens to copy after
+setting sRGB); never under. The message adds "held as 5 copies" and why, naming Blender's
+Interpolation and Extension. This changes how the author's limit is counted, not the limit:
+decision 10 says so, for the author to confirm. check-editor's "grey exactly where the file
+gives a mesh no material" never saw such a mesh (no demo model has one): it now makes a GLB of
+a red box with a box without a material on it, serves it as if it were in the lecture folder
+(`host.made`), shows it with `material: file` beside the marker's grey copy, and requires the
+bare box grey and the other red; with `parseModel`'s marker taken out, it fails. The 9b
+paragraph above now states the current checks (it listed MASK and a mesh without a material
+among the refusals). Checked: vitest (543, from 539), tsc, the extension's build and tsc,
+check-editor in Chromium and Firefox, check-extension with this editor and v2.12.0's,
+build:demo and check:demo, Baneplanlegging, and the PDF. Next: once the author has seen how the
+total is counted, push, let engine CI pass, tag v2.14.0, and move the course with Update engine
+(the course has no `model:` lines, so the new stop for a textured GLB without `material:`
+breaks nothing); the author can then try a textured GLB from Blender in github.dev.
 
 Proposals (not built):
 - From step 9's hands-on test: entering the pendulum scene logs about 45 `THREE.WebGLShadowMap:
@@ -552,7 +579,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**539**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**543**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

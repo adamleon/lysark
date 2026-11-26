@@ -238,7 +238,7 @@ Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures 
      build and the panel alike. Without it a 5 MB file could hold hundreds of flat 2048-pixel
      PNGs, gigabytes on the graphics card.
      *Counted as copies, after the answers' review (2026-11-26), for the author to confirm:*
-     first each image counted once, however many textures or materials used it. But three
+     it first counted each image once, however many textures or materials used it. But three
      uploads an image again for each filter and wrap its textures read it with (glTF's sampler;
      Blender's Interpolation and Extension), and again without sRGB where a normal map or other
      data reads it through a texture of its own, so a 228 kB file reading one flat 2048-pixel
