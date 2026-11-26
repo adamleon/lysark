@@ -439,7 +439,10 @@ objects:
   stop the build, because its scene file says limits: off`. The panel can't read the file, so
   the rest of it is checked only by the build. A model under 32 MB shows in the preview.
 - **The student file** holds each model about a third larger than on disk: a 40 MB model makes a
-  55 MB student file, which builds, passes `lysark check` and shows from `file://`.
+  55 MB student file, which builds, passes `lysark check` and shows from `file://`. It can hold
+  at most about 400 MB of models in all, whatever the scene files say: its script is one
+  JavaScript string, which Node (and Chrome) can't make longer. Past that the build stops at the
+  object whose model takes the lecture over it.
 - **In the editor**, adding or removing the line loads the panel afresh, which checks the models
   again.
 
@@ -719,6 +722,11 @@ words (for a file VS Code won't read, its own reason). For example:
   smaller)`; for a GLB, `a model may be at most 5 MB, its textures included. Export it with fewer
   triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data >
   Material, Images: JPEG Format) or smaller`
+- With `limits: off`, past what a student file holds: `scenes/arm.yaml, line 41: object
+  'bracket': the model is 402.7 MB: a student file can hold at most about 400 MB of models in all,
+  even with limits: off (its script is one JavaScript string, which can be no longer). Export it
+  smaller` (for the file that takes several over it, `with this model, the lecture's models are
+  450.0 MB: … Show fewer models, or smaller ones`)
 - In the panel only, for a file over the 32 MB VS Code reads: `scenes/arm.yaml, line 41: object
   'bracket': the model 'models/bracket.stl' is larger than 32 MB: VS Code's editor reads at most
   32 MB per file, so the preview can't show it. The lecture doesn't build with it either: a model
@@ -879,6 +887,12 @@ the file with `limits: off`. The panel puts new text whose objects differ at mos
 into the running deck in place, without checking the models again, and a change to the line
 alone changes no object; so `updateInPlace` (`src/editor/runtime.ts`) loads the panel afresh when
 `limitsChanged` (`src/editor/panel-models.ts`) sees the line change in a scene file with models.
+With the limits off, the next ceiling is JavaScript's longest string: the build
+(`readModels`, `MAX_MODELS_BYTES`) adds up the models' sizes on disk and stops, at the object's
+line, before their base64 would be longer than Node's `MAX_STRING_LENGTH` (2^29 - 24
+characters), where it would otherwise fail with Node's own error and no line. Within a few MB
+under it, the rest of the page (the engine is about 4 MB) can still take the script over, and the
+build fails with Node's error: that edge is left as it is.
 VS Code's 32 MB is the extension's own (`MAX_READ_BYTES` in `extension/src/extension.ts`), which
 answers `larger than 32 MB` without the size; the panel words it (`unreadProblem`). No extension
 change.

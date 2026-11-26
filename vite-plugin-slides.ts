@@ -1,4 +1,5 @@
 import { normalizePath, type Plugin, type ViteDevServer } from 'vite'
+import { constants } from 'node:buffer'
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { compileLecture, IMAGE_TOKEN, type ImageRef, type ModelRef } from './src/compiler/compile-slides'
@@ -300,6 +301,29 @@ function dataUri(file: string): string {
 }
 
 /**
+ * The most bytes of model files a lecture can hold in all, whatever its
+ * scene files say. The slides module keeps them as base64, a third larger,
+ * and the student file keeps that module in its one script, all of it one
+ * JavaScript string; Node makes no string longer than MAX_STRING_LENGTH
+ * (2^29 - 24 characters on 64-bit, as Chrome). Past this the build can only
+ * fail, with Node's own error and no line (under it, the rest of the page can
+ * still take the script over). The size limits keep a lecture far under it;
+ * limits: off doesn't (decision 11 in docs/scene-files-proposal.md).
+ */
+const MAX_MODELS_BYTES = Math.floor(constants.MAX_STRING_LENGTH / 4) * 3
+
+/** what is wrong with the lecture's models coming to `total` bytes with one of `bytes`, or null */
+function modelsTotalProblem(bytes: number, total: number): string | null {
+  if (total <= MAX_MODELS_BYTES) return null
+  const mb = (n: number) => (n / 1e6).toFixed(1)
+  const most = `a student file can hold at most about ${Math.floor(MAX_MODELS_BYTES / 1e8) * 100} MB of models in all, even with limits: off ` +
+    `(its script is one JavaScript string, which can be no longer)`
+  return bytes === total
+    ? `the model is ${mb(bytes)} MB: ${most}. Export it smaller`
+    : `with this model, the lecture's models are ${mb(total)} MB: ${most}. Show fewer models, or smaller ones`
+}
+
+/**
  * The model files a lecture shows (compileLecture's `models`), each found
  * (resolveFile), checked (src/scene/model-check.ts) and read once, however
  * many objects show it: its bytes, and every path the scene files write for
@@ -323,12 +347,17 @@ async function readModels(
     users.get(file)!.push(ref)
   }
   const out: Array<{ base64: string; srcs: string[] }> = []
+  let total = 0
   for (const [file, uses] of users) {
     // the size on disk first, so a file far over the limit is never read: named
     // at the first object whose scene file keeps the limits (limits: off lifts them)
+    const onDisk = statSync(file).size
     const limited = uses.find((ref) => ref.limits === 'on')
-    const size = limited ? modelSizeProblem(statSync(file).size, limited.format, limited.limits) : null
+    const size = limited ? modelSizeProblem(onDisk, limited.format, limited.limits) : null
     if (size) throw new Error(`${modelWhere(limited!)}: ${size}`)
+    total += onDisk
+    const tooMuch = modelsTotalProblem(onDisk, total)
+    if (tooMuch) throw new Error(`${modelWhere(uses[0])}: ${tooMuch}`)
     const bytes = readFileSync(file)
     // exactly the file's bytes: a small file's Buffer is a view into a shared
     // pool, whose whole ArrayBuffer would be read as a different file
