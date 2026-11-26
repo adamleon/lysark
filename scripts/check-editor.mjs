@@ -41,7 +41,8 @@
 // models among them standing on their at with M's rings at their middle, those
 // with material: file in their files' own materials, a cut-out one (alpha mode
 // MASK) with its cutoff as alphaTest, a texture an <img> loaded
-// from a data: address with no blob: request, a typed new place for one put in
+// from a data: address with no blob: request, a mesh a file gives no material
+// grey (in a file the check makes), a typed new place for one put in
 // place, a new unit loading the panel afresh, a textured model without a
 // material: line (while another object showing its file in grey still shows
 // it) and a model file that isn't there each named in the banner
@@ -62,11 +63,27 @@ import { fileURLToPath } from 'node:url'
 import { launchBrowser } from './browser.mjs'
 import { EDITOR_PREFIX, serveEditor, stopServer } from './editor-server.mjs'
 import { EDITOR_PROTOCOL, editorAssets, editorProtocol, panelPage } from '../src/editor/panel-page.js'
+import { box, glb } from '../src/scene/model-test-files.js'
 
 const ISOLATED = { 'cross-origin-opener-policy': 'same-origin', 'cross-origin-embedder-policy': 'require-corp' }
 
 // the model files a scene file can name (MODEL_FORMATS in src/compiler/model-types.ts)
 const MODEL_FILE = /\.(stl|glb)$/i
+
+// a model file the check makes and serves as if it were in the lecture folder (no demo model has a
+// mesh without a material): a 40 mm box in a red of its own, and a 20 mm box on it its file gives
+// no material, which material: file shows grey (WITHOUT_FILE_MATERIAL in src/engine/object-types.ts)
+const BARE_MODEL = 'models/lysark-check-bare.glb'
+const BARE_MATERIAL = 'check red'
+function bareModel() {
+  return glb({
+    meshes: [
+      { name: 'coloured', triangles: box([-0.02, 0, -0.02], [0.02, 0.04, 0.02]), material: 0 },
+      { name: 'bare', triangles: box([-0.01, 0.04, -0.01], [0.01, 0.06, 0.01]) },
+    ],
+    materials: [{ name: BARE_MATERIAL, pbrMetallicRoughness: { baseColorFactor: [0.8, 0.1, 0.1, 1], metallicFactor: 0 } }],
+  })
+}
 
 /** the materials a GLB file lists in its JSON chunk, or none for any other file */
 function glbMaterials(file) {
@@ -320,6 +337,8 @@ function createHost(lectureDir, lectureText) {
     served: 0,
     /** model files read and found, by path: the panel reads each once for each page it loads */
     modelReads: {},
+    /** files the check makes, by path in the lecture folder: their bytes, read as if they were there */
+    made: new Map(),
     /** the next edit finds the document changed meanwhile (typing between read and edit) */
     typeBeforeNextEdit: false,
     /** paths asked for outside the lecture folder */
@@ -350,7 +369,10 @@ function createHost(lectureDir, lectureText) {
       for (const rel of message.paths) {
         const file = inside(rel)
         if (docs.has(rel) && message.as === 'text') files[rel] = { ...docs.get(rel) }
-        else if (!file || !existsSync(file)) files[rel] = { error: 'not found' }
+        else if (file && host.made.has(rel) && message.as === 'bytes') {
+          files[rel] = { base64: Buffer.from(host.made.get(rel)).toString('base64') }
+          host.modelReads[rel] = (host.modelReads[rel] ?? 0) + 1
+        } else if (!file || !existsSync(file)) files[rel] = { error: 'not found' }
         else if (message.as === 'bytes') {
           files[rel] = { base64: readFileSync(file).toString('base64') }
           // the panel reads images and models the same way (panel-images.ts, panel-models.ts)
@@ -1951,13 +1973,19 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
 
         // a textured GLB without a material: line: the panel refuses it as the build does, named in
         // the banner at its model: line, and its object stays an empty node (scene-files step 9); an
-        // object added showing the same file in grey still shows it
+        // object added showing the same file in grey still shows it. And meanwhile an object added
+        // showing a file the check makes (bareModel) with material: file: its mesh without a
+        // material is grey, as the theme's --object-grey, and its other mesh keeps its file's colour
         const unchosen = textured[0]
         if (unchosen) {
           const plain = parseDocument(host.docs.get(armPath).text)
           plain.deleteIn(['objects', unchosen, 'material'])
           const greyCopy = `${unchosen}-grey`
           plain.setIn(['objects', greyCopy], plain.createNode({ ...armObjects[unchosen], material: 'grey' }))
+          const bareObject = `${unchosen}-bare`
+          host.made.set(BARE_MODEL, new Uint8Array(bareModel()))
+          const { at, parent } = armObjects[unchosen]
+          plain.setIn(['objects', bareObject], plain.createNode({ model: BARE_MODEL, ...(at ? { at } : {}), ...(parent ? { parent } : {}), material: 'file' }))
           host.docs.set(armPath, { text: plain.toString(), version: host.docs.get(armPath).version + 1 })
           const plainSeq = await source(added)
           if (!(await fromRuntime({ type: 'lysark:accepted', seq: plainSeq }))) return fail(`'${unchosen}' without material: did not load the panel afresh`)
@@ -1991,9 +2019,39 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
             `'${unchosen}' without its material: line: the banner names "${expectedPlain}…", and it stays an empty node, ` +
               `while '${greyCopy}', the same file in grey, shows ${greyMeshes} mesh${greyMeshes === 1 ? '' : 'es'}`,
           )
-          // its line back, and the grey copy gone, for what follows
+          const bareParts = await waitFor(() =>
+            inPanel((w, name) => {
+              const L = w.__lysark
+              if (!L || L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm') return null
+              const grey = w.getComputedStyle(w.document.documentElement).getPropertyValue('--object-grey').trim().toLowerCase()
+              const parts = []
+              L.sceneManager.active.anchors[name]?.children.find((c) => c.name === `object:${name}:model`)?.traverse((part) => {
+                if (!part.isMesh) return
+                parts.push({
+                  material: part.material.name,
+                  grey: !part.material.map && `#${part.material.color.getHexString()}` === grey,
+                  bare: part.userData.lysarkWithoutFileMaterial === true,
+                })
+              })
+              return parts.length > 0 ? parts : null
+            }, bareObject),
+          )
+          const bareRight =
+            bareParts?.length === 2 &&
+            bareParts.some((m) => m.bare && m.grey) &&
+            bareParts.some((m) => !m.bare && !m.grey && m.material === BARE_MATERIAL)
+          if (!bareRight) {
+            return fail(
+              `'${bareObject}' (material: file, a file the check makes with a mesh it gives no material) shows ${JSON.stringify(bareParts)}: ` +
+                `expected that mesh grey, and the other in the file's '${BARE_MATERIAL}' (the panel says: ${await banner()})`,
+            )
+          }
+          lines.push(`'${bareObject}', a file with a mesh it gives no material (made by the check), with material: file: that mesh grey, the other in its file's '${BARE_MATERIAL}'`)
+          // its line back, and the grey copy and the made file's object gone, for what follows
           const back = parseDocument(host.docs.get(armPath).text)
           back.deleteIn(['objects', greyCopy])
+          back.deleteIn(['objects', bareObject])
+          host.made.delete(BARE_MODEL)
           back.setIn(['objects', unchosen, 'material'], 'file')
           host.docs.set(armPath, { text: back.toString(), version: host.docs.get(armPath).version + 1 })
         } else {
