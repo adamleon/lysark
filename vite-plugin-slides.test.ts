@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { binaryStl, cylinder, glb, glbEdits, lfsPointer, png } from './src/scene/model-test-files.js'
+import { binaryStl, cylinder, glb, glbEdits, jpeg, lfsPointer, png } from './src/scene/model-test-files.js'
 import { lectureSceneFiles, resolveFile, resolveImage, slidesPlugin } from './vite-plugin-slides'
 
 let course: string
@@ -302,6 +302,25 @@ describe('models in the build (docs/scene-files.md, "Models")', () => {
     )
     // with a colour, the texture is left out, however large
     expect(await failure('  a:\n    model: models/poster.glb\n    material: grey\n')).toBe('built')
+  })
+
+  it('names a file whose textures are too many pixels in all, by the path the scene file writes (step 9)', async () => {
+    const sizes = [2048, 2048, 2048, 2048, 1]
+    file(
+      join(course, 'assets', 'photos.glb'),
+      glb({
+        meshes: sizes.map((_, k) => ({ uvs: true, material: k })),
+        materials: sizes.map((_, k) => ({ pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0 } })),
+        textures: sizes.map((side) => ({ bytes: jpeg(side, side), mimeType: 'image/jpeg' })),
+      }),
+    )
+    expect(await failure('  photos:\n    model: ../../assets/photos.glb\n    material: file\n')).toBe(
+      "scenes/arm.yaml, line 4: object 'photos': the model '../../assets/photos.glb' has 16,777,217 pixels of textures in all (5 images); " +
+        "a model may have at most 16,777,216, four 2048 x 2048 textures' worth (about 90 MB of the graphics card's memory). " +
+        "Use fewer textures or smaller ones (in Blender's Image Editor, Image > Resize, then Image > Save) and export again, " +
+        'or write a colour such as material: grey',
+    )
+    expect(await failure('  photos:\n    model: ../../assets/photos.glb\n    material: grey\n')).toBe('built')
   })
 
   it('refuses wrong capital letters, naming the file on disk', async () => {

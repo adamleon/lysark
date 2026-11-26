@@ -339,7 +339,7 @@ async function readModels(
     const way = (ref: ModelRef) => `${ref.unit} ${ref.look}`
     for (const key of new Set(uses.map(way))) {
       const user = uses.find((ref) => way(ref) === key)!
-      const problem = await checkModel(buffer, user.format, [user.unit], user.look)
+      const problem = await checkModel(buffer, user.format, [user.unit], user.look, user.src)
       if (problem) throw new Error(`${modelWhere(user)}: ${problem}`)
     }
     out.push({ base64: bytes.toString('base64'), srcs: [...new Set(uses.map((ref) => ref.src))] })

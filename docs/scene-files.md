@@ -351,8 +351,10 @@ colours, and its textures (images painted on it, such as a label or a printed ma
   without textures and no `material:` line is grey, as before.
 - **Textures** are PNG or JPEG images inside the `.glb` (Blender's glTF Binary export puts them
   there), at most 2048 pixels on a side: a 2048 × 2048 texture takes about 22 MB of the graphics
-  card's memory with the smaller copies it is drawn from at a distance. To make one smaller in
-  Blender, open it in the Image Editor, Image > Resize, then Image > Save, and export again. The
+  card's memory with the smaller copies it is drawn from at a distance. A file's textures may
+  have at most four of those in all, 16,777,216 pixels (about 90 MB), counting each image its
+  materials use once, however many use it. To make one smaller in Blender, open it in the Image
+  Editor, Image > Resize, then Image > Save, and export again. The
   5 MB limit per file counts its textures, and a 2048-pixel photo as PNG uses all of it: export
   textures as JPEG (in Blender's glTF export, under Data > Material, Images: JPEG Format; an image
   that needs its transparency stays PNG). KTX2 (Basis), WebP and AVIF textures are refused: export
@@ -618,6 +620,11 @@ words (for a file VS Code won't read, its own reason). For example:
 - `scenes/arm.yaml, line 54: object 'marker': the model's image 'label' is 4096 x 4096 pixels: a
   texture may be at most 2048 pixels on a side. Scale the image down (in Blender's Image Editor,
   Image > Resize, then Image > Save) and export again, or write a colour such as material: grey`
+- `scenes/arm.yaml, line 54: object 'marker': the model 'models/marker.glb' has 20,971,520 pixels
+  of textures in all (5 images); a model may have at most 16,777,216, four 2048 x 2048 textures'
+  worth (about 90 MB of the graphics card's memory). Use fewer textures or smaller ones (in
+  Blender's Image Editor, Image > Resize, then Image > Save) and export again, or write a colour
+  such as material: grey`
 - `scenes/arm.yaml, line 54: object 'marker': the model's textures are WebP (EXT_texture_webp),
   which a lecture can't show: export the textures as PNG or JPEG (in Blender's glTF export, under
   Data > Material, Images: JPEG Format, with Create WebP off)`. Without a `material:` line the
@@ -750,7 +757,8 @@ never sees one. An image that doesn't decode stops the model, named, and the dec
 `lysark check` fails on it. Without `material: file`, the materials' textures are taken out of the
 file before the loader reads it, so no image is ever loaded. The build's check runs in Node, which
 has no `<img>`: it reads each image's type and size from its header (`src/compiler/model-types.ts`,
-`pngSize` and `jpegSize`), checks the materials in the file, then parses the file without its
+`pngSize` and `jpegSize`), adds up the pixels of the images the materials use (each once), checks
+the materials in the file, then parses the file without its
 images and checks what the loader built for a see-through material. `jpegSize` walks a JPEG's
 markers as libjpeg, the browsers' decoder, does, and refuses a file where the two could read
 different frame headers (`FF 00` read as a marker) or that libjpeg refuses, so a larger image

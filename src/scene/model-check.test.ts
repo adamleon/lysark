@@ -104,6 +104,19 @@ describe('checkModel', () => {
       )
     })
 
+    it('names the file whose textures are too many pixels in all, from their headers too', async () => {
+      const sizes = [2048, 2048, 2048, 2048, 64]
+      const photos = glb({
+        meshes: sizes.map((_, k) => ({ uvs: true, material: k })),
+        materials: sizes.map((_, k) => ({ pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0 } })),
+        textures: sizes.map((side) => ({ bytes: jpeg(side, side), mimeType: 'image/jpeg' })),
+      })
+      expect(await checkModel(photos, 'glb', ['m'], 'file', '../../assets/photos.glb')).toMatch(
+        /^the model '\.\.\/\.\.\/assets\/photos\.glb' has 16,781,312 pixels of textures in all \(5 images\); a model may have at most 16,777,216,/,
+      )
+      expect(await checkModel(photos, 'glb', ['m'], 'preset', '../../assets/photos.glb')).toBeNull()
+    })
+
     it('refuses a see-through material in what the loader built, whatever the JSON says', async () => {
       const glass = glb({ meshes: [{ name: 'pane', material: 0 }], materials: [{ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }] })
       expect(await checkModel(glass, 'glb', ['m'], 'file')).toMatch(/^the model's material 'glass' is see-through \(blended/)

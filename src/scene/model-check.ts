@@ -79,16 +79,23 @@ function readAsText(buffer: ArrayBuffer): boolean {
  * What is wrong with a model file, or null. `buffer` holds exactly the
  * file's bytes; `units` are those of every object that shows it, as each
  * reads the file in its own unit; `look` is where its look comes from (its
- * object's material: line). Never rejects: what three.js throws on is a
- * file that couldn't be read.
+ * object's material: line); `src` is its path as the scene file writes it,
+ * which a message about all its textures together names. Never rejects:
+ * what three.js throws on is a file that couldn't be read.
  *
  * With material: file, the textures' images are not loaded here (the build
  * runs in Node, which has no <img>): their type and size are read from their
  * headers (model-types.ts), and an image that is broken past its header
  * fails when the deck loads it, which `lysark check` catches.
  */
-export async function checkModel(buffer: ArrayBuffer, format: ModelFormat, units: readonly ModelUnit[], look: ModelLook = 'default'): Promise<string | null> {
-  const bytes = modelBytesProblem(buffer, format, look)
+export async function checkModel(
+  buffer: ArrayBuffer,
+  format: ModelFormat,
+  units: readonly ModelUnit[],
+  look: ModelLook = 'default',
+  src?: string,
+): Promise<string | null> {
+  const bytes = modelBytesProblem(buffer, format, look, src)
   if (bytes) return bytes
   let largest: number
   // all of it in the try: a file laid out as no exporter writes it can make

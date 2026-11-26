@@ -93,7 +93,7 @@ async function contentProblems(base64: string, uses: ModelRef[]): Promise<{ prob
     const readers = uses.filter((ref) => readWay(ref) === way)
     let problem: string | null
     try {
-      problem = await checkModel(buffer, readers[0].format, [readers[0].unit], readers[0].look)
+      problem = await checkModel(buffer, readers[0].format, [readers[0].unit], readers[0].look, readers[0].src)
     } catch (error) {
       // the checks catch the loaders' errors; this is a check that threw
       problem = `the model couldn't be read: ${firstLine(error)}`

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { modelFormat, type ModelLook, type ModelRef } from '../compiler/model-types'
+import { modelFormat, modelWhere, type ModelLook, type ModelRef } from '../compiler/model-types'
 import type { ModelUnit } from '../engine/object-types'
-import { binaryStl, box, glb, glbEdits, lfsPointer, png } from '../scene/model-test-files.js'
+import { checkModel } from '../scene/model-check'
+import { binaryStl, box, glb, glbEdits, jpeg, lfsPointer, png } from '../scene/model-test-files.js'
 import type { HostFile } from './host'
 import { base64Bytes, loadModels } from './panel-models'
 
@@ -200,6 +201,24 @@ describe('loadModels', () => {
     expect(none.files).toEqual({})
     expect(none.leftOut).toEqual([])
     expect(none.problems).toHaveLength(2)
+  })
+
+  it('names a file whose textures are too many pixels in all in the words of the build (checkModel with its path)', async () => {
+    const sizes = [2048, 2048, 2048, 2048, 1]
+    const bytes = glb({
+      meshes: sizes.map((_, k) => ({ uvs: true, material: k })),
+      materials: sizes.map((_, k) => ({ pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0 } })),
+      textures: sizes.map((side) => ({ bytes: jpeg(side, side), mimeType: 'image/jpeg' })),
+    })
+    const { read } = host({ 'models/photos.glb': { base64: base64(bytes) } })
+    const photos = ref('photos', 'models/photos.glb', 40, 'm', 'file')
+    const loaded = await loadModels([photos, ref('grey', 'models/photos.glb', 46, 'm', 'preset')], read)
+    // as vite-plugin-slides.ts says it: where, then checkModel's words for the object and its path
+    expect(loaded.problems).toEqual([`${modelWhere(photos)}: ${await checkModel(bytes, 'glb', ['m'], 'file', 'models/photos.glb')}`])
+    expect(loaded.problems[0]).toMatch(
+      /^scenes\/arm\.yaml, line 40: object 'photos': the model 'models\/photos\.glb' has 16,777,217 pixels of textures in all \(5 images\); /,
+    )
+    expect(loaded.leftOut).toEqual(['scenes/arm.yaml photos'])
   })
 
   it('asks for nothing when no scene a slide runs has a model', async () => {

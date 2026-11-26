@@ -10,9 +10,10 @@ import { MAX_METRES, type ModelUnit } from '../engine/object-types'
  * GPU memory that src/scene/dispose.ts doesn't free, so a model that passes
  * keeps the student file working from file:// (lysark-design.md §9) and one
  * scene's GPU resources alive at a time (§4.1). With material: file, so would
- * a texture that isn't a PNG or JPEG inside the file, or is larger than 2048
- * pixels on a side; and a material the stage would draw black or not at all
- * is refused too (decision 10 in scene-files-proposal.md).
+ * a texture that isn't a PNG or JPEG inside the file, is larger than 2048
+ * pixels on a side, or takes the file's textures past four such in all; and a
+ * material the stage would draw black or not at all is refused too (decision
+ * 10 in scene-files-proposal.md).
  */
 
 /** the model files, by extension (any case): STL, binary or text, and binary glTF */
@@ -69,6 +70,17 @@ export interface ModelRef {
 
 /** a texture's image may be at most this many pixels on a side: as RGBA with mipmaps, about 22 MB of GPU memory */
 export const MAX_TEXTURE_PIXELS = 2048
+
+/**
+ * A model file's textures may have at most this many pixels in all: four
+ * 2048 x 2048 images' worth, about 90 MB of GPU memory as RGBA with mipmaps
+ * (decision 10 in scene-files-proposal.md, the author's answer of
+ * 2026-11-26). Each image its materials use counts once, however many
+ * textures or materials use it, and an image none uses not at all. Without
+ * it, a 5 MB file could hold hundreds of flat 2048-pixel images, which PNG
+ * packs into a few kB each and the graphics card holds at full size.
+ */
+export const MAX_TEXTURE_TOTAL_PIXELS = 4 * MAX_TEXTURE_PIXELS * MAX_TEXTURE_PIXELS
 
 /**
  * With material: file, a material without a metallic texture may be at most
@@ -290,9 +302,11 @@ function unshownTextures(json: Record<string, unknown>, used: Set<unknown>): str
  * would need a request, a worker, wasm or GPU memory dispose.ts doesn't
  * free is refused before GLTFLoader ever sees it. `look` is where the
  * model's look comes from: with `file`, its textures' images (their type and
- * size, read from their headers) and its materials are checked too.
+ * size, read from their headers) and its materials are checked too. `src` is
+ * the model's path as the scene file writes it, which a message about all
+ * its textures together names.
  */
-export function modelBytesProblem(buffer: ArrayBuffer, format: ModelFormat, look: ModelLook = 'default'): string | null {
+export function modelBytesProblem(buffer: ArrayBuffer, format: ModelFormat, look: ModelLook = 'default', src?: string): string | null {
   const size = modelSizeProblem(buffer.byteLength, format)
   if (size) return size
   const bytes = new Uint8Array(buffer)
@@ -379,7 +393,7 @@ export function modelBytesProblem(buffer: ArrayBuffer, format: ModelFormat, look
   const instanced = nodes.some((node) => node?.extensions?.EXT_mesh_gpu_instancing !== undefined)
   if (used.has('EXT_mesh_gpu_instancing') || instanced) return MODEL_INSTANCING_PROBLEM
   if (look === 'file') {
-    const own = ownLookProblem(json, used, binary)
+    const own = ownLookProblem(json, used, binary, src)
     if (own) return own
   }
   // GLTFLoader only warns about a required extension it doesn't know, and shows the model wrong
@@ -469,14 +483,16 @@ export function jpegSize(data: Uint8Array): { width: number; height: number } | 
  * chunk, where its images are.
  *
  * Its textures must be PNG or JPEG images in the file, at most
- * MAX_TEXTURE_PIXELS on a side, read from their headers here. Its materials
- * mustn't be what the stage draws black or not at all: see-through (blended,
- * cut out, or transmission), metallic beyond MAX_FILE_METALNESS without a
- * metallic texture (the stage has no reflections), or missing on a mesh,
- * which three gives a fully metallic default; and a textured mesh must have
- * the texture coordinates its textures use.
+ * MAX_TEXTURE_PIXELS on a side and MAX_TEXTURE_TOTAL_PIXELS in all, read
+ * from their headers here. Its materials mustn't be what the stage draws
+ * black or not at all: see-through (blended, cut out, or transmission),
+ * metallic beyond MAX_FILE_METALNESS without a metallic texture (the stage
+ * has no reflections), or missing on a mesh, which three gives a fully
+ * metallic default; and a textured mesh must have the texture coordinates
+ * its textures use. `src` is the model's path, for the message about all
+ * its textures together.
  */
-function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | undefined): string | null {
+function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | undefined, src: string | undefined): string | null {
   const notGlb = `the model isn't a binary glTF 2.0 file. Export it again as glTF Binary (.glb)`
   const images = listOf(json.images)
   const textures = listOf(json.textures)
@@ -487,6 +503,8 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
 
   const other = unshownTextures(json, used)
   if (other) return other
+  // each image's size, by its place in the file
+  const sizes: Array<{ width: number; height: number }> = []
   for (const [k, item] of images.entries()) {
     const image = asJson(item)
     const name = itemName(item, k)
@@ -515,9 +533,31 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
         `again, or write a colour such as material: grey`
       )
     }
+    sizes.push(size)
   }
   for (const [k, texture] of textures.entries()) {
     if (!isIndex(asJson(texture)?.source, images.length)) return `the model's texture ${itemName(texture, k)} has no image in the file: export it again`
+  }
+  // what the graphics card holds of them: the images the materials use through
+  // their textures, each once however many textures or materials use it (an
+  // image no material's texture uses is never loaded). A texture the file
+  // lacks is refused below
+  const shown = new Set<number>()
+  for (const material of materials) {
+    materialTextures(material, (texture) => {
+      if (isIndex(texture.index, textures.length)) shown.add(asJson(textures[texture.index as number])!.source as number)
+    })
+  }
+  let total = 0
+  for (const k of shown) total += sizes[k].width * sizes[k].height
+  if (total > MAX_TEXTURE_TOTAL_PIXELS) {
+    // about 90 MB: as RGBA, 4 bytes a pixel, and a third more for the smaller copies (mipmaps)
+    return (
+      `${src === undefined ? 'the model' : `the model '${src}'`} has ${grouped(total)} pixels of textures in all (${shown.size} images); ` +
+      `a model may have at most ${grouped(MAX_TEXTURE_TOTAL_PIXELS)}, four ${MAX_TEXTURE_PIXELS} x ${MAX_TEXTURE_PIXELS} textures' worth ` +
+      `(about 90 MB of the graphics card's memory). Use fewer textures or smaller ones (in Blender's Image Editor, Image > Resize, ` +
+      `then Image > Save) and export again, or write a colour such as material: grey`
+    )
   }
 
   // each material's look, and the texture coordinates its textures read
@@ -583,6 +623,11 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
     }
   }
   return null
+}
+
+/** a whole number with a comma between each three digits, as 16,777,216 */
+function grouped(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+$)/g, ',')
 }
 
 /** a length to three significant digits, without trailing zeros */

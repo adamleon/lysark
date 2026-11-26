@@ -19,6 +19,7 @@ import {
   jpegSize,
   MAX_FILE_METALNESS,
   MAX_TEXTURE_PIXELS,
+  MAX_TEXTURE_TOTAL_PIXELS,
   MIN_MODEL_METRES,
   MODEL_MAX_BYTES,
   MODEL_TEXTURES_UNCHOSEN,
@@ -379,6 +380,74 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
     expect(own(textureBox({ name: '', bytes: jpeg(4096, 3072, { frame: 0xc2 }), mimeType: 'image/jpeg' }))).toBe(
       `the model's image number 1 is 4096 x 3072 pixels: ${smaller}`,
     )
+  })
+
+  describe('a total of texture pixels per file (the author, 2026-11-26)', () => {
+    /** a box for each image, its material showing that image (a JPEG: a few kB in the file at any size) */
+    const photos = (sizes: Array<[number, number]>, edit?: GlbEdit) =>
+      glb({
+        meshes: sizes.map((_, k): GlbMesh => ({ uvs: true, material: k, translation: [2 * k, 0, 0] })),
+        materials: sizes.map((_, k) => ({ name: `photo ${k + 1}`, pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0 } })),
+        textures: sizes.map(([width, height], k) => ({ name: `photo ${k + 1}`, bytes: jpeg(width, height), mimeType: 'image/jpeg' })),
+        edits: edit ? [edit] : [],
+      })
+    const full = (): Array<[number, number]> => [
+      [2048, 2048],
+      [2048, 2048],
+      [2048, 2048],
+      [2048, 2048],
+    ]
+    const limit =
+      "a model may have at most 16,777,216, four 2048 x 2048 textures' worth (about 90 MB of the graphics card's memory). " +
+      "Use fewer textures or smaller ones (in Blender's Image Editor, Image > Resize, then Image > Save) and export again, " +
+      'or write a colour such as material: grey'
+
+    it('passes four 2048 x 2048 textures, and refuses one pixel more, naming the file, the total and the limit', () => {
+      expect(MAX_TEXTURE_TOTAL_PIXELS).toBe(16_777_216)
+      expect(own(photos(full()))).toBeNull()
+      const over = photos([...full(), [1, 1]])
+      expect(modelBytesProblem(over, 'glb', 'file', 'models/photos.glb')).toBe(
+        `the model 'models/photos.glb' has 16,777,217 pixels of textures in all (5 images); ${limit}`,
+      )
+      // without a path, as a test may ask
+      expect(own(over)).toBe(`the model has 16,777,217 pixels of textures in all (5 images); ${limit}`)
+      // with a colour, the textures are left out, however many
+      expect(modelBytesProblem(over, 'glb', 'preset')).toBeNull()
+      // smaller images add up the same way
+      expect(own(photos([[2048, 2048], [2048, 2048], [2048, 2048], [2048, 2047], [2048, 1]]))).toBeNull()
+      expect(own(photos([[2048, 2048], [2048, 2048], [2048, 2048], [2048, 2048], [16, 16], [8, 8]]))).toMatch(
+        /^the model has 16,777,536 pixels of textures in all \(6 images\);/,
+      )
+    })
+
+    it('counts an image once, however many textures and materials use it', () => {
+      // a fifth material showing the first image again, through a texture of its own and through the first one
+      const again = photos(full(), (json) => {
+        json.textures.push({ source: 0 })
+        json.materials.push({ pbrMetallicRoughness: { baseColorTexture: { index: 4 }, metallicFactor: 0 }, normalTexture: { index: 0 } })
+        json.meshes[0].primitives.push({ ...json.meshes[0].primitives[0], material: 4 })
+      })
+      expect(own(again)).toBeNull()
+    })
+
+    it("doesn't count an image no material's texture uses, which is never loaded", () => {
+      // a fifth image with a texture no material uses: its material shows the first image instead
+      const unused = photos([...full(), [2048, 2048]], (json) => (json.materials[4].pbrMetallicRoughness.baseColorTexture.index = 0))
+      expect(own(unused)).toBeNull()
+      // and with no texture at all
+      const bare = photos([...full(), [2048, 2048]], (json) => {
+        json.textures.pop()
+        json.materials[4].pbrMetallicRoughness.baseColorTexture.index = 0
+      })
+      expect(own(bare)).toBeNull()
+      // a material using it counts it, in an extension's texture too
+      expect(own(photos([...full(), [2048, 2048]]))).toMatch(/^the model has 20,971,520 pixels of textures in all \(5 images\);/)
+      const coat = photos([...full(), [2048, 2048]], (json) => {
+        json.materials[4].pbrMetallicRoughness.baseColorTexture.index = 0
+        json.materials[4].extensions = { KHR_materials_clearcoat: { clearcoatTexture: { index: 4 } } }
+      })
+      expect(own(coat)).toMatch(/^the model has 20,971,520 pixels of textures in all/)
+    })
   })
 
   it('reads a JPEG labelled image/jpg, as some programs write it, as a JPEG', () => {
