@@ -84,6 +84,16 @@ export function modelWhere(ref: Pick<ModelRef, 'file' | 'line' | 'object'>): str
 }
 
 /**
+ * A model object, by its scene file and name, as the panel names one it
+ * leaves without its model while showing the file to other objects
+ * (panel-models.ts, deck-from-source.ts): `scenes/arm.yaml marker`. A scene
+ * file's path has no spaces, so the two can't run together.
+ */
+export function modelObjectKey(ref: Pick<ModelRef, 'file' | 'object'>): string {
+  return `${ref.file} ${ref.object}`
+}
+
+/**
  * What is wrong with a model's path as written, or null. Only the text is
  * checked, so the compiler can say it with the scene file's line: where the
  * file is, and whether it is there, is for the build and the panel. As for
@@ -139,20 +149,26 @@ function megabytes(bytes: number): string {
 
 /**
  * What to do about a model file over the limit; the editor panel also gives
- * it when VS Code won't read a file that large at all (panel-models.ts).
+ * it when VS Code won't read a file that large at all (panel-models.ts). A
+ * GLB's textures count in it: a 2048-pixel photo is 5 MB or more as PNG, and
+ * well under 1 MB as JPEG.
  */
-export const MODEL_SIZE_ADVICE =
-  `a model may be at most ${MODEL_MAX_BYTES / 1e6} MB. ` +
-  `Export it with fewer triangles, or as binary STL rather than text STL (about five times smaller)`
+export function modelSizeAdvice(format: ModelFormat): string {
+  const limit = `a model may be at most ${MODEL_MAX_BYTES / 1e6} MB`
+  return format === 'glb'
+    ? `${limit}, its textures included. Export it with fewer triangles, or its textures as JPEG rather than PNG ` +
+        `(in Blender's glTF export, under Data > Material, Images: JPEG Format) or smaller`
+    : `${limit}. Export it with fewer triangles, or as binary STL rather than text STL (about five times smaller)`
+}
 
 /**
  * What is wrong with a model file of `bytes` bytes, or null. The build
  * asks before reading the file, and the panel from the length of the base64
  * the host sends, before decoding it.
  */
-export function modelSizeProblem(bytes: number): string | null {
+export function modelSizeProblem(bytes: number, format: ModelFormat): string | null {
   if (bytes <= MODEL_MAX_BYTES) return null
-  return `the model is ${megabytes(bytes)} MB; ${MODEL_SIZE_ADVICE}`
+  return `the model is ${megabytes(bytes)} MB; ${modelSizeAdvice(format)}`
 }
 
 /**
@@ -191,8 +207,14 @@ const GLTF_LISTS = [
  * file can't use offline, and a lecture shows PNG and JPEG only
  */
 const TEXTURE_EXTENSIONS: Record<string, string> = { KHR_texture_basisu: 'KTX2', EXT_texture_webp: 'WebP', EXT_texture_avif: 'AVIF' }
-/** the images a texture can be, by glTF's mimeType, and the name a message gives each */
-const TEXTURE_IMAGES: Record<string, string> = { 'image/png': 'PNG', 'image/jpeg': 'JPEG' }
+/**
+ * the images a texture can be, by glTF's mimeType, and the name a message
+ * gives each. glTF says image/jpeg; some programs write image/jpg, which
+ * three.js shows as well (the bytes are checked to be a JPEG either way)
+ */
+const TEXTURE_IMAGES: Record<string, string> = { 'image/png': 'PNG', 'image/jpeg': 'JPEG', 'image/jpg': 'JPEG' }
+/** in Blender's glTF export, where its textures are made PNG or JPEG */
+const BLENDER_IMAGES = `in Blender's glTF export, under Data > Material, Images: JPEG Format, with Create WebP off`
 /** these unpack in a worker or with wasm, which the student file can't use offline */
 const COMPRESSION_EXTENSIONS = ['KHR_draco_mesh_compression', 'EXT_meshopt_compression', 'KHR_meshopt_compression']
 /**
@@ -239,6 +261,30 @@ export const MODEL_TEXTURES_UNCHOSEN =
   `or a colour such as material: grey to colour it all with that`
 
 /**
+ * What to do about a see-through material, with material: file. Blender's
+ * glTF export writes a material as blended whenever anything is linked to
+ * the Principled BSDF's Alpha, or it is under 1 (Blender 4.2 and later have
+ * no blend mode of their own); model-check.ts says it too.
+ */
+export const MODEL_OPAQUE_ADVICE =
+  `make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), ` +
+  `or write a colour such as material: grey`
+
+/**
+ * What a GLB whose textures are kept as KTX2, WebP or AVIF gets, or null:
+ * a lecture shows PNG and JPEG only. GLTFLoader reads a texture's extension
+ * whatever extensionsUsed lists, so a texture's own counts too.
+ */
+function unshownTextures(json: Record<string, unknown>, used: Set<unknown>): string | null {
+  const textures = Array.isArray(json.textures) ? json.textures : []
+  const other = Object.keys(TEXTURE_EXTENSIONS).find(
+    (name) => used.has(name) || textures.some((texture) => asJson(asJson(texture)?.extensions)?.[name] !== undefined),
+  )
+  if (!other) return null
+  return `the model's textures are ${TEXTURE_EXTENSIONS[other]} (${other}), which a lecture can't show: export the textures as PNG or JPEG (${BLENDER_IMAGES})`
+}
+
+/**
  * What is wrong with a model file's bytes, or null: what can be told
  * without parsing it. For a GLB this reads the JSON chunk, so a file that
  * would need a request, a worker, wasm or GPU memory dispose.ts doesn't
@@ -247,7 +293,7 @@ export const MODEL_TEXTURES_UNCHOSEN =
  * size, read from their headers) and its materials are checked too.
  */
 export function modelBytesProblem(buffer: ArrayBuffer, format: ModelFormat, look: ModelLook = 'default'): string | null {
-  const size = modelSizeProblem(buffer.byteLength)
+  const size = modelSizeProblem(buffer.byteLength, format)
   if (size) return size
   const bytes = new Uint8Array(buffer)
   if (startsWith(bytes, LFS_POINTER)) {
@@ -304,7 +350,13 @@ export function modelBytesProblem(buffer: ArrayBuffer, format: ModelFormat, look
   const required = list(json.extensionsRequired)
   const used = new Set([...list(json.extensionsUsed), ...required])
   const textured = list(json.images).length > 0 || list(json.textures).length > 0 || Object.keys(TEXTURE_EXTENSIONS).some((name) => used.has(name))
-  if (textured && look === 'default') return MODEL_TEXTURES_UNCHOSEN
+  if (textured && look === 'default') {
+    // textures material: file can't show either: said now, not after the lecturer writes it
+    const other = unshownTextures(json, used)
+    return other
+      ? `${other}, and write material: file to show them, or a colour such as material: grey to colour it all with that`
+      : MODEL_TEXTURES_UNCHOSEN
+  }
   // GLTFLoader fetches any buffer but the GLB's own: blocked offline and in the editor panel
   const buffers = list(json.buffers)
   if (buffers.length > 1 || (buffers.length === 1 && (buffers[0] as { uri?: unknown } | null)?.uri !== undefined)) {
@@ -370,8 +422,8 @@ export function pngSize(data: Uint8Array): { width: number; height: number } | u
 
 /**
  * A JPEG's size in pixels, from its frame header (SOF0 to SOF15), without
- * decoding it; undefined if it isn't a JPEG, or has no frame header before
- * its image data.
+ * decoding it; undefined if it isn't a JPEG, has no frame header before its
+ * image data, or has a marker libjpeg reads otherwise or refuses.
  */
 export function jpegSize(data: Uint8Array): { width: number; height: number } | undefined {
   if (data.length < 4 || data[0] !== 0xff || data[1] !== 0xd8) return undefined
@@ -390,10 +442,16 @@ export function jpegSize(data: Uint8Array): { width: number; height: number } | 
     }
     // the start of another image, its end, or its data: no frame header came first
     if (marker === 0xd8 || marker === 0xd9 || marker === 0xda) return undefined
+    // as libjpeg, the browsers' JPEG decoder, reads them. FF 00 isn't a marker:
+    // libjpeg skips it and every byte up to the next FF, so a length read after
+    // it could skip a frame header that libjpeg reads, and a larger image would
+    // pass. And libjpeg refuses the reserved markers (0x02 to 0xbf, 0xc8, 0xde,
+    // 0xdf, 0xf0 to 0xfd), so the image wouldn't show
+    if (marker <= 0xbf || marker === 0xc8 || marker === 0xde || marker === 0xdf || (marker >= 0xf0 && marker <= 0xfd)) return undefined
     const length = (data[at + 2] << 8) | data[at + 3]
     if (length < 2) return undefined
-    // the frame headers are 0xc0 to 0xcf, but for 0xc4 (Huffman tables), 0xc8 and 0xcc (arithmetic coding)
-    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+    // the frame headers are 0xc0 to 0xcf, but for 0xc4 (Huffman tables) and 0xcc (arithmetic coding)
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xcc) {
       if (length < 8 || at + 9 > data.length) return undefined
       const height = (data[at + 5] << 8) | data[at + 6]
       const width = (data[at + 7] << 8) | data[at + 8]
@@ -420,17 +478,15 @@ export function jpegSize(data: Uint8Array): { width: number; height: number } | 
  */
 function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | undefined): string | null {
   const notGlb = `the model isn't a binary glTF 2.0 file. Export it again as glTF Binary (.glb)`
-  const opaque = 'make it opaque in the program that made it, or write a colour such as material: grey'
   const images = listOf(json.images)
   const textures = listOf(json.textures)
   const materials = listOf(json.materials)
   const bufferViews = listOf(json.bufferViews)
+  // GLTFLoader reads a texture's offset, scale and turn only when extensionsUsed lists the extension
+  const transforms = listOf(json.extensionsUsed).includes('KHR_texture_transform')
 
-  // GLTFLoader reads a texture's extension whatever extensionsUsed lists
-  const other = Object.keys(TEXTURE_EXTENSIONS).find(
-    (name) => used.has(name) || textures.some((texture) => asJson(asJson(texture)?.extensions)?.[name] !== undefined),
-  )
-  if (other) return `the model's textures are ${TEXTURE_EXTENSIONS[other]} (${other}), which a lecture can't show: export the textures as PNG or JPEG`
+  const other = unshownTextures(json, used)
+  if (other) return other
   for (const [k, item] of images.entries()) {
     const image = asJson(item)
     const name = itemName(item, k)
@@ -442,7 +498,7 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
     const type = image!.mimeType
     if (typeof type !== 'string' || !Object.hasOwn(TEXTURE_IMAGES, type)) {
       const what = typeof type === 'string' ? `'${type}'` : 'of no type it says'
-      return `the model's image ${name} is ${what}: a lecture shows PNG and JPEG textures only. Export the textures as PNG or JPEG`
+      return `the model's image ${name} is ${what}: a lecture shows PNG and JPEG textures only. Export the textures as PNG or JPEG (${BLENDER_IMAGES})`
     }
     const start = view.byteOffset ?? 0
     const length = view.byteLength
@@ -455,7 +511,8 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
     if (size.width > MAX_TEXTURE_PIXELS || size.height > MAX_TEXTURE_PIXELS) {
       return (
         `the model's image ${name} is ${size.width} x ${size.height} pixels: a texture may be at most ${MAX_TEXTURE_PIXELS} ` +
-        `pixels on a side. Export it smaller`
+        `pixels on a side. Scale the image down (in Blender's Image Editor, Image > Resize, then Image > Save) and export ` +
+        `again, or write a colour such as material: grey`
       )
     }
   }
@@ -473,24 +530,27 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
     materialTextures(material, (texture) => {
       if (!isIndex(texture.index, textures.length)) missing = true
       // KHR_texture_transform may say which, as GLTFLoader reads it
-      read.add(asJson(asJson(texture.extensions)?.KHR_texture_transform)?.texCoord ?? texture.texCoord ?? 0)
+      const transform = transforms ? asJson(asJson(texture.extensions)?.KHR_texture_transform) : undefined
+      read.add(transform?.texCoord ?? texture.texCoord ?? 0)
     })
     if (missing) return `the model's material ${name} uses a texture the file doesn't have: export it again`
     coordinates.push(read)
     const extensions = asJson(material?.extensions) ?? {}
     if (material?.alphaMode === 'BLEND' || material?.alphaMode === 'MASK') {
       const how = material.alphaMode === 'BLEND' ? 'blended' : 'cut out'
-      return `the model's material ${name} is see-through (${how}, alpha mode ${material.alphaMode}), which the stage draws wrong or not at all: ${opaque}`
+      return `the model's material ${name} is see-through (${how}, alpha mode ${material.alphaMode}), which the stage draws wrong or not at all: ${MODEL_OPAQUE_ADVICE}`
     }
     const through = SEE_THROUGH_EXTENSIONS.find((extension) => extensions[extension] !== undefined)
-    if (through) return `the model's material ${name} is see-through (${through}), which the stage can't draw: ${opaque}`
+    if (through) return `the model's material ${name} is see-through (${through}), which the stage can't draw: ${MODEL_OPAQUE_ADVICE}`
     // an unlit material shows its colour whatever the light; a metallic texture's pixels can't be read here
     const pbr = asJson(material?.pbrMetallicRoughness)
-    const metalness = pbr?.metallicFactor ?? 1
-    if (extensions.KHR_materials_unlit === undefined && pbr?.metallicRoughnessTexture === undefined && typeof metalness === 'number' && metalness > MAX_FILE_METALNESS) {
-      const said = pbr?.metallicFactor === undefined ? `, glTF's own when a material doesn't say` : ''
+    // GLTFLoader hands three whatever the file says, which takes a string '1' as 1
+    if (pbr?.metallicFactor !== undefined && typeof pbr.metallicFactor !== 'number') return notGlb
+    const metalness = (pbr?.metallicFactor as number | undefined) ?? 1
+    if (extensions.KHR_materials_unlit === undefined && pbr?.metallicRoughnessTexture === undefined && metalness > MAX_FILE_METALNESS) {
+      const said = pbr?.metallicFactor === undefined ? 'metallicFactor left out, which glTF reads as 1; Blender leaves it out at Metallic 1' : `metallicFactor ${metalness}`
       return (
-        `the model's material ${name} is metallic (metallicFactor ${metalness}${said}): the stage has no reflections for a metal ` +
+        `the model's material ${name} is metallic (${said}): the stage has no reflections for a metal ` +
         `to show, so it would look near black. Set its metallic to at most ${MAX_FILE_METALNESS} in the program that made it, ` +
         `or write a colour such as material: metal`
       )

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import {
   MODEL_BONES_PROBLEM,
   MODEL_INSTANCING_PROBLEM,
+  MODEL_OPAQUE_ADVICE,
   modelBytesProblem,
   modelExtentProblem,
   type ModelFormat,
@@ -59,9 +60,7 @@ function builtLookProblem(model: THREE.Object3D): string | null {
     for (const material of [mesh.material].flat() as THREE.MeshPhysicalMaterial[]) {
       if (material.transparent || material.alphaTest > 0 || (material.transmission ?? 0) > 0) {
         const name = material.name ? `'${material.name}'` : `of the mesh '${mesh.name}'`
-        problem =
-          `the model's material ${name} is see-through, which the stage draws wrong or not at all: ` +
-          `make it opaque in the program that made it, or write a colour such as material: grey`
+        problem = `the model's material ${name} is see-through, which the stage draws wrong or not at all: ${MODEL_OPAQUE_ADVICE}`
         return
       }
     }

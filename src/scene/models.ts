@@ -161,7 +161,9 @@ function fileImages(loader: GLTFLoader, manager: THREE.LoadingManager, own: Set<
         // the checks refuse an image at an address: the manager refuses it too
         if (image?.bufferView === undefined) continue
         const bytes = (await parser.getDependency('bufferView', image.bufferView)) as ArrayBuffer
-        const url = `data:${image.mimeType};base64,${base64Of(bytes)}`
+        // the checks let a JPEG labelled image/jpg through, as glTF names it image/jpeg
+        const type = image.mimeType === 'image/jpg' ? 'image/jpeg' : image.mimeType
+        const url = `data:${type};base64,${base64Of(bytes)}`
         own.add(url)
         names.set(url, typeof image.name === 'string' && image.name !== '' ? `'${image.name}'` : `number ${k + 1}`)
         image.uri = url
@@ -204,14 +206,16 @@ function base64Of(buffer: ArrayBuffer): string {
  * panel read). Each object parses its own copy, so no two objects share
  * geometry, materials or textures. Never rejects: an object whose file it
  * hasn't got (the build and the panel have said why already) or can't read
- * keeps its empty node.
+ * keeps its empty node. So does an object in `leftOut`: the editor panel's
+ * checks refused its file in its unit or look, and passed it for other
+ * objects (panel-models.ts).
  */
-export function modelLoader(files: Record<string, string>): ModelLoader {
+export function modelLoader(files: Record<string, string>, leftOut: ReadonlySet<SceneObject> = new Set()): ModelLoader {
   return {
     async load(objects: SceneObject[]): Promise<Map<string, THREE.Object3D>> {
       const models = new Map<string, THREE.Object3D>()
       for (const spec of objects) {
-        if (spec.shape !== 'model' || !spec.model) continue
+        if (spec.shape !== 'model' || !spec.model || leftOut.has(spec)) continue
         const { src } = spec.model
         if (!Object.hasOwn(files, src)) continue
         try {

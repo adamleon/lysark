@@ -325,7 +325,7 @@ async function readModels(
   const out: Array<{ base64: string; srcs: string[] }> = []
   for (const [file, uses] of users) {
     // the size on disk first, so a file far over the limit is never read
-    const size = modelSizeProblem(statSync(file).size)
+    const size = modelSizeProblem(statSync(file).size, uses[0].format)
     if (size) throw new Error(`${modelWhere(uses[0])}: ${size}`)
     const bytes = readFileSync(file)
     // exactly the file's bytes: a small file's Buffer is a view into a shared

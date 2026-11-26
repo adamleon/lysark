@@ -1,5 +1,5 @@
 import type { ModelRef } from '../compiler/compile-slides'
-import { MODEL_SIZE_ADVICE, modelSizeProblem, modelWhere } from '../compiler/model-types'
+import { modelObjectKey, modelSizeAdvice, modelSizeProblem, modelWhere } from '../compiler/model-types'
 import { checkModel } from '../scene/model-check'
 import { decodeBase64, firstLine } from '../scene/models'
 import type { HostFile } from './host'
@@ -56,58 +56,73 @@ function notThere(file: HostFile | undefined): boolean {
  * the path from the lecture folder of a file that is there when the path is
  * read from scenes/.
  */
-function unreadProblem(src: string, error: string, fix: string | undefined): string {
+function unreadProblem(ref: ModelRef, error: string, fix: string | undefined): string {
   const hint = fix ? `. Write ${fix}: the path is from the lecture folder, not from scenes/` : ''
   if (error === 'not found') {
-    return `the model '${src}' was not found. Paths in scene files are from the lecture folder, where slides.md is, as for images${hint}`
+    return `the model '${ref.src}' was not found. Paths in scene files are from the lecture folder, where slides.md is, as for images${hint}`
   }
   // VS Code reads at most 32 MB of a file: one larger is far over lysark's own limit
-  if (error.startsWith('larger than')) return `the model is ${error}; ${MODEL_SIZE_ADVICE}`
-  return `the model '${src}': ${error}${hint}`
+  if (error.startsWith('larger than')) return `the model is ${error}; ${modelSizeAdvice(ref.format)}`
+  return `the model '${ref.src}': ${error}${hint}`
 }
 
 /** how an object reads its model file, for the checks: its unit and its look */
 const readWay = (ref: ModelRef) => `${ref.unit} ${ref.look}`
 
 /**
- * What is wrong with a file's base64 for the objects that show it, named at
- * the first object it is wrong for; null if all of them can show it.
+ * What is wrong with a file's base64 for the objects that show it: a problem
+ * for each way they read it (unit and look) that fails, named at the first
+ * object that reads it so, at its own line, as the build does; and the
+ * objects it can't be shown for. All of them when the file itself is wrong.
  */
-async function contentProblem(base64: string, uses: ModelRef[]): Promise<string | null> {
+async function contentProblems(base64: string, uses: ModelRef[]): Promise<{ problems: string[]; refused: Set<ModelRef> }> {
+  const all = (problem: string) => ({ problems: [`${modelWhere(uses[0])}: ${problem}`], refused: new Set(uses) })
   // the size first, so a file far over the limit is never decoded
-  const size = modelSizeProblem(base64Bytes(base64))
-  if (size) return `${modelWhere(uses[0])}: ${size}`
+  const size = modelSizeProblem(base64Bytes(base64), uses[0].format)
+  if (size) return all(size)
+  let buffer: ArrayBuffer
   try {
-    const buffer = decodeBase64(base64)
-    // each object reads the file in its own unit and with its own look (its
-    // material: line): a problem names the first object with the unit and look
-    // it is about, at its own line, as the build does
-    for (const way of new Set(uses.map(readWay))) {
-      const user = uses.find((ref) => readWay(ref) === way)!
-      const problem = await checkModel(buffer, user.format, [user.unit], user.look)
-      if (problem) return `${modelWhere(user)}: ${problem}`
-    }
-    return null
+    buffer = decodeBase64(base64)
   } catch (error) {
-    // the checks catch the loaders' errors; this is a file that isn't base64, or
-    // a check that threw: the model is left out, and the panel starts anyway
-    return `${modelWhere(uses[0])}: the model couldn't be read: ${firstLine(error)}`
+    // the host never sends what isn't base64: the model is left out, and the panel starts anyway
+    return all(`the model couldn't be read: ${firstLine(error)}`)
   }
+  const problems: string[] = []
+  const refused = new Set<ModelRef>()
+  for (const way of new Set(uses.map(readWay))) {
+    const readers = uses.filter((ref) => readWay(ref) === way)
+    let problem: string | null
+    try {
+      problem = await checkModel(buffer, readers[0].format, [readers[0].unit], readers[0].look)
+    } catch (error) {
+      // the checks catch the loaders' errors; this is a check that threw
+      problem = `the model couldn't be read: ${firstLine(error)}`
+    }
+    if (problem === null) continue
+    problems.push(`${modelWhere(readers[0])}: ${problem}`)
+    for (const ref of readers) refused.add(ref)
+  }
+  return { problems, refused }
 }
 
 /**
  * The model files as base64, by src, from files read with `read`, for the
- * deck's model loader (deck-from-source.ts); and the problems with those it
+ * deck's model loader (deck-from-source.ts); the problems with those it
  * leaves out, each starting where the scene file names it
- * (`scenes/arm.yaml, line 12: object 'bracket': …`). Their objects are drawn
- * as empty nodes. Never rejects, so a model can't keep the panel from starting.
+ * (`scenes/arm.yaml, line 12: object 'bracket': …`); and `leftOut`, the
+ * objects (modelObjectKey) that read a file it gives a way that failed, their
+ * unit or their look, so the loader shows the file only to the others: one
+ * object without its material: line doesn't take the file from another with
+ * a colour. The objects left out are drawn as empty nodes. Never rejects, so
+ * a model can't keep the panel from starting.
  */
 export async function loadModels(
   refs: ModelRef[],
   read: (paths: string[]) => Promise<Record<string, HostFile>>,
-): Promise<{ files: Record<string, string>; problems: string[] }> {
+): Promise<{ files: Record<string, string>; problems: string[]; leftOut: string[] }> {
   const files: Record<string, string> = {}
   const problems: string[] = []
+  const leftOut = new Set<string>()
   // by the path read, in the order the scene files first show each
   const users = new Map<string, ModelRef[]>()
   for (const ref of refs) {
@@ -115,7 +130,7 @@ export async function loadModels(
     if (!users.has(path)) users.set(path, [])
     users.get(path)!.push(ref)
   }
-  if (users.size === 0) return { files, problems }
+  if (users.size === 0) return { files, problems, leftOut: [] }
   const got = await read([...users.keys()])
   // a file not where its path says may be where the path says read from scenes/:
   // asked for only then, so a lecture whose models are all there makes one request
@@ -126,15 +141,15 @@ export async function loadModels(
     if (typeof file?.base64 !== 'string') {
       const there = fromScenes(path)
       const fix = notThere(file) && typeof fromThere[there]?.base64 === 'string' ? there : undefined
-      problems.push(`${modelWhere(uses[0])}: ${unreadProblem(uses[0].src, file?.error ?? 'not found', fix)}`)
+      problems.push(`${modelWhere(uses[0])}: ${unreadProblem(uses[0], file?.error ?? 'not found', fix)}`)
       continue
     }
-    const problem = await contentProblem(file.base64, uses)
-    if (problem) {
-      problems.push(problem)
-      continue
-    }
-    for (const { src } of uses) files[src] = file.base64
+    const content = await contentProblems(file.base64, uses)
+    problems.push(...content.problems)
+    const shown = uses.filter((ref) => !content.refused.has(ref))
+    if (shown.length === 0) continue
+    for (const { src } of shown) files[src] = file.base64
+    for (const ref of content.refused) leftOut.add(modelObjectKey(ref))
   }
-  return { files, problems }
+  return { files, problems, leftOut: [...leftOut] }
 }

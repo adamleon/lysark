@@ -99,8 +99,8 @@ describe('checkModel', () => {
         materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
         textures: [{ name: 'photo', bytes: jpeg(3000, 2000), mimeType: 'image/jpeg' }],
       })
-      expect(await checkModel(large, 'glb', ['m'], 'file')).toBe(
-        "the model's image 'photo' is 3000 x 2000 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+      expect(await checkModel(large, 'glb', ['m'], 'file')).toMatch(
+        /^the model's image 'photo' is 3000 x 2000 pixels: a texture may be at most 2048 pixels on a side\. Scale the image down/,
       )
     })
 
@@ -111,7 +111,8 @@ describe('checkModel', () => {
       vi.mocked(modelBytesProblem).mockReturnValueOnce(null)
       expect(await checkModel(glass, 'glb', ['m'], 'file')).toBe(
         "the model's material 'glass' is see-through, which the stage draws wrong or not at all: " +
-          'make it opaque in the program that made it, or write a colour such as material: grey',
+          "make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), " +
+          'or write a colour such as material: grey',
       )
       // with a preset the file's materials are replaced
       expect(await checkModel(glass, 'glb', ['m'], 'preset')).toBeNull()

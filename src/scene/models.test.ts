@@ -348,4 +348,14 @@ describe('models', () => {
     expect(error.mock.calls[0][0]).toMatch(/^object 'broken': the model 'models\/broken\.glb' couldn't be read: \S/)
     expect(error.mock.calls[1][0]).toMatch(/^object 'garbled': the model 'models\/garbled\.stl' couldn't be read: \S/)
   })
+
+  it("leaves out the objects the panel refused a file for, and shows it to the others", async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    // the panel refused models/tray.glb for 'unchosen' (a textured file without a material: line), and passed it with a colour
+    const unchosen = { ...modelObject('unchosen', 'models/tray.glb'), material: 'grey' as const }
+    const loader = modelLoader({ 'models/tray.glb': base64(glb()) }, new Set([unchosen]))
+    const models = await loader.load([unchosen, { ...modelObject('grey', 'models/tray.glb'), material: 'grey' }, { ...modelObject('own', 'models/tray.glb'), material: 'file' }])
+    expect([...models.keys()]).toEqual(['grey', 'own'])
+    expect(error).not.toHaveBeenCalled()
+  })
 })

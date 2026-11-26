@@ -303,7 +303,9 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
   above, as for the KUKA, whatever the unit. The same goes for a GLB mesh without normals.
 - **Size:** a file may be at most 5 MB (5,000,000 bytes on disk), about 100,000 triangles as
   binary STL. For a larger part, export it with fewer triangles (CAD programs have a coarser STL
-  setting) or as binary STL. The model's largest side, read in its `unit`, must be between 1 mm
+  setting) or as binary STL. A GLB's textures count too: a 2048-pixel photo is 5 MB or more as PNG
+  and well under 1 MB as JPEG, so export textures as JPEG (in Blender's glTF export, under Data >
+  Material, Images: JPEG Format). The model's largest side, read in its `unit`, must be between 1 mm
   and 10 m: anything else is a file read in the wrong unit, and the build says what to change.
   Each file is built into the student file once, about a third larger than on disk, however
   many objects show it. A lecture without models carries none of the code that reads them.
@@ -330,10 +332,13 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
   A model the panel can't show (a file that isn't there, too large, or refused) is drawn as an
   empty node, still an anchor and a parent, and a banner lists each under **Models not shown:**
   (after **Images not shown:**, if any), with the scene file, the line, the object and the build's
-  words. Letter case is the exception, as for images: desktop VS Code on Windows finds
-  `Bracket.stl` for `bracket.stl`, so the panel shows a model only the build refuses. A path
-  whose case is wrong in a folder after `..` (`../../Assets/bracket.stl`) the panel calls outside
-  the lecture folder, on any computer, and the build says the case is wrong.
+  words. A file refused only for how one object reads it, its `unit` or its `material:` line (a
+  textured GLB without `material:`, say), still shows on the objects that read it in another unit
+  or look; the build stops at the first problem all the same. Letter case is the exception, as
+  for images: desktop VS Code on Windows finds `Bracket.stl` for `bracket.stl`, so the panel shows
+  a model only the build refuses. A path whose case is wrong in a folder after `..`
+  (`../../Assets/bracket.stl`) the panel calls outside the lecture folder, on any computer, and
+  the build says the case is wrong.
 
 ### A GLB's own look: `material: file`
 
@@ -346,19 +351,28 @@ colours, and its textures (images painted on it, such as a label or a printed ma
   without textures and no `material:` line is grey, as before.
 - **Textures** are PNG or JPEG images inside the `.glb` (Blender's glTF Binary export puts them
   there), at most 2048 pixels on a side: a 2048 × 2048 texture takes about 22 MB of the graphics
-  card's memory with the smaller copies it is drawn from at a distance. The 5 MB limit per file
-  counts its textures. KTX2 (Basis), WebP and AVIF textures are refused: export the textures as
-  PNG or JPEG. A texture's offset, scale and turn (`KHR_texture_transform`, which Blender writes
-  for a Mapping node) are read.
+  card's memory with the smaller copies it is drawn from at a distance. To make one smaller in
+  Blender, open it in the Image Editor, Image > Resize, then Image > Save, and export again. The
+  5 MB limit per file counts its textures, and a 2048-pixel photo as PNG uses all of it: export
+  textures as JPEG (in Blender's glTF export, under Data > Material, Images: JPEG Format; an image
+  that needs its transparency stays PNG). KTX2 (Basis), WebP and AVIF textures are refused: export
+  them as PNG or JPEG (Blender's Images: Automatic keeps a WebP image WebP, and Create WebP adds
+  WebP copies: leave it off). A texture's offset, scale and turn (`KHR_texture_transform`, which
+  Blender writes for a Mapping node) are read.
 - **What the stage can't draw is refused**, each with a message naming the material or mesh: a
-  see-through material (blend mode alpha blend or clip, or transmission), since the stage draws
-  those wrong or not at all; a material more metallic than 0.6 (the `metal` preset's) without a
-  metallic texture, since the stage has no reflections for a metal to show, and it would look near
-  black (glTF counts a material that doesn't say as fully metallic); a mesh without a material,
-  which three.js draws fully metallic; and a textured mesh without texture coordinates (a UV map).
-  A metallic texture's pixels can't be read by the build: where such a texture says fully
-  metallic, the part shows dark. An unlit material (`KHR_materials_unlit`) shows its colour
-  whatever the light.
+  see-through material (alpha blend or clip, or transmission), since the stage draws those wrong
+  or not at all; a material more metallic than 0.6 (the `metal` preset's) without a metallic
+  texture, since the stage has no reflections for a metal to show, and it would look near black
+  (glTF reads a material that doesn't say as fully metallic, and Blender leaves it out at
+  Metallic 1); a mesh without a material, which three.js draws fully metallic; and a textured mesh
+  without texture coordinates (a UV map). A metallic texture's pixels can't be read by the build:
+  where such a texture says fully metallic, the part shows dark. An unlit material
+  (`KHR_materials_unlit`) shows its colour whatever the light.
+- **Opaque in Blender.** Blender 4.2 and later have no blend mode of their own: the glTF export
+  writes a material as blended whenever anything is linked to the Principled BSDF's Alpha, or it
+  is under 1. Unlink it and set it to 1. A texture's transparent pixels then show the colour they
+  hold (often white or black), so a sticker or decal with a transparent surround shows as a
+  square: paint it onto the part's own texture instead.
 - **The theme and the print PDF.** The file's colours don't follow the theme. In the PDF the page
   is white, so a white part can vanish into it, where the `white` preset is a little greyer:
   give such a part a colour, or a darker white in the file. Textures print as they show.
@@ -602,25 +616,34 @@ words (for a file VS Code won't read, its own reason). For example:
   textures of its own: give it one of the colours. The colours: grey, …` (a compile error, at the
   `material:` line)
 - `scenes/arm.yaml, line 54: object 'marker': the model's image 'label' is 4096 x 4096 pixels: a
-  texture may be at most 2048 pixels on a side. Export it smaller`
+  texture may be at most 2048 pixels on a side. Scale the image down (in Blender's Image Editor,
+  Image > Resize, then Image > Save) and export again, or write a colour such as material: grey`
 - `scenes/arm.yaml, line 54: object 'marker': the model's textures are WebP (EXT_texture_webp),
-  which a lecture can't show: export the textures as PNG or JPEG`
+  which a lecture can't show: export the textures as PNG or JPEG (in Blender's glTF export, under
+  Data > Material, Images: JPEG Format, with Create WebP off)`. Without a `material:` line the
+  same message ends `…, and write material: file to show them, or a colour such as material: grey
+  to colour it all with that`.
 - `scenes/arm.yaml, line 49: object 'tray': the model's material 'steel' is metallic
-  (metallicFactor 1): the stage has no reflections for a metal to show, so it would look near
+  (metallicFactor 0.9): the stage has no reflections for a metal to show, so it would look near
   black. Set its metallic to at most 0.6 in the program that made it, or write a colour such as
-  material: metal`
+  material: metal` (for a material that leaves the factor out, as Blender's does at Metallic 1:
+  `(metallicFactor left out, which glTF reads as 1; Blender leaves it out at Metallic 1)`)
 - `scenes/arm.yaml, line 49: object 'tray': the model's material 'glass' is see-through (blended,
   alpha mode BLEND), which the stage draws wrong or not at all: make it opaque in the program that
-  made it, or write a colour such as material: grey`
+  made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), or write a
+  colour such as material: grey`
 - `scenes/arm.yaml, line 41: object 'bracket': the model is 7.3 MB; a model may be at most 5 MB.
   Export it with fewer triangles, or as binary STL rather than text STL (about five times
-  smaller)`
+  smaller)`; for a GLB, `a model may be at most 5 MB, its textures included. Export it with fewer
+  triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data >
+  Material, Images: JPEG Format) or smaller`
 - `scenes/arm.yaml, line 49: object 'tray': the model is a Git LFS pointer, not the model: the
   course build doesn't fetch LFS files. Keep the file in git itself (git lfs untrack, then commit
   it again)`
 
 When several objects show one file in different units, or with different `material:` lines, the
-message names the first object whose unit or look is wrong, at its own line.
+message names the first object whose unit or look is wrong, at its own line. The panel names one
+for each unit or look that is wrong, and still shows the file on the other objects.
 
 **Slide keys are checked too** (from v2.5.0). A misspelled key used to be ignored without a word;
 now `camrea:` stops the build: `slides.md, line 9: slide 3 has the key 'camrea', which a slide
@@ -728,7 +751,13 @@ never sees one. An image that doesn't decode stops the model, named, and the dec
 file before the loader reads it, so no image is ever loaded. The build's check runs in Node, which
 has no `<img>`: it reads each image's type and size from its header (`src/compiler/model-types.ts`,
 `pngSize` and `jpegSize`), checks the materials in the file, then parses the file without its
-images and checks what the loader built for a see-through material. Everything else that would
+images and checks what the loader built for a see-through material. `jpegSize` walks a JPEG's
+markers as libjpeg, the browsers' decoder, does, and refuses a file where the two could read
+different frame headers (`FF 00` read as a marker) or that libjpeg refuses, so a larger image
+can't pass under a smaller frame header. In the panel, a file is checked once for each way the
+objects read it (unit and look), and a way that fails leaves out only the objects that read it
+so: `loadModels` names them (`leftOut`, by scene file and object name), and
+`src/editor/deck-from-source.ts` hands those objects to `modelLoader`, which skips them. Everything else that would
 need a request, a worker or wasm (a `.gltf`, Draco and meshopt compression, KTX2 textures) or GPU
 memory `dispose.ts` doesn't free (bones, GPU instancing) stays refused, and the rest a GLB can hold
 (lights, cameras, lines, points) is taken out before the scene sees it.

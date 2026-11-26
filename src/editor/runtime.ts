@@ -547,6 +547,7 @@ window.addEventListener('message', async (event) => {
     window.__LYSARK_FILES__ = files
     window.__LYSARK_IMAGES__ = images
     window.__LYSARK_MODELS__ = models.files
+    window.__LYSARK_MODELS_LEFT_OUT__ = models.leftOut
     try {
       await import('../main')
       runningDeck = (await import('./deck-from-source')).default

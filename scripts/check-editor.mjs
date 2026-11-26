@@ -42,7 +42,8 @@
 // with material: file in their files' own materials, a texture an <img> loaded
 // from a data: address with no blob: request, a typed new place for one put in
 // place, a new unit loading the panel afresh, a textured model without a
-// material: line and a model file that isn't there each named in the banner
+// material: line (while another object showing its file in grey still shows
+// it) and a model file that isn't there each named in the banner
 // with its line, a broken text
 // refused, script in lecture text never run (inline handler, javascript: links,
 // a form), no errors, and no requests anywhere else. Engine CI runs it on the
@@ -1911,11 +1912,14 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         }
 
         // a textured GLB without a material: line: the panel refuses it as the build does, named in
-        // the banner at its model: line, and its object stays an empty node (scene-files step 9)
+        // the banner at its model: line, and its object stays an empty node (scene-files step 9); an
+        // object added showing the same file in grey still shows it
         const unchosen = textured[0]
         if (unchosen) {
           const plain = parseDocument(host.docs.get(armPath).text)
           plain.deleteIn(['objects', unchosen, 'material'])
+          const greyCopy = `${unchosen}-grey`
+          plain.setIn(['objects', greyCopy], plain.createNode({ ...armObjects[unchosen], material: 'grey' }))
           host.docs.set(armPath, { text: plain.toString(), version: host.docs.get(armPath).version + 1 })
           const plainSeq = await source(added)
           if (!(await fromRuntime({ type: 'lysark:accepted', seq: plainSeq }))) return fail(`'${unchosen}' without material: did not load the panel afresh`)
@@ -1933,9 +1937,25 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
           }
           const leftPlain = await waitFor(fitted)
           if (!leftPlain || leftPlain[unchosen].meshes !== 0) return fail(`without material:, '${unchosen}' should be an empty node: ${JSON.stringify(leftPlain)}`)
-          lines.push(`'${unchosen}' without its material: line: the banner names "${expectedPlain}…", and it stays an empty node`)
-          // its line back, for what follows
+          const greyMeshes = await waitFor(() =>
+            inPanel((w, name) => {
+              const L = w.__lysark
+              if (!L || L.sceneManager.busy || L.sceneManager.activeSceneId !== 'arm') return null
+              let meshes = 0
+              L.sceneManager.active.anchors[name]?.children.find((c) => c.name === `object:${name}:model`)?.traverse((part) => {
+                if (part.isMesh) meshes += 1
+              })
+              return meshes || null
+            }, greyCopy),
+          )
+          if (!greyMeshes) return fail(`'${greyCopy}', the same file in grey, should still show it while '${unchosen}' has no material: line (the panel says: ${await banner()})`)
+          lines.push(
+            `'${unchosen}' without its material: line: the banner names "${expectedPlain}…", and it stays an empty node, ` +
+              `while '${greyCopy}', the same file in grey, shows ${greyMeshes} mesh${greyMeshes === 1 ? '' : 'es'}`,
+          )
+          // its line back, and the grey copy gone, for what follows
           const back = parseDocument(host.docs.get(armPath).text)
+          back.deleteIn(['objects', greyCopy])
           back.setIn(['objects', unchosen, 'material'], 'file')
           host.docs.set(armPath, { text: back.toString(), version: host.docs.get(armPath).version + 1 })
         } else {

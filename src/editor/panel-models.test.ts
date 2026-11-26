@@ -52,6 +52,7 @@ describe('loadModels', () => {
     expect(loaded).toEqual({
       files: { 'models/bracket.stl': bracket, './models/bracket.stl': bracket, '../../assets/tray.glb': tray },
       problems: [],
+      leftOut: [],
     })
   })
 
@@ -83,6 +84,7 @@ describe('loadModels', () => {
     const notFound = 'was not found. Paths in scene files are from the lecture folder, where slides.md is, as for images'
     expect(loaded).toEqual({
       files: {},
+      leftOut: [],
       problems: [
         `scenes/arm.yaml, line 12: object 'gone': the model 'models/gone.stl' ${notFound}`,
         `scenes/arm.yaml, line 14: object 'tray': the model '../../../assets/tray.glb': ${OUTSIDE}. Write ../../assets/tray.glb${fromScenes}`,
@@ -96,15 +98,21 @@ describe('loadModels', () => {
     const { asked, read } = host({
       'models/late.stl': { error: 'VS Code did not answer' },
       'models/big.stl': { error: 'larger than 32 MB' },
+      'models/big.glb': { error: 'larger than 32 MB' },
       'models/folder.stl': { error: 'a folder, not a file' },
     })
-    const loaded = await loadModels([ref('late', 'models/late.stl', 3), ref('big', 'models/big.stl', 5), ref('folder', 'models/folder.stl', 7)], read)
+    const loaded = await loadModels(
+      [ref('late', 'models/late.stl', 3), ref('big', 'models/big.stl', 5), ref('bigger', 'models/big.glb', 6), ref('folder', 'models/folder.stl', 7)],
+      read,
+    )
     expect(asked).toHaveLength(1)
     expect(loaded.problems).toEqual([
       "scenes/arm.yaml, line 3: object 'late': the model 'models/late.stl': VS Code did not answer",
-      // VS Code's own limit gets lysark's advice
+      // VS Code's own limit gets lysark's advice, for the file's format
       "scenes/arm.yaml, line 5: object 'big': the model is larger than 32 MB; a model may be at most 5 MB. " +
         'Export it with fewer triangles, or as binary STL rather than text STL (about five times smaller)',
+      "scenes/arm.yaml, line 6: object 'bigger': the model is larger than 32 MB; a model may be at most 5 MB, its textures included. " +
+        "Export it with fewer triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data > Material, Images: JPEG Format) or smaller",
       "scenes/arm.yaml, line 7: object 'folder': the model 'models/folder.stl': a folder, not a file",
     ])
   })
@@ -144,7 +152,9 @@ describe('loadModels', () => {
       ],
       read,
     )
-    expect(loaded.files).toEqual({ 'models/other.stl': good })
+    // the file read in the right unit is still shown to 'right': only 'wrong' goes without it
+    expect(loaded.files).toEqual({ 'models/part.stl': good, 'models/other.stl': good })
+    expect(loaded.leftOut).toEqual(['scenes/arm.yaml wrong'])
     expect(loaded.problems).toEqual([
       expect.stringMatching(/^scenes\/arm\.yaml, line 20: object 'pointer': the model is a Git LFS pointer, not the model: /),
       expect.stringMatching(/^scenes\/arm\.yaml, line 26: object 'textured': the model has textures: write material: file to show them/),
@@ -162,29 +172,39 @@ describe('loadModels', () => {
         }),
       )
     const label = texture(png(8, 8))
-    const { read } = host({ 'models/label.glb': { base64: label }, 'models/poster.glb': { base64: texture(png(2049, 1)) } })
+    const poster = texture(png(2049, 1))
+    const { read } = host({ 'models/label.glb': { base64: label }, 'models/poster.glb': { base64: poster } })
     const loaded = await loadModels(
       [
         ref('own', 'models/label.glb', 10, 'm', 'file'),
         ref('red', 'models/label.glb', 14, 'm', 'preset'),
         ref('poster', 'models/poster.glb', 18, 'm', 'file'),
-        // a colour leaves the texture out, however large, but the build stops at 'poster' all the same: the file isn't shown
+        // a colour leaves the texture out, however large: the build stops at 'poster', but the
+        // panel still shows the file to 'grey', and leaves it out for 'poster' only
         ref('grey', 'models/poster.glb', 22, 'm', 'preset'),
       ],
       read,
     )
-    expect(loaded.files).toEqual({ 'models/label.glb': label })
+    expect(loaded.files).toEqual({ 'models/label.glb': label, 'models/poster.glb': poster })
+    expect(loaded.leftOut).toEqual(['scenes/arm.yaml poster'])
     expect(loaded.problems).toEqual([
-      "scenes/arm.yaml, line 18: object 'poster': the model's image 'label' is 2049 x 1 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+      expect.stringMatching(/^scenes\/arm\.yaml, line 18: object 'poster': the model's image 'label' is 2049 x 1 pixels: a texture may be at most 2048 pixels on a side\. /),
     ])
-    // no material: line: the object is named, at its line
+    // no material: line: the object is named, at its line, and only it goes without the file
     const unchosen = await loadModels([ref('own', 'models/label.glb', 10, 'm', 'file'), ref('plain', 'models/label.glb', 30)], read)
     expect(unchosen.problems).toEqual([expect.stringMatching(/^scenes\/arm\.yaml, line 30: object 'plain': the model has textures: write material: file/)])
+    expect(unchosen.files).toEqual({ 'models/label.glb': label })
+    expect(unchosen.leftOut).toEqual(['scenes/arm.yaml plain'])
+    // every way failing: the file isn't given at all, and nothing need be left out
+    const none = await loadModels([ref('plain', 'models/label.glb', 30), ref('poster', 'models/poster.glb', 18, 'm', 'file')], read)
+    expect(none.files).toEqual({})
+    expect(none.leftOut).toEqual([])
+    expect(none.problems).toHaveLength(2)
   })
 
   it('asks for nothing when no scene a slide runs has a model', async () => {
     const { asked, read } = host({})
-    expect(await loadModels([], read)).toEqual({ files: {}, problems: [] })
+    expect(await loadModels([], read)).toEqual({ files: {}, problems: [], leftOut: [] })
     expect(asked).toEqual([])
   })
 })

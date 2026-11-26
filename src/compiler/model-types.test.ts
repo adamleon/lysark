@@ -26,7 +26,9 @@ import {
   modelBytesProblem,
   modelExtentProblem,
   modelFormat,
+  modelObjectKey,
   modelPathProblem,
+  modelSizeAdvice,
   modelSizeProblem,
   modelWhere,
   pngSize,
@@ -53,6 +55,11 @@ describe('model files (scene-files-proposal.md step 8)', () => {
     // a dot in a folder's name is not an extension
     expect(modelFormat('models.stl/bracket')).toBeUndefined()
     expect(modelFormat('models/.constructor')).toBeUndefined()
+  })
+
+  it('names a model object by its scene file and name', () => {
+    expect(modelObjectKey({ file: 'scenes/arm.yaml', object: 'marker' })).toBe('scenes/arm.yaml marker')
+    expect(modelObjectKey({ file: 'scenes/arm.yaml', object: 'grey crate' })).toBe('scenes/arm.yaml grey crate')
   })
 
   it('has the units, the size limit and the smallest model', () => {
@@ -169,12 +176,22 @@ describe('modelSizeProblem and modelBytesProblem: the file (B1-B9)', () => {
   })
 
   it('refuses a file over the limit (B1), and says how much over', () => {
-    expect(modelSizeProblem(MODEL_MAX_BYTES)).toBeNull()
-    expect(modelSizeProblem(7_300_000)).toBe(`the model is 7.3 MB; ${tooLarge}`)
-    expect(modelSizeProblem(5_040_000)).toBe(`the model is 5.04 MB; ${tooLarge}`)
-    expect(modelSizeProblem(MODEL_MAX_BYTES + 1)).toBe(`the model is 5.000001 MB; ${tooLarge}`)
+    expect(modelSizeProblem(MODEL_MAX_BYTES, 'stl')).toBeNull()
+    expect(modelSizeProblem(7_300_000, 'stl')).toBe(`the model is 7.3 MB; ${tooLarge}`)
+    expect(modelSizeProblem(5_040_000, 'stl')).toBe(`the model is 5.04 MB; ${tooLarge}`)
+    expect(modelSizeProblem(MODEL_MAX_BYTES + 1, 'stl')).toBe(`the model is 5.000001 MB; ${tooLarge}`)
     expect(modelBytesProblem(new ArrayBuffer(MODEL_MAX_BYTES + 1), 'stl')).toBe(`the model is 5.000001 MB; ${tooLarge}`)
     expect(modelBytesProblem(new ArrayBuffer(MODEL_MAX_BYTES + 1), 'glb')).toMatch(/^the model is 5\.000001 MB/)
+  })
+
+  it("advises a GLB over the limit about its textures, which count in it (a 2048-pixel PNG photo alone can be 5 MB)", () => {
+    const glbAdvice =
+      'a model may be at most 5 MB, its textures included. Export it with fewer triangles, or its textures as JPEG rather than PNG ' +
+      "(in Blender's glTF export, under Data > Material, Images: JPEG Format) or smaller"
+    expect(modelSizeAdvice('glb')).toBe(glbAdvice)
+    expect(modelSizeAdvice('stl')).toBe(tooLarge)
+    expect(modelSizeProblem(5_500_000, 'glb')).toBe(`the model is 5.5 MB; ${glbAdvice}`)
+    expect(modelBytesProblem(new ArrayBuffer(MODEL_MAX_BYTES + 1), 'glb')).toBe(`the model is 5.000001 MB; ${glbAdvice}`)
   })
 
   it('refuses a Git LFS pointer (B2)', () => {
@@ -268,7 +285,20 @@ describe('modelSizeProblem and modelBytesProblem: the file (B1-B9)', () => {
       ...['KHR_texture_basisu', 'EXT_texture_webp', 'EXT_texture_avif'].map((name) => glb({ edits: [glbEdits.extension(name, false)] })),
       textureBox(),
     ]
-    for (const file of textured) expect(modelBytesProblem(file, 'glb')).toBe(message)
+    for (const file of textured.slice(0, 2)) expect(modelBytesProblem(file, 'glb')).toBe(message)
+    expect(modelBytesProblem(textureBox(), 'glb')).toBe(message)
+    // textures material: file couldn't show either are said at once, not after material: file is written
+    const blender = "in Blender's glTF export, under Data > Material, Images: JPEG Format, with Create WebP off"
+    for (const [k, [name, kind]] of [
+      ['KHR_texture_basisu', 'KTX2'],
+      ['EXT_texture_webp', 'WebP'],
+      ['EXT_texture_avif', 'AVIF'],
+    ].entries()) {
+      expect(modelBytesProblem(textured[2 + k], 'glb')).toBe(
+        `the model's textures are ${kind} (${name}), which a lecture can't show: export the textures as PNG or JPEG (${blender}), ` +
+          'and write material: file to show them, or a colour such as material: grey to colour it all with that',
+      )
+    }
     // with a preset, its materials and textures are left out, whatever they are
     for (const file of textured) expect(modelBytesProblem(file, 'glb', 'preset')).toBeNull()
     expect(modelBytesProblem(glb({ edits: [glbEdits.extension('KHR_texture_basisu')] }), 'glb', 'preset')).toBeNull()
@@ -341,17 +371,32 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
   })
 
   it('refuses an image over 2048 pixels on a side, naming it and its size', () => {
-    expect(own(textureBox({ name: 'label', bytes: png(2049, 1) }))).toBe(
-      "the model's image 'label' is 2049 x 1 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
-    )
+    const smaller =
+      "a texture may be at most 2048 pixels on a side. Scale the image down (in Blender's Image Editor, Image > Resize, then Image > Save) " +
+      'and export again, or write a colour such as material: grey'
+    expect(own(textureBox({ name: 'label', bytes: png(2049, 1) }))).toBe(`the model's image 'label' is 2049 x 1 pixels: ${smaller}`)
     // the size from a JPEG's frame header, a progressive one's too; an image without a name by its place
     expect(own(textureBox({ name: '', bytes: jpeg(4096, 3072, { frame: 0xc2 }), mimeType: 'image/jpeg' }))).toBe(
-      "the model's image number 1 is 4096 x 3072 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+      `the model's image number 1 is 4096 x 3072 pixels: ${smaller}`,
+    )
+  })
+
+  it('reads a JPEG labelled image/jpg, as some programs write it, as a JPEG', () => {
+    expect(own(textureBox({ bytes: jpeg(16, 16), mimeType: 'image/jpg' }))).toBeNull()
+    expect(own(textureBox({ name: 'label', bytes: jpeg(4096, 16), mimeType: 'image/jpg' }))).toMatch(/^the model's image 'label' is 4096 x 16 pixels/)
+    expect(own(textureBox({ name: 'label', mimeType: 'image/jpg' }))).toBe("the model's image 'label' isn't the JPEG the file says it is: export it again")
+  })
+
+  it("refuses a JPEG whose frame header libjpeg reads elsewhere: a larger image can't hide behind FF 00", () => {
+    expect(own(textureBox({ name: 'label', bytes: hiddenJpeg().buffer as ArrayBuffer, mimeType: 'image/jpeg' }))).toBe(
+      "the model's image 'label' isn't the JPEG the file says it is: export it again",
     )
   })
 
   it('refuses an image that is not a PNG or JPEG, or not the one it says', () => {
-    const only = 'a lecture shows PNG and JPEG textures only. Export the textures as PNG or JPEG'
+    const only =
+      "a lecture shows PNG and JPEG textures only. Export the textures as PNG or JPEG (in Blender's glTF export, under Data > Material, " +
+      'Images: JPEG Format, with Create WebP off)'
     expect(own(textureBox({ name: 'label', mimeType: 'image/webp' }))).toBe(`the model's image 'label' is 'image/webp': ${only}`)
     expect(own(textureBox({ name: 'label', mimeType: 'image/ktx2' }))).toBe(`the model's image 'label' is 'image/ktx2': ${only}`)
     expect(own(textureBox({ name: 'label' }, (json) => delete json.images[0].mimeType))).toBe(`the model's image 'label' is of no type it says: ${only}`)
@@ -366,7 +411,9 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
       ['EXT_texture_webp', 'WebP'],
       ['EXT_texture_avif', 'AVIF'],
     ]) {
-      const message = `the model's textures are ${kind} (${name}), which a lecture can't show: export the textures as PNG or JPEG`
+      const message =
+        `the model's textures are ${kind} (${name}), which a lecture can't show: export the textures as PNG or JPEG ` +
+        "(in Blender's glTF export, under Data > Material, Images: JPEG Format, with Create WebP off)"
       expect(own(textureBox({}, glbEdits.extension(name)))).toBe(message)
       expect(own(textureBox({}, (json) => (json.textures[0].extensions = { [name]: { source: 0 } })))).toBe(message)
     }
@@ -391,7 +438,9 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
   })
 
   it('refuses a see-through material, which the stage draws wrong or not at all', () => {
-    const opaque = 'make it opaque in the program that made it, or write a colour such as material: grey'
+    const opaque =
+      "make it opaque in the program that made it (in Blender, the Principled BSDF's Alpha at 1, with nothing linked to it), " +
+      'or write a colour such as material: grey'
     expect(own(coloured({ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }))).toBe(
       `the model's material 'glass' is see-through (blended, alpha mode BLEND), which the stage draws wrong or not at all: ${opaque}`,
     )
@@ -414,9 +463,15 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
     expect(own(coloured({ name: 'steel', pbrMetallicRoughness: { metallicFactor: 0.9 } }))).toBe(
       `the model's material 'steel' is metallic (metallicFactor 0.9): ${advice}`,
     )
-    // glTF's own metallicFactor is 1
-    expect(own(coloured({ name: 'plain' }))).toBe(`the model's material 'plain' is metallic (metallicFactor 1, glTF's own when a material doesn't say): ${advice}`)
-    expect(own(coloured({ pbrMetallicRoughness: {} }))).toMatch(/^the model's material number 1 is metallic \(metallicFactor 1, glTF's own/)
+    // glTF's own metallicFactor is 1, and Blender leaves it out then
+    expect(own(coloured({ name: 'plain' }))).toBe(
+      `the model's material 'plain' is metallic (metallicFactor left out, which glTF reads as 1; Blender leaves it out at Metallic 1): ${advice}`,
+    )
+    expect(own(coloured({ pbrMetallicRoughness: {} }))).toMatch(/^the model's material number 1 is metallic \(metallicFactor left out, which glTF reads as 1;/)
+    // any other value three would take as a number: GLTFLoader hands it on, and three reads '1' as 1
+    for (const value of ['1', [1], true, null]) {
+      expect(own(coloured({ pbrMetallicRoughness: { metallicFactor: value } })), JSON.stringify(value)).toBe(notGlb)
+    }
     // as metallic as the preset, unlit, or with a texture saying how metallic each point is (which isn't read here)
     expect(own(coloured({ pbrMetallicRoughness: { metallicFactor: 0.6 } }))).toBeNull()
     expect(own(coloured({ extensions: { KHR_materials_unlit: {} } }))).toBeNull()
@@ -447,6 +502,11 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
       })
     expect(own(transformed(1))).toMatch(/\(TEXCOORD_1, a UV map\)/)
     expect(own(transformed(0))).toBeNull()
+    // but only when extensionsUsed lists it: GLTFLoader reads the transform only then
+    const unlisted = textureBox({}, (json) => {
+      json.materials[0].pbrMetallicRoughness.baseColorTexture.extensions = { KHR_texture_transform: { texCoord: 1 } }
+    })
+    expect(own(unlisted)).toBeNull()
   })
 
   it("refuses a required extension GLTFLoader doesn't read into the file's look, and allows those it does", () => {
@@ -485,7 +545,44 @@ describe('pngSize and jpegSize: an image size from its header', () => {
     expect(jpegSize(new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0, 2, 0xff, 0xd9]))).toBeUndefined()
     expect(jpegSize(plain.subarray(0, 30))).toBeUndefined()
   })
+
+  it('reads the markers as libjpeg, the browsers\' decoder, does, or refuses the file', () => {
+    // FF 00 isn't a marker: libjpeg skips it and the bytes up to the next FF, and reads a
+    // 4096-pixel frame header that a length after FF 00 would skip, to a 16-pixel one
+    expect(jpegSize(hiddenJpeg())).toBeUndefined()
+    // a reserved marker (RESn, JPG, DHP, EXP, JPGn), which libjpeg refuses, before the frame header
+    const plain = bytes(jpeg(16, 8))
+    for (const marker of [0x02, 0x4f, 0xbf, 0xc8, 0xde, 0xdf, 0xf0, 0xfd]) {
+      const reserved = new Uint8Array(plain.length + 4)
+      reserved.set(plain.subarray(0, 2))
+      reserved.set([0xff, marker, 0, 2], 2)
+      reserved.set(plain.subarray(2), 6)
+      expect(jpegSize(reserved), marker.toString(16)).toBeUndefined()
+    }
+    // the markers libjpeg reads on past: application data and comments (0xe0 to 0xef, 0xfe), and a restart interval
+    for (const marker of [0xe1, 0xef, 0xfe, 0xdd]) {
+      const read = new Uint8Array(plain.length + 6)
+      read.set(plain.subarray(0, 2))
+      read.set([0xff, marker, 0, 4, 0, 0], 2)
+      read.set(plain.subarray(2), 8)
+      expect(jpegSize(read), marker.toString(16)).toEqual({ width: 16, height: 8 })
+    }
+  })
 })
+
+/**
+ * A JPEG's header as a crafted file has it (step 9's review): after the start
+ * of the image, FF 00 and two bytes, which read as a marker with a length
+ * would skip to a 16 x 16 frame header inside an APP1 segment; libjpeg skips
+ * FF 00 and the bytes up to the next FF, and reads the 4096 x 4096 frame
+ * header before the APP1. The crafted file, with tables and image data after
+ * this, decodes at 4096 x 4096 in Chromium and Firefox.
+ */
+function hiddenJpeg(): Uint8Array {
+  const frame = (size: number) => [0xff, 0xc0, 0, 11, 8, size >> 8, size & 0xff, size >> 8, size & 0xff, 1, 1, 0x11, 0]
+  // 0x13, read as a length: its own 2 bytes, the large frame header's 13 and the APP1's first 4
+  return new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x00, 0x13, ...frame(4096), 0xff, 0xe1, 0x00, 15, ...frame(16), 0xff, 0xd9])
+}
 
 describe('modelExtentProblem: the size of the model (B11-B12)', () => {
   it('allows 1 mm to 10 m, read in the unit', () => {

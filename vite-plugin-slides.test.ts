@@ -249,16 +249,24 @@ describe('models in the build (docs/scene-files.md, "Models")', () => {
     )
   })
 
-  it('refuses a file over 5 MB from its size on disk', async () => {
+  it('refuses a file over 5 MB from its size on disk, with advice for its format', async () => {
     const big = join(m1, 'models', 'big.stl')
+    const bigGlb = join(m1, 'models', 'big.glb')
     writeFileSync(big, Buffer.alloc(5_000_001))
+    writeFileSync(bigGlb, Buffer.alloc(5_000_001))
     try {
       expect(await failure('  big:\n    model: models/big.stl\n')).toBe(
         "scenes/arm.yaml, line 4: object 'big': the model is 5.000001 MB; a model may be at most 5 MB. " +
           'Export it with fewer triangles, or as binary STL rather than text STL (about five times smaller)',
       )
+      expect(await failure('  big:\n    model: models/big.glb\n')).toBe(
+        "scenes/arm.yaml, line 4: object 'big': the model is 5.000001 MB; a model may be at most 5 MB, its textures included. " +
+          "Export it with fewer triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data > Material, " +
+          'Images: JPEG Format) or smaller',
+      )
     } finally {
       rmSync(big)
+      rmSync(bigGlb)
     }
   })
 
@@ -289,8 +297,8 @@ describe('models in the build (docs/scene-files.md, "Models")', () => {
     expect(await failure('  a:\n    model: models/labelled.glb\n    material: file\n  b:\n    model: models/labelled.glb\n')).toMatch(
       /^scenes\/arm\.yaml, line 7: object 'b': the model has textures: write material: file/,
     )
-    expect(await failure('  a:\n    model: models/poster.glb\n    material: file\n')).toBe(
-      "scenes/arm.yaml, line 4: object 'a': the model's image 'poster' is 3000 x 1 pixels: a texture may be at most 2048 pixels on a side. Export it smaller",
+    expect(await failure('  a:\n    model: models/poster.glb\n    material: file\n')).toMatch(
+      /^scenes\/arm\.yaml, line 4: object 'a': the model's image 'poster' is 3000 x 1 pixels: a texture may be at most 2048 pixels on a side\. Scale/,
     )
     // with a colour, the texture is left out, however large
     expect(await failure('  a:\n    model: models/poster.glb\n    material: grey\n')).toBe('built')
