@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { compileSlides } from '../compiler/compile-slides'
+import { readSceneFiles } from '../compiler/scene-files'
 import { namedTarget, namedViewEdit, saveAsChanges, saveAsChoices, viewEdit, viewUsers, type SaveAsChanges } from './save-view'
 
 const apply = (text: string, e: { start: number; end: number; text: string }) => text.slice(0, e.start) + e.text + text.slice(e.end)
@@ -167,5 +168,27 @@ describe('Save view as…', () => {
     expect('problem' in taken && taken.problem).toMatch(/already a view called 'near'/)
     const odd = saveAsChanges(slides, { slides, scene }, 1, choices, { kind: 'new', name: 'two words' }, view)
     expect('problem' in odd && odd.problem).toMatch(/one word/)
+  })
+
+  it('keeps a limits: off line at the top of the scene file, saving into a view or adding one (decision 11)', () => {
+    const limited = `limits: off\n${scene}objects:\n  part:\n    model: models/part.glb\n    material: file\n`
+    const withLimits = { 'slides.md': slides, 'scenes/arm.yaml': limited }
+    const camerasHere = compileSlides(slides, withLimits).map((s) => s.effective.camera)
+    const choices = saveAsChoices(withLimits, 1, (target) => viewUsers(withLimits, target, camerasHere))!
+    const put = (plan: SaveAsChanges | { problem: string }) => {
+      if ('problem' in plan) throw new Error(plan.problem)
+      return plan.scene ? limited.slice(0, plan.scene.start) + plan.scene.text + limited.slice(plan.scene.end) : limited
+    }
+    const into = put(saveAsChanges(slides, { slides, scene: limited }, 1, choices, { kind: 'view', name: 'near' }, view))
+    const added = put(saveAsChanges(slides, { slides, scene: limited }, 1, choices, { kind: 'new', name: 'nært' }, view))
+    // V on a slide that names a view
+    const named = namedViewEdit(limited, 'wide', view)
+    if (!named || 'problem' in named) throw new Error(`no edit: ${JSON.stringify(named)}`)
+    const v = apply(limited, named)
+    for (const text of [into, added, v]) {
+      expect(text.startsWith('limits: off\nbase: arm\n')).toBe(true)
+      expect(readSceneFiles({ 'scenes/arm.yaml': text }).get('arm')!.limits).toBe('off')
+    }
+    expect(into).toBe(limited.replace('offset: [1, 1, 1]', 'offset: [1.5, 0.5, 2]').replace(/(near:\n {4}lookAt: )\[0, 0, 0\]/, '$1[0.1, 0.5, 0]'))
   })
 })

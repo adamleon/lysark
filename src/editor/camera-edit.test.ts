@@ -275,3 +275,22 @@ describe('save view as, second review', () => {
     expect(setNamedView(scene, 'oversikt', v)).not.toContain('spring')
   })
 })
+
+describe('a scene file with limits: off (decision 11)', () => {
+  const objects = 'objects:\n  part:\n    model: models/part.glb\n    material: file\n'
+  const limitsOf = (text: string) => readSceneFiles({ 'scenes/arm.yaml': text }).get('arm')!.limits
+
+  it('keeps the line when V changes a view, and when a view is added, under views: or with it', () => {
+    const scene = `limits: off\nbase: arm\nviews:\n  oversikt:\n    lookAt: [0, 0.5, 0]\n    offset: [2, 2, 2]\n${objects}`
+    const changed = setNamedView(scene, 'oversikt', view)
+    expect(changed).toBe(scene.replace('lookAt: [0, 0.5, 0]', 'lookAt: [0.12, 0.5, 0]').replace('offset: [2, 2, 2]', 'offset: [1.5, 0.75, 2]'))
+    const added = addNamedView(scene, 'nært', view)
+    expect(added.startsWith('limits: off\nbase: arm\n')).toBe(true)
+    // a file without views: gets one after the rest, the line where it was
+    const bare = `base: arm\n${objects}limits: off   # for testing\n`
+    const withViews = addNamedView(bare, 'nært', view)
+    expect(withViews.startsWith(bare)).toBe(true)
+    for (const text of [changed, added, withViews]) expect(limitsOf(text)).toBe('off')
+    expect(readSceneFiles({ 'scenes/arm.yaml': withViews }).get('arm')!.views.get('nært')!.camera.offset).toEqual([1.5, 0.75, 2])
+  })
+})

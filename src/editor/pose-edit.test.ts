@@ -372,6 +372,34 @@ describe('pose text edits for save pose as', () => {
     expect(readSceneFiles({ 'scenes/agilus.yaml': text }).get('agilus')!.poses.get('grip')!.joints).toMatchObject({ joint_2: -1.25, joint_6: 0 })
   })
 
+  it('keeps a limits: off line at the top of the scene file, with P, Save pose as… and a pose added (decision 11)', () => {
+    const objects = 'objects:\n  part:\n    model: models/part.glb\n    material: file\n'
+    const limited = `limits: off\nbase: arm\nposes:\n  reach: [0.9, 1.1, -1.5]\n  low: { joint2: 0.3 }\n${objects}`
+    // P into a named pose
+    const p = namedPoseEdit(limited, 'reach', { joint2: 0.75 }, ARM)
+    if (!p || 'problem' in p) throw new Error(`no edit: ${JSON.stringify(p)}`)
+    const saved = apply(limited, p)
+    expect(saved).toBe(limited.replace('[0.9, 1.1, -1.5]', '[0.9, 0.75, -1.5]'))
+    // a new pose, under poses:, or with poses: added after the rest
+    const added = addNamedPose(limited, 'q0', [0, 0.6, -1], ARM)
+    const withPoses = addNamedPose(`base: arm\n${objects}limits: off\n`, 'q0', [0, 0.6, -1], ARM)
+    expect(withPoses.startsWith(`base: arm\n${objects}limits: off\n`)).toBe(true)
+    // Save pose as… into the pose 'low', the slide naming it
+    const files = { 'slides.md': '---\nscene: arm\njoints:\n  joint1: 0.2\n---\n# A\n', 'scenes/arm.yaml': limited }
+    const plan = poseAsChanges(files['slides.md'], { slides: files['slides.md'], scene: limited }, 0, poseAsChoices(files, 0, () => [])!, { kind: 'pose', name: 'low' }, {
+      joint1: 0.2,
+      joint2: 0.4,
+      joint3: -1,
+    }, ['joint2'])
+    if ('problem' in plan) throw new Error(plan.problem)
+    const into = apply(limited, plan.scene!)
+    for (const text of [saved, added, withPoses, into]) {
+      expect(readSceneFiles({ 'scenes/arm.yaml': text }).get('arm')!.limits).toBe('off')
+    }
+    for (const text of [saved, added, into]) expect(text.startsWith('limits: off\nbase: arm\n')).toBe(true)
+    expect(readSceneFiles({ 'scenes/arm.yaml': into }).get('arm')!.poses.get('low')!.joints).toMatchObject({ joint2: 0.4 })
+  })
+
   it('leaves a number already right as written', () => {
     expect(setNamedPose('base: arm\nposes:\n  a: { joint1: 0.0, joint2: 1 }\n', 'a', { joint1: 0, joint2: 2 }, ARM)).toBe(
       'base: arm\nposes:\n  a: { joint1: 0.0, joint2: 2 }\n',

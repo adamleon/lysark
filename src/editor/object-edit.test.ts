@@ -196,6 +196,20 @@ describe('objects in the files', () => {
     }
   })
 
+  it('keeps a limits: off line at the top of the scene file, moving and turning an object (decision 11)', () => {
+    const limited = `limits: off   # a test rig, not a lecture\n${CELL}`
+    const moved = objectEdit(limited, 'table', { at: [0.7, 0, -0.6], rotate: [0, 50, 0] }, { at: [0.62, 0, -0.69], rotate: [0, 48, 0] })
+    if (!moved || 'problem' in moved) throw new Error(`no edit: ${JSON.stringify(moved)}`)
+    const text = limited.slice(0, moved.start) + moved.text + limited.slice(moved.end)
+    expect(text.startsWith('limits: off   # a test rig, not a lecture\nbase: arm\n')).toBe(true)
+    expect(text).toBe(limited.replace('[0.62, 0, -0.69]', '[0.7, 0, -0.6]').replace('rotate: 48 ', 'rotate: 50 '))
+    expect(readSceneFiles({ 'scenes/arm.yaml': text }).get('arm')!.limits).toBe('off')
+    // an at the object didn't have, added after its keys, and CRLF kept
+    const crlf = setObjectPlace(limited.replace(/\n/g, '\r\n'), 'grip', { at: [0, 0.1, 0] })
+    expect(crlf.startsWith('limits: off   # a test rig, not a lecture\r\nbase: arm\r\n')).toBe(true)
+    expect(read(crlf, 'grip').at).toEqual([0, 0.1, 0])
+  })
+
   it('counts every key but at and rotate, a key objects get later too', () => {
     const table: SceneObject = { name: 'table', shape: 'box', size: [0.4, 0.3, 0.4], at: [0, 0, 0], rotate: [0, 0, 0], material: 'wood' }
     const extra = { ...table, later: 1 } as SceneObject
