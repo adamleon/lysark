@@ -58,6 +58,19 @@ describe('readSceneFiles', () => {
     expect(problem('- base: agilus\n')).toMatch(/line 1: a scene file is a YAML mapping/)
   })
 
+  it("gives a YAML error at its line once, without yaml's own place and the colon before its quote", () => {
+    const problem = (text: string) => {
+      try {
+        readSceneFiles({ 'scenes/agilus.yaml': text })
+        return 'no error'
+      } catch (err) {
+        return (err as Error).message
+      }
+    }
+    expect(problem('base: agilus\nlimits: off\nlimits: off\n')).toBe('scenes/agilus.yaml, line 3: Map keys must be unique')
+    expect(problem('base: agilus\n\tviews: {}\n')).toBe('scenes/agilus.yaml, line 2: Tabs are not allowed as indentation')
+  })
+
   it('refuses two files for one scene', () => {
     expect(() => readSceneFiles({ 'scenes/arm.yaml': 'base: arm\n', 'scenes/arm.yml': 'base: arm\n' })).toThrow(/both scene 'arm'/)
   })

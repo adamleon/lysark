@@ -154,7 +154,9 @@ function readSceneFile(path: string, name: string, text: string): { file: SceneF
   }
   if (doc.errors.length > 0) {
     const error = doc.errors[0]
-    throw new Error(`${path}, line ${error.linePos?.[0].line ?? 1}: ${error.message.split('\n')[0]}`)
+    // yaml ends its first line with where it is, then a colon before the lines it quotes: the line is said already
+    const message = error.message.split('\n')[0].replace(/ at line \d+, column \d+:?$/, '')
+    throw new Error(`${path}, line ${error.linePos?.[0].line ?? 1}: ${message}`)
   }
   // a shared value (`*name`, `<<: *name`) would make one saved view change others
   visit(doc, {
