@@ -501,11 +501,12 @@ export function jpegSize(data: Uint8Array): { width: number; height: number } | 
  * from their headers here. Its materials mustn't be what the stage draws
  * wrong, black or not at all: see-through (blended, or transmission; a
  * cut-out material, alpha mode MASK, is drawn in the opaque pass and
- * allowed), metallic beyond MAX_FILE_METALNESS without a metallic texture (the stage
- * has no reflections), or missing on a mesh, which three gives a fully
- * metallic default; and a textured mesh must have the texture coordinates
- * its textures use. `src` is the model's path, for the message about all
- * its textures together.
+ * allowed), or metallic beyond MAX_FILE_METALNESS without a metallic texture
+ * (the stage has no reflections); and a textured mesh must have the texture
+ * coordinates its textures use. A mesh without a material is allowed: three
+ * would give it a fully metallic default, near black on the stage, and
+ * objects.ts makes it grey instead. `src` is the model's path, for the
+ * message about all its textures together.
  */
 function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | undefined, src: string | undefined): string | null {
   const notGlb = `the model isn't a binary glTF 2.0 file. Export it again as glTF Binary (.glb)`
@@ -616,18 +617,14 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
     }
   }
 
-  // each mesh's triangles: a material of its own, and texture coordinates for its textures (lines and points are left out)
+  // each mesh's triangles: texture coordinates for its material's textures (lines and points are left out).
+  // One without a material is shown grey, as Blender shows it (objects.ts), and has no textures
   for (const [k, item] of listOf(json.meshes).entries()) {
     const mesh = asJson(item)
     for (const primitive of listOf(mesh?.primitives).map(asJson)) {
       if (![undefined, 4, 5, 6].includes(primitive?.mode as number | undefined)) continue
       const index = primitive?.material
-      if (index === undefined) {
-        return (
-          `the model's mesh ${itemName(item, k)} has no material, which three.js draws fully metallic, near black on the stage: ` +
-          `give it a material in the program that made it, or write a colour such as material: grey`
-        )
-      }
+      if (index === undefined) continue
       if (!isIndex(index, materials.length)) return notGlb
       const attributes = asJson(primitive?.attributes) ?? {}
       for (const n of coordinates[index]) {

@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js'
 import { modelFormat, type ModelFormat } from '../compiler/model-types'
-import { MATERIAL_FILE, type ModelLoader, type SceneObject } from '../engine/object-types'
+import { MATERIAL_FILE, WITHOUT_FILE_MATERIAL, type ModelLoader, type SceneObject } from '../engine/object-types'
 
 /**
  * Models from STL and GLB files (docs/scene-files.md, "Models"). This module
@@ -65,7 +65,9 @@ export function decodeBase64(base64: string): ArrayBuffer {
  * images it loads. Only meshes are left: a GLB's lights, cameras, lines and
  * points go (the stage's own lights stay the only ones), and its animations
  * are not used. With `ownLook`, a GLB's meshes keep its materials and
- * textures; without, they get no textures, and fitModel gives them the preset.
+ * textures, and one the file gives no material is marked WITHOUT_FILE_MATERIAL
+ * for fitModel to make grey; without, they get no textures, and fitModel
+ * gives them the preset.
  */
 export async function parseModel(buffer: ArrayBuffer, format: ModelFormat, { ownLook = false, images = ownLook }: ParseOptions = {}): Promise<THREE.Group> {
   if (format === 'stl') {
@@ -116,7 +118,12 @@ export async function parseModel(buffer: ArrayBuffer, format: ModelFormat, { own
       fixed.set(mesh.geometry, geometry)
     }
     mesh.geometry = geometry
-    if (ownLook) for (const material of [mesh.material].flat()) shadowedCutOut(material)
+    if (!ownLook) return
+    for (const material of [mesh.material].flat()) shadowedCutOut(material)
+    // a mesh the file gives no material has GLTFLoader's default, which the
+    // file doesn't list (no association with one of its materials): objects.ts
+    // makes it grey
+    if (gltf.parser.associations.get(mesh.material as THREE.Material)?.materials === undefined) mesh.userData[WITHOUT_FILE_MATERIAL] = true
   })
   return root
 }

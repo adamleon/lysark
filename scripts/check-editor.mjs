@@ -1800,6 +1800,8 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
                     alphaTest: part.material.alphaTest,
                     visible: part.material.visible,
                     grey: !part.material.map && `#${part.material.color.getHexString()}` === grey,
+                    // a mesh its file gives no material, which is grey (WITHOUT_FILE_MATERIAL in src/engine/object-types.ts)
+                    bare: part.userData.lysarkWithoutFileMaterial === true,
                     map: part.material.map
                       ? {
                           img: image instanceof w.HTMLImageElement,
@@ -1815,8 +1817,9 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
             }, ownLook),
           )
           if (!looks) return fail(`the models with material: file ${JSON.stringify(ownLook)} never showed with every texture loaded (the panel says: ${await banner()})`)
-          const preset = ownLook.find((n) => looks[n].length === 0 || looks[n].some((m) => m.grey))
-          if (preset) return fail(`'${preset}' has material: file, but shows ${JSON.stringify(looks[preset])}: the grey preset, not the file's own look`)
+          // grey exactly where the file gives a mesh no material, as Blender shows it
+          const preset = ownLook.find((n) => looks[n].length === 0 || looks[n].some((m) => m.grey !== m.bare))
+          if (preset) return fail(`'${preset}' has material: file, but shows ${JSON.stringify(looks[preset])}: the grey preset, not the file's own look, on a mesh with a material of its own, or not grey on one without`)
           const wrong = ownLook.find((n) => looks[n].some((m) => m.map && !(m.map.img && m.map.data && m.map.size[0] > 0)))
           if (wrong) return fail(`'${wrong}''s texture isn't an <img> loaded from a data: address: ${JSON.stringify(looks[wrong])}`)
           if (blobRequests.length > 0) return fail(`the panel asked for blob: addresses: ${blobRequests.join(', ')}`)

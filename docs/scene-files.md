@@ -366,10 +366,12 @@ colours, and its textures (images painted on it, such as a label or a printed ma
   at all; a material more metallic than 0.6 (the `metal` preset's) without a metallic
   texture, since the stage has no reflections for a metal to show, and it would look near black
   (glTF reads a material that doesn't say as fully metallic, and Blender leaves it out at
-  Metallic 1); a mesh without a material, which three.js draws fully metallic; and a textured mesh
-  without texture coordinates (a UV map). A metallic texture's pixels can't be read by the build:
-  where such a texture says fully metallic, the part shows dark. An unlit material
-  (`KHR_materials_unlit`) shows its colour whatever the light.
+  Metallic 1); and a textured mesh without texture coordinates (a UV map). A metallic texture's
+  pixels can't be read by the build: where such a texture says fully metallic, the part shows
+  dark. An unlit material (`KHR_materials_unlit`) shows its colour whatever the light.
+- **A mesh without a material** is grey, as Blender shows it: the `grey` preset, which follows
+  the theme, while the file's own materials show on the rest (from engine v2.14.0, the author's
+  answer of 2026-11-26; three.js alone would draw it fully metallic, near black on the stage).
 - **Opaque in Blender.** Blender 4.2 and later have no blend mode of their own: the glTF export
   writes a material as blended whenever the Principled BSDF's Alpha is under 1 or has anything
   linked to it, but for alpha clip (below). Unlink it and set it to 1. A texture's transparent
@@ -738,7 +740,9 @@ models gets the code that reads them (`src/scene/models.ts`, with the loaders;
 object's text back into bytes and parses it in memory, then adds the objects
 (`src/scene/objects.ts`): the model on its object, scaled by `unit`, turned for `up`, moved so
 that the middle of its underside is the object's origin, and given the preset's material, or
-with `material: file` left in its own.
+with `material: file` left in its own (but for a mesh the file gives no material: `parseModel`
+marks it, as one whose material isn't one of the file's in three's glTF loader's list of what it
+made from what, and `fitModel` gives it the `grey` preset).
 Nothing is fetched and nothing runs in a worker, so the student file still works from
 `file://`. In the panel, the runtime reads the same paths through VS Code once the images have
 come (`src/editor/panel-models.ts`), runs the same check, and hands the files that pass to the

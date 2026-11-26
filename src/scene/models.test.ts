@@ -1,9 +1,10 @@
 import * as THREE from 'three'
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SceneObject } from '../engine/object-types'
+import { WITHOUT_FILE_MATERIAL, type SceneObject } from '../engine/object-types'
 import { binaryStl, cylinder, glb, glbEdits, png, textStl, UNIT_CUBE, type GlbEdit } from './model-test-files.js'
 import { decodeBase64, modelLoader, parseModel } from './models'
+import { buildObject } from './objects'
 
 /** the file as base64, as the student file and the editor host give it */
 function base64(buffer: ArrayBuffer): string {
@@ -331,6 +332,33 @@ describe('models', () => {
       const opaque = await material({ alphaMode: 'OPAQUE', ...colour(0.3) })
       expect(opaque.alphaTest).toBe(0)
       expect(opaque.opacity).toBeCloseTo(0.3)
+    })
+
+    it('marks a mesh the file gives no material, which its object shows grey next to a textured one (the author, 2026-11-26)', async () => {
+      browser()
+      const file = textured((json) => {
+        json.meshes.push({ name: 'bare', primitives: [{ attributes: { POSITION: json.meshes[0].primitives[0].attributes.POSITION } }] })
+        json.nodes.push({ name: 'bare', mesh: json.meshes.length - 1, translation: [4, 0, 0] })
+        json.scenes[0].nodes.push(json.nodes.length - 1)
+      })
+      const model = await parseModel(file, 'glb', { ownLook: true })
+      expect(meshes(model).map((mesh) => [mesh.name, mesh.userData[WITHOUT_FILE_MATERIAL] === true])).toEqual([
+        ['box', false],
+        ['plain', false],
+        ['bare', true],
+      ])
+      // GLTFLoader's default for it is fully metallic, near black on the stage
+      expect((meshes(model)[2].material as THREE.MeshStandardMaterial).metalness).toBe(1)
+      const grey = '#808080'
+      const node = buildObject({ ...modelObject('tray', 'models/tray.glb'), material: 'file' }, (token) => (token === '--object-grey' ? grey : 'red'), model)
+      const [box, plain, bare] = meshes(node).map((mesh) => mesh.material as THREE.MeshStandardMaterial)
+      expect(box.map?.image).toBeInstanceOf(FakeImage)
+      expect(box.name).toBe('printed')
+      expect(plain.color.getHexString()).toBe('0000ff')
+      expect(bare.color.getHexString()).toBe(new THREE.Color(grey).getHexString())
+      expect([bare.metalness, bare.map]).toEqual([0, null])
+      // without material: file nothing is marked: the preset replaces every material
+      expect(meshes(await parseModel(file, 'glb')).some((mesh) => WITHOUT_FILE_MATERIAL in mesh.userData)).toBe(false)
     })
 
     it("gives the file's materials creased normals' smooth shading on a mesh without normals", async () => {

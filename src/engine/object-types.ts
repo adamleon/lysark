@@ -18,6 +18,14 @@ export const OBJECT_MATERIALS = ['grey', 'white', 'black', 'red', 'yellow', 'gre
 export type ObjectMaterial = (typeof OBJECT_MATERIALS)[number]
 /** `material: file`: a GLB model's own materials and textures, in place of a colour (decision 10 in scene-files-proposal.md) */
 export const MATERIAL_FILE = 'file'
+/**
+ * With material: file, marks a mesh its file gives no material, in its
+ * userData (src/scene/models.ts). three.js's glTF loader gives such a mesh a
+ * fully metallic default, near black on the stage; src/scene/objects.ts gives
+ * it the grey preset instead, as Blender shows such a mesh grey (the author,
+ * 2026-11-26).
+ */
+export const WITHOUT_FILE_MATERIAL = 'lysarkWithoutFileMaterial'
 
 /** what a model's file is measured in (`unit:`), and the axis that is up in it (`up:`) */
 export type ModelUnit = 'mm' | 'cm' | 'm'

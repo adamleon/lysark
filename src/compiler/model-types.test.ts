@@ -561,11 +561,10 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
     expect(own(textureBox({}, (json) => (json.materials[0].pbrMetallicRoughness = { metallicRoughnessTexture: { index: 0 } })))).toBeNull()
   })
 
-  it('refuses a mesh without a material, which three.js draws fully metallic', () => {
-    expect(own(glb({ meshes: [{ name: 'tray' }] }))).toBe(
-      "the model's mesh 'tray' has no material, which three.js draws fully metallic, near black on the stage: " +
-        'give it a material in the program that made it, or write a colour such as material: grey',
-    )
+  it('passes a mesh without a material, which is shown grey, as Blender shows it (the author, 2026-11-26)', () => {
+    expect(own(glb({ meshes: [{ name: 'tray' }] }))).toBeNull()
+    // next to a textured one, with no texture coordinates of its own
+    expect(own(textureBox({}, (json) => json.meshes[0].primitives.push({ attributes: { POSITION: 0 } })))).toBeNull()
     // lines and points are left out, material or not
     expect(own(glb({ meshes: [{ material: 0 }, { mode: 1 }, { mode: 0 }], materials: [{ pbrMetallicRoughness: { metallicFactor: 0 } }] }))).toBeNull()
     expect(own(coloured({ pbrMetallicRoughness: { metallicFactor: 0 } }, { material: 4 }))).toBe(notGlb)

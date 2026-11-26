@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import type { SceneObject } from '../engine/object-types'
-import { binaryStl, box, glb } from './model-test-files.js'
+import { binaryStl, box, glb, png } from './model-test-files.js'
 import { parseModel } from './models'
 import { addObjects, buildObject } from './objects'
 
@@ -216,6 +216,35 @@ describe('objects', () => {
     // a colour replaces them, as before
     const red = buildObject(modelSpec({ name: 'red', material: 'wood' }), color, await parseModel(file, 'glb'))
     expect(meshesUnder(red).map((mesh) => (mesh.material as THREE.MeshStandardMaterial).color.getHexString())).toEqual(['a07040', 'a07040'])
+  })
+
+  it("makes a mesh the file gives no material grey, as Blender shows it, next to the file's own materials (the author, 2026-11-26)", async () => {
+    const file = glb({
+      meshes: [
+        { name: 'label', uvs: true, material: 0 },
+        { name: 'bare', translation: [2, 0, 0] },
+        { name: 'teal', material: 1, translation: [4, 0, 0] },
+        { name: 'bare too', translation: [6, 0, 0] },
+      ],
+      materials: [
+        { name: 'printed', pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } },
+        { name: 'teal', pbrMetallicRoughness: { baseColorFactor: [0, 0.5, 0.5, 1], metallicFactor: 0 } },
+      ],
+      textures: [{ name: 'label', bytes: png(4, 4) }],
+    })
+    // the build's check parses it so, without the images, which Node has no <img> for
+    const parsed = await parseModel(file, 'glb', { ownLook: true, images: false })
+    const tray = buildObject(modelSpec({ name: 'tray', material: 'file' }), color, parsed)
+    const [label, bare, teal, bareToo] = meshesUnder(tray).map((mesh) => mesh.material as THREE.MeshStandardMaterial)
+    expect([label.name, teal.name]).toEqual(['printed', 'teal'])
+    // the grey preset, its token read when the object is built, so it follows the theme; one material for both
+    expect(bare.color.getHexString()).toBe(new THREE.Color('#808080').getHexString())
+    expect([bare.metalness, bare.roughness]).toEqual([0, 0.7])
+    expect(bareToo).toBe(bare)
+    expect(teal.color.getHexString()).not.toBe(bare.color.getHexString())
+    // with a colour, every mesh has it
+    const wood = buildObject(modelSpec({ name: 'wood', material: 'wood' }), color, await parseModel(file, 'glb'))
+    expect(new Set(meshesUnder(wood).map((mesh) => (mesh.material as THREE.MeshStandardMaterial).color.getHexString()))).toEqual(new Set(['a07040']))
   })
 
   it("hangs objects on a model's node, where they don't count in its box", async () => {
