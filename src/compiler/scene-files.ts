@@ -398,6 +398,9 @@ function readObjects(
       const alias = typeof key === 'string' && Object.hasOwn(OBJECT_KEY_ALIASES, key.toLowerCase()) ? OBJECT_KEY_ALIASES[key.toLowerCase()] : undefined
       const guess = typeof key === 'string' ? (alias ?? closest(key, OBJECT_KEYS)) : undefined
       if (key === 'size') fail(q.key, `${where} has 'size': write the size with the shape, such as box: [0.4, 0.2, 0.4]. ${known}`)
+      if (key === 'limits') {
+        fail(q.key, `${where} has 'limits', a line of the scene file itself: write limits: off at the top level, beside base:, and it lifts the size limits on all of the file's models`)
+      }
       if (key === 'scale') {
         fail(
           q.key,

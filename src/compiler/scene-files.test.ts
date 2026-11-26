@@ -700,6 +700,13 @@ describe('limits: off (decision 11, the author, 2026-11-26)', () => {
     expect(problem('base: arm\nsizes: off\n')).toBe(`scenes/arm.yaml, line 2: unknown key 'sizes'. ${keys}`)
   })
 
+  it('says where the line goes when it is written under an object', () => {
+    expect(problem('base: arm\nobjects:\n  part:\n    model: models/part.stl\n    limits: off\n')).toBe(
+      "scenes/arm.yaml, line 5: object 'part' has 'limits', a line of the scene file itself: write limits: off at the top level, " +
+        "beside base:, and it lifts the size limits on all of the file's models",
+    )
+  })
+
   it("is an error in a file without models while another with the same base has the objects, and their models keep the limits", () => {
     const read = (files: Record<string, string>) => {
       try {

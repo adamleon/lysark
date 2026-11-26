@@ -636,6 +636,9 @@ The build (and the panel) names the file, the line and what to do. For example:
 - `scenes/arm.yaml, line 1: limits is 'on', but its one value is off: limits: off lifts the size
   limits on the models in this file (5 MB per file, 2048 pixels on a texture's side and
   16,777,216 pixels of textures per file). To keep the limits, leave the line out`
+- `scenes/arm.yaml, line 5: object 'part' has 'limits', a line of the scene file itself: write
+  limits: off at the top level, beside base:, and it lifts the size limits on all of the file's
+  models`
 - `scenes/talk.yaml, line 6: limits: off lifts the size limits on the models in this file, and
   it has none. The objects of 'arm' are in scenes/arm.yaml, with their models: put the line
   there`
