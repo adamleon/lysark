@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-11-25)
+## Where the project is (2026-11-26)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -294,11 +294,45 @@ GPU memory back to 0 geometries and 1 texture), the student file in Firefox, Ban
 the PDF (the objects page shows the marker's texture and the teal tray). In the student file the
 marker's texture leaves the GPU when the arm scene is put away and is uploaded again when it
 comes back (Chromium and Firefox); on a scratch copy whose dispose.ts doesn't free textures,
-check:demo fails ("2 textures … a scene left GPU memory behind"). Next: push, let engine CI pass,
-tag v2.14.0, and move the course with Update engine; the author can then try a textured GLB from
-Blender in github.dev. Step 9's proposals are in scene-files-proposal.md, "Proposals from step 9".
+check:demo fails ("2 textures … a scene left GPU memory behind").
+
+Step 9 then had a code review and a hands-on test with real Blender 5.2 exports (2026-11-26), and
+their findings are fixed in more local commits, still not pushed. `jpegSize` read `FF 00` as a
+marker with a length, where libjpeg (both browsers) skips it to the next `FF`: a crafted JPEG
+hid a 4096 × 4096 frame header behind a 16 × 16 one, passed the build and the panel, and showed
+at 4096 in both browsers. It now refuses `FF 00` and the markers libjpeg refuses. A
+`metallicFactor` that isn't a number (three takes `"1"` as 1) is refused as a broken file;
+`KHR_texture_transform`'s `texCoord` counts only when extensionsUsed lists it, as GLTFLoader
+reads it; a JPEG labelled `image/jpg` is read as a JPEG. The panel no longer leaves a file out for
+every object when one object's unit or look fails: `loadModels` returns `leftOut` (the objects
+refused, as `modelObjectKey`: scene file and name), runtime.ts puts it in
+`window.__LYSARK_MODELS_LEFT_OUT__`, and deck-from-source.ts finds those objects in its scene
+files and hands them to `modelLoader`, which skips them. (A key by unit and look wouldn't do: the
+compiler gives an object without a `material:` line `grey`, so the deck can't tell it from one
+with `material: grey`.) check-editor now adds a grey copy of the marker while the marker has no
+`material:` line, and requires the copy shown. Messages: the over-5 MB advice for a GLB names
+its textures and Blender's Images: JPEG Format; 4096 says how to scale an image down in Blender;
+BLEND names the Principled BSDF's Alpha; WebP names Blender's settings, and without a
+`material:` line says at once that WebP can't be shown; a left-out `metallicFactor` says
+Blender leaves it out at Metallic 1. `lysark check` waited a fixed 450 ms before looking for
+three's lighting table, so a lecture whose only lit scene was on one slide and built slower
+than that failed the GPU check falsely; it now waits until the scene manager isn't busy, in
+both directions (shown on a scratch lecture whose scene builds 1.2 s slower: the old check
+fails, the new one passes). Open for the author, in scene-files-proposal.md "Proposals from step
+9": whether decision 10 as recorded is meant (the words relayed were "refuse textures"), a total
+texture-memory limit per file (the review packed 290 flat 2048-pixel PNGs, about 6.5 GB of GPU
+memory, into a GLB that passes), cut-out (MASK) materials, and grey for a mesh without a
+material. Also the author's: scripts/browser.mjs's `--use-angle=swiftshader` (below, under
+Gotchas), a change outside the step that came with 9b's commit. Next: the author answers those,
+then push, let engine CI pass, tag v2.14.0, and move the course with Update engine (the course
+has no `model:` lines, so the new stop for a textured GLB without `material:` breaks nothing);
+the author can then try a textured GLB from Blender in github.dev.
 
 Proposals (not built):
+- From step 9's hands-on test: entering the pendulum scene logs about 45 `THREE.WebGLShadowMap:
+  … has no shadow` warnings (in the demo too). src/scenes/pendulum.ts sets `castShadow` on every
+  node under its root, the stage's lights included, and three warns for a light without a
+  shadow; setting it on meshes only would end them. Warnings, so `lysark check` passes.
 - From step 2: course CI installs Chromium (~27 s) even when no lecture changed. The
   HTML job could skip the install, and the offline check, when `lysark site` has
   nothing to build.
@@ -484,7 +518,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**522**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**528**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

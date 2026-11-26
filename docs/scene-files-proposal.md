@@ -153,7 +153,10 @@ Each step lands on its own, with a note and coverage in the demo lecture, as ste
    and `lysark check` checks GPU memory; 9b, `material: file` (engine v2.14.0). The images load
    from `data:` addresses into `<img>`s, with no request and no `blob:` address, checked in
    Chromium and Firefox, in the student file, the editor check and the released extension 0.4.0
-   in VS Code for the web.
+   in VS Code for the web. After its review and a hands-on test (2026-11-26): a JPEG's size is
+   read as the browsers' libjpeg reads it, so a larger image can't hide; the panel shows a file
+   to the objects that read it a way that passes; messages say what to do in Blender; and
+   `lysark check` waits for a slow scene before looking for three's lighting table.
 
 Left for when a lecture needs them: a start state per scene run, a second robot or a moved robot
 in one scene, showing or moving objects per slide, and scene files shared between lectures.
@@ -314,13 +317,41 @@ For the future:
 ## Proposals from step 9
 
 Not built; each would be its own small change, landed and understood before a lecture uses it.
+The questions (from step 9's review and hands-on test, 2026-11-26) are the author's to answer
+first.
 
-- **A total of texture memory per model.** Each texture is at most 2048 pixels on a side, about
-  22 MB of GPU memory with its mipmaps, but a flat-coloured PNG of that size compresses to a few
-  kB, so a 5 MB GLB could hold dozens of them, over a gigabyte on the graphics card. Exporters
-  don't write such files (Blender writes one image per texture it uses), so step 9 has only the
-  limit per side. A limit on a file's total texture pixels (say four 2048 × 2048 textures, about
-  90 MB) could be added without changing a lecture under it, read from the same headers.
+- **Question for the author before the push: decision 10 as recorded.** Decision 10 shows
+  textures with `material: file`, up to 2048 pixels on a side. Step 9's review noted that the
+  author's words relayed to it were "go for material: file and refuse textures". If "refuse
+  textures" meant every texture, step 9 is cut back to the file's own colours: keep 9a (textures
+  freed, the GPU check) and `material: file` for colours; refuse any GLB with images or textures
+  under `material: file`, with a message; and drop the image route in `src/scene/models.ts`
+  (`fileImages`), `pngSize`/`jpegSize`, the demo's `marker.glb`, and the texture parts of
+  `scripts/check-editor.mjs` and `scripts/check-extension.mjs`. Not pushed until confirmed.
+- **Question for the author: a total of texture memory per model.** Each texture is at most 2048
+  pixels on a side, about 22 MB of GPU memory with its mipmaps, but nothing limits how many a file
+  holds. A flat 2048 × 2048 PNG compresses to 12-16 kB (under 1 kB as a 1-bit grey image, which
+  the browser still uploads as 2048 × 2048 colour), so a hand-made 5 MB GLB can hold hundreds to
+  thousands of them, many gigabytes on the graphics card: step 9's review made one of 290 that
+  passes the checks, about 6.5 GB, and each object showing the file holds its own. Exporters don't
+  write such files, but a real one can still be heavy: 5 MB of 2048-pixel JPEG photos is about 5
+  to 15 textures, 110 to 340 MB per object, on a student's laptop whose graphics share its memory.
+  *Recommended:* a limit on the total pixels of the images a file's materials use, read from the
+  same headers, say four 2048 × 2048 textures (about 90 MB), with a message naming the total and
+  the limit. It changes no lecture under it. Not built: it is a new limit, the author's to set.
+- **Question for the author: cut-out materials** (`alphaMode: MASK`, Blender's alpha clip).
+  Refused today with the blended ones. three.js draws a cut-out material in the opaque pass,
+  shadows included, so it would show correctly, and it would allow stickers and decals with a
+  transparent surround (today their surround shows as the colour the pixels hold). *Recommended:
+  allow MASK, keep BLEND refused.*
+- **Question for the author: a mesh without a material in grey.** Refused today, because
+  three.js gives it a fully metallic default, near black on the stage. Blender shows such a mesh
+  grey; lysark could give it the grey preset (its own colours elsewhere in the file kept), as
+  Blender does, instead of stopping the build. *Recommended: grey, as Blender shows it.*
+- **The build names slides.md for a model problem** (from before step 9). A model problem stops
+  the build with Vite's trailer `file: …/slides.md`, though the problem is in a scene file, and a
+  compile error starts with "Could not load virtual:lysark-deck (imported by …/src/main.ts)". The
+  message itself names the scene file and line; the CLI could print only it.
 - **Reflections for metals.** A file's material more metallic than 0.6 without a metallic texture
   is refused, because the stage has no environment map: checked on the demo (2026-11-25), the
   tray at metalness 1 shows near black, at 0.6 dimmer but clear. An environment map made per
