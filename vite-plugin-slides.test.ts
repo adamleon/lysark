@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { binaryStl, cylinder, glb, glbEdits, jpeg, lfsPointer, png } from './src/scene/model-test-files.js'
+import { binaryStl, cylinder, glb, glbEdits, jpeg, lfsPointer, overLimitStl, png } from './src/scene/model-test-files.js'
 import { lectureSceneFiles, resolveFile, resolveImage, slidesPlugin } from './vite-plugin-slides'
 
 let course: string
@@ -430,5 +430,85 @@ describe('models in the build (docs/scene-files.md, "Models")', () => {
     expect(await failure('  a:\n    model: parts/kept.stl\n')).toMatch(
       /was not found .*as for images\. Write scenes\/parts\/kept\.stl: the path is from the lecture folder, not from scenes\/$/,
     )
+  })
+
+  describe('limits: off (decision 11)', () => {
+    const big = overLimitStl()
+    const textured = (sides: number[], material: Record<string, unknown> = {}) =>
+      glb({
+        meshes: sides.map((_, k) => ({ uvs: true, material: k, translation: [2 * k, 0, 0] })),
+        materials: sides.map((_, k) => ({ name: `m${k}`, pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0 }, ...material })),
+        textures: sides.map((side) => ({ bytes: jpeg(side, side), mimeType: 'image/jpeg' })),
+      })
+    // a texture 4096 on a side, and five that take the file over the total
+    const poster = textured([4096])
+    const photos = textured([2048, 2048, 2048, 2048, 1])
+    const glass = textured([8], { alphaMode: 'BLEND' })
+    /** the build's message for the arm scene file with `top` before these objects */
+    const failureWith = (top: string, yaml: string, slidesText = SLIDE) => {
+      writeFileSync(join(m1, 'scenes', 'arm.yaml'), `base: arm\n${top}objects:\n${yaml}`)
+      return transform(slidesText, slides).then(
+        () => 'built',
+        (error: Error) => error.message,
+      )
+    }
+    const OBJECTS =
+      '  huge:\n    model: models/huge.stl\n' +
+      '  poster:\n    model: models/poster.glb\n    material: file\n' +
+      '  photos:\n    model: models/photos.glb\n    material: file\n'
+
+    beforeAll(() => {
+      file(join(m1, 'models', 'huge.stl'), big)
+      file(join(m1, 'models', 'poster.glb'), poster)
+      file(join(m1, 'models', 'photos.glb'), photos)
+      file(join(m1, 'models', 'glass.glb'), glass)
+    })
+
+    it('builds a file over 5 MB and textures over 2048 pixels and over the total, each built in once', async () => {
+      expect(await failureWith('limits: off\n', OBJECTS)).toBe('built')
+      const code = await transform(SLIDE, slides)
+      expect(run(code).models).toEqual({ 'models/huge.stl': base64(big), 'models/poster.glb': base64(poster), 'models/photos.glb': base64(photos) })
+      expect(code.split(base64(big)).length - 1).toBe(1)
+    })
+
+    it('refuses each without it, at its line, the file over 5 MB from its size on disk', async () => {
+      expect(await failureWith('', OBJECTS)).toMatch(/^scenes\/arm\.yaml, line 4: object 'huge': the model is 5\.0001 MB; a model may be at most 5 MB\. /)
+      expect(await failureWith('', '  poster:\n    model: models/poster.glb\n    material: file\n')).toMatch(
+        /^scenes\/arm\.yaml, line 4: object 'poster': the model's image number 1 is 4096 x 4096 pixels: a texture may be at most 2048 pixels on a side/,
+      )
+      expect(await failureWith('', '  photos:\n    model: models/photos.glb\n    material: file\n')).toMatch(
+        /^scenes\/arm\.yaml, line 4: object 'photos': the model 'models\/photos\.glb' has 16,777,217 pixels of textures in all/,
+      )
+    })
+
+    it("still refuses what is wrong with a file, and a unit that is wrong", async () => {
+      expect(await failureWith('limits: off\n', '  pane:\n    model: models/glass.glb\n    material: file\n')).toMatch(
+        /^scenes\/arm\.yaml, line 5: object 'pane': the model's material 'm0' is see-through \(blended, alpha mode BLEND\)/,
+      )
+      // 0.1 across in its units: a tenth of a millimetre read in mm
+      expect(await failureWith('limits: off\n', '  huge:\n    model: models/huge.stl\n    unit: mm\n')).toBe(
+        "scenes/arm.yaml, line 5: object 'huge': the model is 0.1 mm across, read in mm. Is the file in metres? Leave out unit",
+      )
+    })
+
+    it('checks a file shared with a scene file that keeps the limits for each, naming the object there at its own line', async () => {
+      const both = '---\nscene: agilus\n---\n# y\n---\nscene: arm\n---\n# x\n'
+      const agilus = join(m1, 'scenes', 'agilus.yaml')
+      try {
+        // agilus.yaml, read first, lifts the limits; arm.yaml keeps them
+        writeFileSync(agilus, 'base: agilus\nlimits: off\nobjects:\n  huge:\n    model: models/huge.stl\n')
+        expect(await failureWith('', '  table:\n    box: [0.4, 0.3, 0.4]\n  huge:\n    model: models/huge.stl\n', both)).toMatch(
+          /^scenes\/arm\.yaml, line 6: object 'huge': the model is 5\.0001 MB; /,
+        )
+        writeFileSync(agilus, 'base: agilus\nlimits: off\nobjects:\n  poster:\n    model: models/poster.glb\n    material: file\n')
+        expect(await failureWith('', '  table:\n    box: [0.4, 0.3, 0.4]\n  poster:\n    model: models/poster.glb\n    material: file\n', both)).toMatch(
+          /^scenes\/arm\.yaml, line 6: object 'poster': the model's image number 1 is 4096 x 4096 pixels/,
+        )
+        // both lift them: built, the file once
+        expect(await failureWith('limits: off\n', '  poster:\n    model: models/poster.glb\n    material: file\n', both)).toBe('built')
+      } finally {
+        rmSync(agilus)
+      }
+    })
   })
 })

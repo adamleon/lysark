@@ -16,7 +16,7 @@ import { createJointPanel, type PanelState } from './joint-panel'
 import { objectEdit, objectsFile, placementChanges, type ObjectPlace } from './object-edit'
 import { createObjectHandles, type ObjectsState } from './object-handles'
 import { loadImages } from './panel-images'
-import { loadModels } from './panel-models'
+import { limitsChanged, loadModels } from './panel-models'
 import { createToolHandle, stepToward } from './tool-handle'
 import { EDITOR_PROTOCOL } from './panel-page.js'
 import {
@@ -229,10 +229,14 @@ async function updateInPlace(files: Record<string, string>): Promise<boolean> {
   if (!engine) return false
   // the same module instance the deck was built from (it stands in for virtual:lysark-deck)
   const { default: deck } = await import('./deck-from-source')
+  // a scene file's limits: line says how its models are checked, which the
+  // panel did when it loaded: a new one needs the fresh page, which checks them again
+  const scenes = readSceneFiles(files)
+  if (limitsChanged(readSceneFiles(shownFiles), scenes)) return false
   // objects are built into their scene once, when it is first shown: a new
   // place for objects of the scene shown (moved in the panel, or typed) is put
   // in at once; any other change to them needs the fresh page
-  const placing = placementChanges(deck.objects ?? {}, lectureObjects(readSceneFiles(files)))
+  const placing = placementChanges(deck.objects ?? {}, lectureObjects(scenes))
   if (placing === null) return false
   const manager = lysark()?.sceneManager
   if (placing.length > 0 && (!manager || manager.busy || placing.some((c) => c.scene !== manager.activeSceneId))) return false

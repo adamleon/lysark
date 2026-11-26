@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { modelFormat, modelWhere, type ModelLimits, type ModelLook, type ModelRef } from '../compiler/model-types'
+import { readSceneFiles } from '../compiler/scene-files'
 import type { ModelUnit } from '../engine/object-types'
 import { checkModel } from '../scene/model-check'
-import { binaryStl, box, glb, glbEdits, jpeg, lfsPointer, png } from '../scene/model-test-files.js'
+import { binaryStl, box, glb, glbEdits, jpeg, lfsPointer, overLimitStl, png } from '../scene/model-test-files.js'
 import type { HostFile } from './host'
-import { base64Bytes, loadModels } from './panel-models'
+import { base64Bytes, limitsChanged, loadModels } from './panel-models'
 
 /** a model as the compiler reports it, in scenes/arm.yaml unless `file` says another scene file */
 const ref = (
@@ -116,14 +117,45 @@ describe('loadModels', () => {
       read,
     )
     expect(asked).toHaveLength(1)
+    const tooLarge = "is larger than 32 MB: VS Code's editor reads at most 32 MB per file, so the preview can't show it. The lecture doesn't build with it either"
     expect(loaded.problems).toEqual([
       "scenes/arm.yaml, line 3: object 'late': the model 'models/late.stl': VS Code did not answer",
-      // VS Code's own limit gets lysark's advice, for the file's format
-      "scenes/arm.yaml, line 5: object 'big': the model is larger than 32 MB; a model may be at most 5 MB. " +
+      // VS Code's own limit, said first, then lysark's advice, for the file's format
+      `scenes/arm.yaml, line 5: object 'big': the model 'models/big.stl' ${tooLarge}: a model may be at most 5 MB. ` +
         'Export it with fewer triangles, or as binary STL rather than text STL (about five times smaller)',
-      "scenes/arm.yaml, line 6: object 'bigger': the model is larger than 32 MB; a model may be at most 5 MB, its textures included. " +
+      `scenes/arm.yaml, line 6: object 'bigger': the model 'models/big.glb' ${tooLarge}: a model may be at most 5 MB, its textures included. ` +
         "Export it with fewer triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data > Material, Images: JPEG Format) or smaller",
       "scenes/arm.yaml, line 7: object 'folder': the model 'models/folder.stl': a folder, not a file",
+    ])
+  })
+
+  it('says a file over what VS Code reads can still build with limits: off, at each scene file of the objects that read it (decision 11)', async () => {
+    const { read } = host({ 'models/part.glb': { error: 'larger than 32 MB' } })
+    const preview = "the model 'models/part.glb' is larger than 32 MB: VS Code's editor reads at most 32 MB per file, so the preview can't show it"
+    const off = await loadModels([ref('part', 'models/part.glb', 9, 'm', 'file', 'off'), ref('again', 'models/part.glb', 14, 'm', 'file', 'off')], read)
+    expect(off).toEqual({
+      files: {},
+      leftOut: [],
+      problems: [`scenes/arm.yaml, line 9: object 'part': ${preview}. The lecture still builds, because its scene file says limits: off`],
+    })
+    // read from a scene file without limits: off too: each named, the first of each, in the order they come
+    const both = await loadModels(
+      [
+        ref('part', 'models/part.glb', 9, 'm', 'file', 'off'),
+        ref('again', 'models/part.glb', 14, 'm', 'file', 'off'),
+        ref('kept', 'models/part.glb', 4, 'm', 'file', 'on', 'scenes/agilus.yaml'),
+      ],
+      read,
+    )
+    expect(both.problems).toEqual([
+      `scenes/arm.yaml, line 9: object 'part': ${preview}. The lecture still builds, because its scene file says limits: off`,
+      `scenes/agilus.yaml, line 4: object 'kept': ${preview}. The lecture doesn't build with it either: a model may be at most 5 MB, its textures included. ` +
+        "Export it with fewer triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data > Material, Images: JPEG Format) or smaller",
+    ])
+    // another of the host's reasons is the same for both: said once
+    const { read: gone } = host({})
+    expect((await loadModels([ref('part', 'models/part.glb', 9, 'm', 'file', 'off'), ref('kept', 'models/part.glb', 4, 'm', 'file', 'on', 'scenes/agilus.yaml')], gone)).problems).toEqual([
+      expect.stringMatching(/^scenes\/arm\.yaml, line 9: object 'part': the model 'models\/part\.glb' was not found/),
     ])
   })
 
@@ -228,6 +260,76 @@ describe('loadModels', () => {
       /^scenes\/arm\.yaml, line 40: object 'photos': the model 'models\/photos\.glb' has 16,777,217 pixels of textures in all \(5 images\); /,
     )
     expect(loaded.leftOut).toEqual(['scenes/arm.yaml photos'])
+  })
+
+  describe('limits: off (decision 11)', () => {
+    const big = base64(overLimitStl())
+    const poster = base64(
+      glb({
+        meshes: [{ uvs: true, material: 0 }],
+        materials: [{ name: 'poster', pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+        textures: [{ name: 'poster', bytes: jpeg(4096, 4096), mimeType: 'image/jpeg' }],
+      }),
+    )
+    const glass = base64(glb({ meshes: [{ material: 0 }], materials: [{ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }] }))
+    const { read } = host({ 'models/big.stl': { base64: big }, 'models/poster.glb': { base64: poster }, 'models/glass.glb': { base64: glass } })
+
+    it('shows a file over 5 MB, and textures over 2048 pixels, for the objects of a scene file with limits: off', async () => {
+      const loaded = await loadModels([ref('big', 'models/big.stl', 5, 'm', 'default', 'off'), ref('poster', 'models/poster.glb', 9, 'm', 'file', 'off')], read)
+      expect(loaded).toEqual({ files: { 'models/big.stl': big, 'models/poster.glb': poster }, problems: [], leftOut: [] })
+      // without it, refused in the build's words, at the line
+      const limited = await loadModels([ref('big', 'models/big.stl', 5), ref('poster', 'models/poster.glb', 9, 'm', 'file')], read)
+      expect(limited.files).toEqual({})
+      expect(limited.problems).toEqual([
+        `scenes/arm.yaml, line 5: object 'big': ${await checkModel(overLimitStl(), 'stl', ['m'], 'default', 'models/big.stl')}`,
+        expect.stringMatching(/^scenes\/arm\.yaml, line 9: object 'poster': the model's image 'poster' is 4096 x 4096 pixels: a texture may be at most 2048 pixels on a side\. /),
+      ])
+      expect(limited.problems[0]).toMatch(/^scenes\/arm\.yaml, line 5: object 'big': the model is 5\.0001 MB; a model may be at most 5 MB\. /)
+    })
+
+    it('checks a file shared by a scene file with limits: off and one without for each, showing it to the objects it passes for', async () => {
+      const loaded = await loadModels(
+        [
+          ref('big', 'models/big.stl', 5, 'm', 'default', 'off'),
+          ref('poster', 'models/poster.glb', 9, 'm', 'file', 'off'),
+          // in scenes/agilus.yaml, which keeps the limits: refused there, at their own lines
+          ref('big', 'models/big.stl', 7, 'm', 'default', 'on', 'scenes/agilus.yaml'),
+          ref('poster', 'models/poster.glb', 11, 'm', 'file', 'on', 'scenes/agilus.yaml'),
+          ref('grey', 'models/poster.glb', 13, 'm', 'preset', 'on', 'scenes/agilus.yaml'),
+        ],
+        read,
+      )
+      expect(loaded.files).toEqual({ 'models/big.stl': big, 'models/poster.glb': poster })
+      expect(loaded.leftOut).toEqual(['scenes/agilus.yaml big', 'scenes/agilus.yaml poster'])
+      expect(loaded.problems).toEqual([
+        expect.stringMatching(/^scenes\/agilus\.yaml, line 7: object 'big': the model is 5\.0001 MB; a model may be at most 5 MB\. /),
+        expect.stringMatching(/^scenes\/agilus\.yaml, line 11: object 'poster': the model's image 'poster' is 4096 x 4096 pixels: /),
+      ])
+      // the deck's loader finds the objects left out by scene file and name (deck-from-source.ts)
+      const scenes = readSceneFiles({
+        'scenes/arm.yaml': 'base: arm\nlimits: off\nobjects:\n  big:\n    model: models/big.stl\n',
+        'scenes/agilus.yaml': 'base: agilus\nobjects:\n  big:\n    model: models/big.stl\n',
+      })
+      const keys = [...scenes.values()].flatMap((file) => file.models.map((m) => `${m.file} ${m.object}`))
+      expect(keys.filter((key) => loaded.leftOut.includes(key))).toEqual(['scenes/agilus.yaml big'])
+    })
+
+    it('still refuses what is wrong with the file', async () => {
+      const loaded = await loadModels([ref('pane', 'models/glass.glb', 3, 'm', 'file', 'off')], read)
+      expect(loaded.files).toEqual({})
+      expect(loaded.problems).toEqual([expect.stringMatching(/^scenes\/arm\.yaml, line 3: object 'pane': the model's material 'glass' is see-through \(blended/)])
+    })
+
+    it('tells a changed limits: line in a scene file with models, which only loading the panel afresh checks again', () => {
+      const arm = (top: string) => readSceneFiles({ 'scenes/arm.yaml': `base: arm\n${top}objects:\n  big:\n    model: models/big.stl\n`, 'scenes/agilus.yaml': 'base: agilus\n' })
+      expect(limitsChanged(arm(''), arm('limits: off\n'))).toBe(true)
+      expect(limitsChanged(arm('limits: off\n'), arm(''))).toBe(true)
+      expect(limitsChanged(arm('limits: off\n'), arm('limits: off   # for testing\n'))).toBe(false)
+      expect(limitsChanged(arm(''), arm('# a comment\n'))).toBe(false)
+      // a file without models has nothing to check again
+      const plain = (top: string) => readSceneFiles({ 'scenes/arm.yaml': `base: arm\n${top}` })
+      expect(limitsChanged(plain(''), plain('limits: off\n'))).toBe(false)
+    })
   })
 
   it('asks for nothing when no scene a slide runs has a model', async () => {

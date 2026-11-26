@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { compileLecture, IMAGE_TOKEN, type ImageRef, type ModelRef } from './src/compiler/compile-slides'
 import { IMAGE_TYPES } from './src/compiler/image-types'
-import { modelSizeProblem, modelWhere } from './src/compiler/model-types'
+import { modelReadWay, modelSizeProblem, modelWhere } from './src/compiler/model-types'
 import { checkModel } from './src/scene/model-check'
 
 /**
@@ -324,22 +324,23 @@ async function readModels(
   }
   const out: Array<{ base64: string; srcs: string[] }> = []
   for (const [file, uses] of users) {
-    // the size on disk first, so a file far over the limit is never read
-    const size = modelSizeProblem(statSync(file).size, uses[0].format)
-    if (size) throw new Error(`${modelWhere(uses[0])}: ${size}`)
+    // the size on disk first, so a file far over the limit is never read: named
+    // at the first object whose scene file keeps the limits (limits: off lifts them)
+    const limited = uses.find((ref) => ref.limits === 'on')
+    const size = limited ? modelSizeProblem(statSync(file).size, limited.format, limited.limits) : null
+    if (size) throw new Error(`${modelWhere(limited!)}: ${size}`)
     const bytes = readFileSync(file)
     // exactly the file's bytes: a small file's Buffer is a view into a shared
     // pool, whose whole ArrayBuffer would be read as a different file
     const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-    // each object reads the file in its own unit and with its own look (its
-    // material: line): a problem names the first object with the unit and look
-    // it is about, so a wrong unit or a missing material: points at its own
-    // line. Another unit or look parses the file again, which only a file
-    // shown two ways costs.
-    const way = (ref: ModelRef) => `${ref.unit} ${ref.look}`
-    for (const key of new Set(uses.map(way))) {
-      const user = uses.find((ref) => way(ref) === key)!
-      const problem = await checkModel(buffer, user.format, [user.unit], user.look, user.src)
+    // each object reads the file in its own unit, with its own look (its
+    // material: line) and its scene file's limits: a problem names the first
+    // object that reads it the way the problem is about, so a wrong unit, a
+    // missing material: or a texture over a limit points at its own line.
+    // Another way parses the file again, which only a file shown two ways costs.
+    for (const key of new Set(uses.map(modelReadWay))) {
+      const user = uses.find((ref) => modelReadWay(ref) === key)!
+      const problem = await checkModel(buffer, user.format, [user.unit], user.look, user.src, user.limits)
       if (problem) throw new Error(`${modelWhere(user)}: ${problem}`)
     }
     out.push({ base64: bytes.toString('base64'), srcs: [...new Set(uses.map((ref) => ref.src))] })
