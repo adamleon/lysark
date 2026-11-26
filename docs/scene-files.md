@@ -337,9 +337,10 @@ from a CAD program, or a GLB from Blender. From the demo lecture's `scenes/arm.y
   A model the panel can't show (a file that isn't there, too large, or refused; VS Code's editor
   reads at most 32 MB of a file, whatever the scene file says) is drawn as an empty node, still an anchor and a parent, and a banner lists each under **Models not shown:**
   (after **Images not shown:**, if any), with the scene file, the line, the object and the build's
-  words. A file refused only for how one object reads it, its `unit` or its `material:` line (a
-  textured GLB without `material:`, say), still shows on the objects that read it in another unit
-  or look; the build stops at the first problem all the same. Letter case is the exception, as
+  words. A file refused only for how one object reads it, its `unit`, its `material:` line (a
+  textured GLB without `material:`, say) or its scene file's `limits: off`, still shows on the
+  objects that read it in another unit, look or scene file; the build stops at the first problem
+  all the same. Letter case is the exception, as
   for images: desktop VS Code on Windows finds `Bracket.stl` for `bracket.stl`, so the panel shows
   a model only the build refuses. A path whose case is wrong in a folder after `..`
   (`../../Assets/bracket.stl`) the panel calls outside the lecture folder, on any computer, and
@@ -728,9 +729,10 @@ words (for a file VS Code won't read, its own reason). For example:
   course build doesn't fetch LFS files. Keep the file in git itself (git lfs untrack, then commit
   it again)`
 
-When several objects show one file in different units, or with different `material:` lines, the
-message names the first object whose unit or look is wrong, at its own line. The panel names one
-for each unit or look that is wrong, and still shows the file on the other objects.
+When several objects show one file in different units, with different `material:` lines, or from
+scene files with and without `limits: off`, the message names the first object whose unit, look
+or limits fail, at its own line. The panel names one for each that fails, and still shows the
+file on the other objects.
 
 **Slide keys are checked too** (from v2.5.0). A misspelled key used to be ignored without a word;
 now `camrea:` stops the build: `slides.md, line 9: slide 3 has the key 'camrea', which a slide
@@ -852,7 +854,7 @@ alpha). `jpegSize` walks a JPEG's
 markers as libjpeg, the browsers' decoder, does, and refuses a file where the two could read
 different frame headers (`FF 00` read as a marker) or that libjpeg refuses, so a larger image
 can't pass under a smaller frame header. In the panel, a file is checked once for each way the
-objects read it (unit and look), and a way that fails leaves out only the objects that read it
+objects read it (unit, look and limits), and a way that fails leaves out only the objects that read it
 so: `loadModels` names them (`leftOut`, by scene file and object name), and
 `src/editor/deck-from-source.ts` hands those objects to `modelLoader`, which skips them. Everything else that would
 need a request, a worker or wasm (a `.gltf`, Draco and meshopt compression, KTX2 textures) or GPU

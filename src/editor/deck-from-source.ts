@@ -22,7 +22,7 @@ declare global {
     __LYSARK_IMAGES__?: Record<string, string>
     /** the lecture's model files as base64, by the path the scene files write; only those that passed the checks (panel-models.ts) */
     __LYSARK_MODELS__?: Record<string, string>
-    /** the model objects (modelObjectKey) whose file is above but was refused in their unit or look: they get no model */
+    /** the model objects (modelObjectKey) whose file is above but was refused in their unit, look or limits: they get no model */
     __LYSARK_MODELS_LEFT_OUT__?: string[]
   }
 }
@@ -32,7 +32,7 @@ const WAITING = '---\nlayout: center\n---\n## Waiting for the lecture text from 
 const files = window.__LYSARK_FILES__ ?? { 'slides.md': WAITING }
 const sceneFiles = readSceneFiles(files)
 const leftOutKeys = new Set(window.__LYSARK_MODELS_LEFT_OUT__ ?? [])
-/** the objects whose file the panel gives other objects, but refused in their unit or look */
+/** the objects whose file the panel gives other objects, but refused in their unit, look or limits */
 const leftOut = new Set(
   [...sceneFiles.values()].flatMap((file) => file.objects.filter((object) => leftOutKeys.has(modelObjectKey({ file: file.path, object: object.name })))),
 )

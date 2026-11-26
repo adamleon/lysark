@@ -238,8 +238,8 @@ function base64Of(buffer: ArrayBuffer): string {
  * geometry, materials or textures. Never rejects: an object whose file it
  * hasn't got (the build and the panel have said why already) or can't read
  * keeps its empty node. So does an object in `leftOut`: the editor panel's
- * checks refused its file in its unit or look, and passed it for other
- * objects (panel-models.ts).
+ * checks refused its file in its unit, look or scene file's limits, and
+ * passed it for other objects (panel-models.ts).
  */
 export function modelLoader(files: Record<string, string>, leftOut: ReadonlySet<SceneObject> = new Set()): ModelLoader {
   return {
