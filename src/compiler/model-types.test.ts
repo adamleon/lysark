@@ -420,7 +420,7 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
       )
     })
 
-    it('counts an image once, however many textures and materials use it', () => {
+    it('counts an image once, however many textures and materials read it the same way', () => {
       // a fifth material showing the first image again, through a texture of its own and through the first one
       const again = photos(full(), (json) => {
         json.textures.push({ source: 0 })
@@ -447,6 +447,78 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
         json.materials[4].extensions = { KHR_materials_clearcoat: { clearcoatTexture: { index: 4 } } }
       })
       expect(own(coat)).toMatch(/^the model has 20,971,520 pixels of textures in all/)
+    })
+
+    describe('as the graphics card holds them: a copy of an image for each way it is read (three r185)', () => {
+      /**
+       * Images of `sizes`, and the first read again by a material of its own
+       * for each of `samplers`, through a texture of its own with that
+       * sampler (none for undefined), as its base colour; `edit` then
+       */
+      const firstAgain = (sizes: Array<[number, number]>, samplers: Array<Record<string, unknown> | undefined>, edit?: GlbEdit) =>
+        photos(sizes, (json) => {
+          for (const sampler of samplers) {
+            if (sampler) json.samplers = [...(json.samplers ?? []), sampler]
+            json.textures.push({ source: 0, ...(sampler ? { sampler: json.samplers.length - 1 } : {}) })
+            json.materials.push({ pbrMetallicRoughness: { baseColorTexture: { index: json.textures.length - 1 }, metallicFactor: 0 } })
+            json.meshes[0].primitives.push({ ...json.meshes[0].primitives[0], material: json.materials.length - 1 })
+          }
+          edit?.(json)
+        })
+      /** the message for 4 images and one copy more */
+      const fiveCopies =
+        `the model has 20,971,520 pixels of textures in all (4 images, held as 5 copies); ` +
+        limit.replace(
+          ' Use fewer',
+          " The graphics card holds an image once for each Interpolation and Extension its Image Texture nodes in Blender give it, " +
+            'and can hold it twice when it is both a colour and other data, such as a normal map. Use fewer',
+        )
+
+      it('counts an image again for each filter and wrap it is read with, as three uploads it again', () => {
+        expect(own(firstAgain(full(), [{ magFilter: 9728 }]))).toBe(fiveCopies)
+        // one image read five ways is five copies; four ways fits
+        const ways = [{ wrapS: 33071 }, { wrapT: 33648 }, { magFilter: 9728 }, { minFilter: 9729 }]
+        expect(own(firstAgain([[2048, 2048]], ways))).toMatch(/^the model has 20,971,520 pixels of textures in all \(1 image, held as 5 copies\);/)
+        expect(own(firstAgain([[2048, 2048]], ways.slice(1)))).toBeNull()
+      })
+
+      it('counts samplers that read an image the same way once, as GLTFLoader reads them', () => {
+        // none, an empty one, glTF's defaults written out, values GLTFLoader doesn't know (read as the defaults) and a number as text
+        const same = [undefined, {}, { magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }, { magFilter: 1234, wrapS: 'repeat' }, { minFilter: '9987' }]
+        expect(own(firstAgain(full(), same))).toBeNull()
+        // a name three's tables have from Object's prototype is read as itself, not as the default
+        expect(own(firstAgain(full(), [{ magFilter: 'constructor' }]))).toMatch(/\(4 images, held as 5 copies\)/)
+      })
+
+      it('counts a copy for an offset, scale or turn once, as it shares the upload', () => {
+        const offset = firstAgain(full(), [undefined], (json) => {
+          json.extensionsUsed = ['KHR_texture_transform']
+          json.materials[4].pbrMetallicRoughness.baseColorTexture.extensions = { KHR_texture_transform: { offset: [0.5, 0], scale: [2, 2] } }
+        })
+        expect(own(offset)).toBeNull()
+      })
+
+      it('counts an image read as a colour and as data twice, unless both read the same texture uncopied', () => {
+        // the first material's normal map is its base colour's texture: one texture, in sRGB
+        expect(own(firstAgain(full(), [], (json) => (json.materials[0].normalTexture = { index: 0 })))).toBeNull()
+        // through a texture of its own, with a sampler that reads it the same way: uploaded again, not in sRGB
+        const apart = (slot: string) =>
+          firstAgain(full(), [], (json) => {
+            json.samplers = [{}, {}]
+            json.textures[0].sampler = 0
+            json.textures.push({ source: 0, sampler: 1 })
+            json.materials[0][slot] = { index: 4 }
+          })
+        expect(own(apart('normalTexture'))).toBe(fiveCopies)
+        // an emissive texture is a colour too: in sRGB, the same upload as the base colour's
+        expect(own(apart('emissiveTexture'))).toBeNull()
+        // or through a copy for a turn, which may not be in sRGB
+        const turned = firstAgain(full(), [], (json) => {
+          json.extensionsUsed = ['KHR_texture_transform']
+          json.materials[0].normalTexture = { index: 0, extensions: { KHR_texture_transform: { rotation: 1 } } }
+        })
+        expect(own(turned)).toBe(fiveCopies)
+      })
     })
   })
 

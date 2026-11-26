@@ -231,12 +231,22 @@ Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures 
      textures over 2048 pixels, as built, not every texture.
    - *A total per file* (the author's answer, 2026-11-26). The images a file's materials use
      through their textures may have at most 16,777,216 pixels in all, four 2048 × 2048
-     textures' worth (about 90 MB of GPU memory with mipmaps): each image counted once, however
-     many textures or materials use it, and an image no texture of a material uses not at all.
-     Read from the same PNG and JPEG headers; only with `material: file` (a colour leaves the
-     textures out). The message names the file, the total and the limit, and says to use fewer
-     or smaller textures, at the `model:` line, in the build and the panel alike. Without it a
-     5 MB file could hold hundreds of flat 2048-pixel PNGs, gigabytes on the graphics card.
+     textures' worth (about 90 MB of GPU memory with mipmaps), and an image no texture of a
+     material uses doesn't count. Read from the same PNG and JPEG headers; only with
+     `material: file` (a colour leaves the textures out). The message names the file, the total
+     and the limit, and says to use fewer or smaller textures, at the `model:` line, in the
+     build and the panel alike. Without it a 5 MB file could hold hundreds of flat 2048-pixel
+     PNGs, gigabytes on the graphics card.
+     *Counted as copies, after the answers' review (2026-11-26), for the author to confirm:*
+     first each image counted once, however many textures or materials used it. But three
+     uploads an image again for each filter and wrap its textures read it with (glTF's sampler;
+     Blender's Interpolation and Extension), and again without sRGB where a normal map or other
+     data reads it through a texture of its own, so a 228 kB file reading one flat 2048-pixel
+     PNG through 108 samplers passed while holding about 2.4 GB. Now each copy the graphics card
+     holds counts (measured in Chromium and Firefox; where a copy may or may not be in sRGB it
+     counts, so the count is never under). A Blender file holds one copy of each image unless
+     two Image Texture nodes give one image different Interpolation or Extension. The limit
+     itself is unchanged.
    - *Accepted with them:* PNG and JPEG textures only, inside the `.glb` (no files beside it, as
      step 8 requires); KTX2/Basis (`KHR_texture_basisu`, which needs a decoder in a worker, which
      the `file://` rule forbids), WebP (`EXT_texture_webp`) and anything else refused with a

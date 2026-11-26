@@ -75,10 +75,13 @@ export const MAX_TEXTURE_PIXELS = 2048
  * A model file's textures may have at most this many pixels in all: four
  * 2048 x 2048 images' worth, about 90 MB of GPU memory as RGBA with mipmaps
  * (decision 10 in scene-files-proposal.md, the author's answer of
- * 2026-11-26). Each image its materials use counts once, however many
- * textures or materials use it, and an image none uses not at all. Without
+ * 2026-11-26). What counts is each copy of an image the graphics card holds
+ * (ownLookProblem): an image its materials use once for each filter and wrap
+ * it is read with, and as a colour and as data apart, however many textures
+ * or materials read it the same way; an image none uses not at all. Without
  * it, a 5 MB file could hold hundreds of flat 2048-pixel images, which PNG
- * packs into a few kB each and the graphics card holds at full size.
+ * packs into a few kB each and the graphics card holds at full size, or one
+ * such image read a hundred ways.
  */
 export const MAX_TEXTURE_TOTAL_PIXELS = 4 * MAX_TEXTURE_PIXELS * MAX_TEXTURE_PIXELS
 
@@ -427,14 +430,47 @@ function itemName(item: unknown, k: number): string {
   return typeof name === 'string' && name.trim() !== '' ? `'${name}'` : `number ${k + 1}`
 }
 
-/** calls `found` with each texture a material uses (a key ending in Texture, as every glTF material texture's does, its extensions' included) */
-function materialTextures(value: unknown, found: (texture: Json) => void): void {
+/** calls `found` with each texture a material uses and its key (a key ending in Texture, as every glTF material texture's does, its extensions' included) */
+function materialTextures(value: unknown, found: (texture: Json, key: string) => void): void {
   for (const [key, inner] of Object.entries(asJson(value) ?? {})) {
     if (key === 'extras') continue
     const texture = asJson(inner)
-    if (key.endsWith('Texture') && texture) found(texture)
+    if (key.endsWith('Texture') && texture) found(texture, key)
     else if (typeof inner === 'object' && inner !== null) materialTextures(inner, found)
   }
+}
+
+/** the material textures GLTFLoader reads as colours, in sRGB (three r185); it reads the others, a normal map's say, as data */
+const COLOUR_TEXTURES = new Set(['baseColorTexture', 'emissiveTexture', 'sheenColorTexture', 'specularColorTexture'])
+
+/** the filter values GLTFLoader reads (WEBGL_FILTERS in three r185): nearest, linear and the four mipmap ones */
+const SAMPLER_FILTERS = [9728, 9729, 9984, 9985, 9986, 9987]
+/** the wrap values it reads (WEBGL_WRAPPINGS): clamp to edge, mirrored repeat, repeat */
+const SAMPLER_WRAPS = [33071, 33648, 10497]
+/** a sampler's settings GLTFLoader reads, with the values it knows and what it takes for any other (glTF's defaults) */
+const SAMPLER_SETTINGS: Array<[name: string, values: number[], otherwise: number]> = [
+  ['magFilter', SAMPLER_FILTERS, 9729],
+  ['minFilter', SAMPLER_FILTERS, 9987],
+  ['wrapS', SAMPLER_WRAPS, 10497],
+  ['wrapT', SAMPLER_WRAPS, 10497],
+]
+
+/**
+ * A texture's filters and wraps as GLTFLoader sets them from its sampler,
+ * as one string: two textures read the same way have the same. As three
+ * r185 reads it, `samplers[sampler]`, each value looked up in its table,
+ * and a value the table doesn't have read as glTF's default; but a name the
+ * table has from Object's prototype (a crafted 'constructor') three takes as
+ * it finds it, so it is kept as itself.
+ */
+function samplerSettings(samplers: unknown[], sampler: unknown): string {
+  const key = String(sampler)
+  const settings = asJson(Object.hasOwn(samplers, key) ? (samplers as unknown as Json)[key] : undefined) ?? {}
+  return SAMPLER_SETTINGS.map(([name, values, otherwise]) => {
+    const value = String(settings[name])
+    if (values.some((known) => String(known) === value)) return value
+    return value in {} ? `'${value}'` : String(otherwise)
+  }).join(' ')
 }
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
@@ -497,8 +533,8 @@ export function jpegSize(data: Uint8Array): { width: number; height: number } | 
  * chunk, where its images are.
  *
  * Its textures must be PNG or JPEG images in the file, at most
- * MAX_TEXTURE_PIXELS on a side and MAX_TEXTURE_TOTAL_PIXELS in all, read
- * from their headers here. Its materials mustn't be what the stage draws
+ * MAX_TEXTURE_PIXELS on a side and MAX_TEXTURE_TOTAL_PIXELS in all, as many
+ * copies as the graphics card holds, their sizes read from their headers here. Its materials mustn't be what the stage draws
  * wrong, black or not at all: see-through (blended, or transmission; a
  * cut-out material, alpha mode MASK, is drawn in the opaque pass and
  * allowed), or metallic beyond MAX_FILE_METALNESS without a metallic texture
@@ -554,24 +590,66 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
   for (const [k, texture] of textures.entries()) {
     if (!isIndex(asJson(texture)?.source, images.length)) return `the model's texture ${itemName(texture, k)} has no image in the file: export it again`
   }
-  // what the graphics card holds of them: the images the materials use through
-  // their textures, each once however many textures or materials use it (an
-  // image no material's texture uses is never loaded). A texture the file
-  // lacks is refused below
-  const shown = new Set<number>()
+  // what the graphics card holds of them (three r185). An image no material's
+  // texture uses is never loaded. GLTFLoader makes one texture for each image
+  // and sampler (by its index) that a material's texture names, with the
+  // sampler's filters and wraps, all before it gives any to a material, so
+  // each starts without a colour space. A material reading one as a colour
+  // (COLOUR_TEXTURES) sets sRGB on it; one reading other texture coordinates,
+  // or with an offset, scale or turn (KHR_texture_transform), gets a copy of
+  // it, which keeps the colour space it had then. three uploads an image once
+  // for each filter, wrap and colour space among its textures (WebGLTextures'
+  // cache key). So a copy counts for each image, filters and wraps, and
+  // colour space; and data (a normal map, say) is in sRGB only where it reads
+  // the very texture a colour sets sRGB on, uncopied, both of them, and is
+  // counted apart otherwise. A texture the file lacks is refused below
+  interface Read {
+    image: number
+    /** its filters and wraps */
+    how: string
+    colour: boolean
+    /** the sampler as GLTFLoader's texture is kept by (with the image) */
+    sampler: string
+    copied: boolean
+  }
+  const reads: Read[] = []
+  const samplers = listOf(json.samplers)
   for (const material of materials) {
-    materialTextures(material, (texture) => {
-      if (isIndex(texture.index, textures.length)) shown.add(asJson(textures[texture.index as number])!.source as number)
+    materialTextures(material, (info, key) => {
+      if (!isIndex(info.index, textures.length)) return
+      const texture = asJson(textures[info.index as number])!
+      const transform = transforms ? asJson(info.extensions)?.KHR_texture_transform : undefined
+      reads.push({
+        image: texture.source as number,
+        how: samplerSettings(samplers, texture.sampler),
+        colour: COLOUR_TEXTURES.has(key),
+        sampler: String(texture.sampler),
+        copied: (info.texCoord !== undefined && info.texCoord !== 0) || transform !== undefined,
+      })
     })
   }
+  // each copy, by its image, filters and wraps and colour space, and its pixels
+  const copies = new Map<string, number>()
+  for (const read of reads) {
+    const sRGB = read.colour || (!read.copied && reads.some((other) => other.image === read.image && other.sampler === read.sampler && other.colour && !other.copied))
+    const { width, height } = sizes[read.image]
+    copies.set(`${read.image} ${read.how} ${sRGB ? 'colour' : 'data'}`, width * height)
+  }
+  const shown = new Set(reads.map((read) => read.image))
   let total = 0
-  for (const k of shown) total += sizes[k].width * sizes[k].height
+  for (const pixels of copies.values()) total += pixels
   if (total > MAX_TEXTURE_TOTAL_PIXELS) {
     // about 90 MB: as RGBA, 4 bytes a pixel, and a third more for the smaller copies (mipmaps)
+    const held = `${shown.size} image${shown.size === 1 ? '' : 's'}${copies.size > shown.size ? `, held as ${copies.size} copies` : ''}`
+    const why =
+      copies.size > shown.size
+        ? ` The graphics card holds an image once for each Interpolation and Extension its Image Texture nodes in Blender ` +
+          `give it, and can hold it twice when it is both a colour and other data, such as a normal map.`
+        : ''
     return (
-      `${src === undefined ? 'the model' : `the model '${src}'`} has ${grouped(total)} pixels of textures in all (${shown.size} images); ` +
+      `${src === undefined ? 'the model' : `the model '${src}'`} has ${grouped(total)} pixels of textures in all (${held}); ` +
       `a model may have at most ${grouped(MAX_TEXTURE_TOTAL_PIXELS)}, four ${MAX_TEXTURE_PIXELS} x ${MAX_TEXTURE_PIXELS} textures' worth ` +
-      `(about 90 MB of the graphics card's memory). Use fewer textures or smaller ones (in Blender's Image Editor, Image > Resize, ` +
+      `(about 90 MB of the graphics card's memory).${why} Use fewer textures or smaller ones (in Blender's Image Editor, Image > Resize, ` +
       `then Image > Save) and export again, or write a colour such as material: grey`
     )
   }

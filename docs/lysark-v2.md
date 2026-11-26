@@ -687,8 +687,10 @@ Confirmed by the author on 2026-11-26, with answers to step 9's questions (decis
 
 - "Refuse textures" meant textures over 2048 pixels on a side, as built, not every texture.
 - A file's textures may have at most 16,777,216 pixels in all, four 2048 × 2048 textures' worth
-  (about 90 MB of GPU memory): each image its materials use counted once, read from the same
-  headers; the message names the file, the total and the limit.
+  (about 90 MB of GPU memory), read from the same headers; the message names the file, the total
+  and the limit. Built first counting each image its materials use once; after the answers'
+  review, each copy the graphics card holds counts (an image read with other filters or wraps,
+  or as data apart from a colour, is uploaded again): decision 10, for the author to confirm.
 - Cut-out materials (alpha mode MASK, Blender's alpha clip) are allowed, their shadows cut out
   too; blended ones (BLEND) stay refused, with a message that names alpha clip.
 - A mesh without a material is grey, the `grey` preset, as Blender shows it.
