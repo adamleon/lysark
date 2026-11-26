@@ -292,7 +292,18 @@ Each has a recommendation; the names in 3, 9, 10 and 11 are permanent once lectu
      checked once for each, and refused at the line of the one without.
    - *VS Code's 32 MB stays.* The extension reads at most 32 MB per file and isn't changed: the
      panel names such a model under "Models not shown:", saying that VS Code's editor reads at
-     most 32 MB per file, and, with `limits: off`, that the lecture still builds.
+     most 32 MB per file, and, with `limits: off`, that its size doesn't stop the build.
+   - *From the review (2026-11-26), for the author to see; the rule above is unchanged.* (1) The
+     32 MB line with `limits: off` said "The lecture still builds", which the panel can't know: it
+     never reads the file, so the build may still refuse it (a see-through material, say), and
+     another scene file showing the same file may keep the limits, where the build stops. It now
+     says "Its size doesn't stop the build, because its scene file says limits: off", and a file
+     is named once, where the build stops. (2) `limits: off` in a scene file without models (only
+     views, say) while another file with the same base has the objects, with models that keep the
+     limits, lifted nothing without a word; it is now an error that names that file. Where there
+     is nothing to lift, it stays allowed. (3) Past about 400 MB of models in all, the build
+     stopped with Node's own error (its longest string) and no line; it now stops at the
+     model's line, at the bound where it could only fail.
    - *Lectures keep the limits.* The messages for the three limits don't mention the line; it is
      documented in scene-files.md, for presentations that aren't lectures.
 

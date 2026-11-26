@@ -407,8 +407,8 @@ loads afresh when `limitsChanged` (panel-models.ts) says so, and check-editor fa
 For a file over the 32 MB VS Code's editor reads (extension 0.4.0 answers only "larger than 32
 MB"), the banner says `the model '…' is larger than 32 MB: VS Code's editor reads at most 32 MB
 per file, so the preview can't show it.`, then `The lecture still builds, because its scene file
-says limits: off`, or without the line `The lecture doesn't build with it either:` and the
-build's size advice. The messages for the three limits don't mention the line (lectures keep the
+says limits: off` (since the review, below, `Its size doesn't stop the build, …`), or without the
+line `The lecture doesn't build with it either:` and the build's size advice. The messages for the three limits don't mention the line (lectures keep the
 limits; scene-files.md documents it). The editor's saves keep the line (a test per save path).
 check-editor adds a 5,000,134-byte STL it makes (`overLimitStl` in model-test-files.js) and a
 model its stand-in host answers as too large, without and with the line (about 3 s more).
@@ -426,6 +426,34 @@ is counted (decision 10), push, let engine CI pass, tag v2.14.0, and move the co
 engine (the course has no `model:` lines, so the new stop for a textured GLB without `material:`
 breaks nothing); the author can then try a textured GLB from Blender in github.dev, and
 `limits: off` on a presentation that isn't a lecture.
+
+**The `limits: off` review (2026-11-26)** found no way past the limits and no blocking bug, and
+seven more local commits fix what it did find, not pushed. The panel's 32 MB line with the line
+said "The lecture still builds", which the panel can't know: it never reads the file (the build
+may still refuse it, a see-through material say), and another scene file showing the same file
+may keep the limits, where the build stops. It now says `Its size doesn't stop the build,
+because its scene file says limits: off`, and names such a file once, as for the host's other
+reasons: at the first object whose scene file keeps the limits, or else at the first. A
+`limits: off` in a scene file without models (only views, say) while another file with the same
+base has the objects, with models that keep the limits, lifted nothing without a word;
+`readSceneFiles` now refuses it there and names that file. `limits:` written under an object
+says it is a line of the scene file. Past about 400 MB of models in all the build died with
+Node's `ERR_STRING_TOO_LONG` and no line; `readModels` now adds up the sizes on disk and stops at
+the model's line before base64 would pass Node's `MAX_STRING_LENGTH`, where it could only fail
+(`MAX_MODELS_BYTES`). A new test file, `vite-plugin-slides.sizes.test.ts`, tells the plugin
+larger sizes for small files (`statSync`) and notes what it reads, so it needs no large file; it
+also pins that a file over 5 MB is never read when an object with the limits off comes first
+(a mutation of that survived before). A scene file's YAML error no longer ends "at line 7,
+column 1:" (from before step 9). Comments and scene-files.md say "unit, look or limits", and
+scene-files.md's example gives the right line. scene-files-proposal.md lists the first three
+under decision 11 for the author; the rule itself is unchanged. `limitsChanged` in runtime.ts is
+still checked only by check-editor, which fails without it (runtime.ts needs the browser).
+Checked: vitest (576, from 570), tsc, the extension's build and tsc (`extension/` unchanged),
+check-editor in Chromium (49 s) and Firefox (44 s), check-extension with this editor and
+v2.12.0's, build:demo (4,276.47 kB) and check:demo (12 slides, 0 errors, 0 requests, GPU memory
+back to 0 geometries and 1 texture), Baneplanlegging (15 slides, 0 and 0), and the PDF (12
+pages at 3200 × 1800, as before). Hands-on with `lysark build`: a 410 MB file under `limits: off`
+stops in 140 ms at its line, and a misplaced line and one under an object give their messages.
 
 Proposals (not built):
 - From step 9's hands-on test: entering the pendulum scene logs about 45 `THREE.WebGLShadowMap:
@@ -617,7 +645,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**570**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**576**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright

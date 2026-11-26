@@ -543,7 +543,7 @@ HTTPS server.
   its models (5 MB per file, 2048 pixels on a texture's side, the texture total), for
   presentations that aren't lectures, in the build, the panel and `lysark check` alike; every
   correctness check stays. The panel names a model over VS Code's own 32 MB per file read, and
-  says whether the lecture still builds.
+  says whether its size stops the build.
   [scene-files.md](scene-files.md#limits-off-for-presentations-that-arent-lectures).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
