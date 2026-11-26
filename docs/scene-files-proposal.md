@@ -13,7 +13,8 @@ tool with inverse kinematics (v2.10.0); step 6, objects written by hand (v2.11.0
 handles for objects (v2.12.0). Step 8, models from STL and untextured GLB files, is released
 (2026-11-12, engine v2.13.0, no extension change); how to write them is in
 [scene-files.md](scene-files.md#models). Its proposals are [below](#proposals-from-step-8).
-**Decision 10, textured models, decided 2026-11-25.** Step 9 is built (2026-11-25, engine
+**Decision 10, textured models, decided 2026-11-25**, confirmed by the author on 2026-11-26 with
+answers to step 9's questions. Step 9 is built (2026-11-25, and the answers 2026-11-26, engine
 v2.14.0, no extension change), not yet released: `material: file` shows a GLB in its own colours
 and textures ([scene-files.md](scene-files.md#a-glbs-own-look-material-file)). Its proposals are
 [below](#proposals-from-step-9).
@@ -156,7 +157,10 @@ Each step lands on its own, with a note and coverage in the demo lecture, as ste
    in VS Code for the web. After its review and a hands-on test (2026-11-26): a JPEG's size is
    read as the browsers' libjpeg reads it, so a larger image can't hide; the panel shows a file
    to the objects that read it a way that passes; messages say what to do in Blender; and
-   `lysark check` waits for a slow scene before looking for three's lighting table.
+   `lysark check` waits for a slow scene before looking for three's lighting table. After the
+   author's answers (2026-11-26, decision 10): a file's textures may have at most 16,777,216
+   pixels in all, cut-out materials (alpha clip) are shown, their shadows cut out too, and a mesh
+   without a material is grey.
 
 Left for when a lecture needs them: a start state per scene run, a second robot or a moved robot
 in one scene, showing or moving objects per slide, and scene files shared between lectures.
@@ -212,7 +216,8 @@ Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures 
      with `*.stl binary` and `*.glb binary` (with `core.autocrlf` on, a text STL would otherwise
      change size between Windows and CI), and a "Models" paragraph in the README (paths, `unit`
      and `up`, 5 MB, no Git LFS). The engine repo has the same `.gitattributes` from step 8.
-10. **Textured models** (needed before step 9; **decided 2026-11-25**):
+10. **Textured models** (needed before step 9; **decided 2026-11-25**; **confirmed 2026-11-26**,
+    with the author's answers to step 9's questions below):
    - *Its own look only when asked.* A model keeps its file's look (its materials: colours and
      textures) only when the scene file says `material: file`. Without a `material:` line a model
      gets the preset as before, but a GLB with textures and no `material:` line stops the build,
@@ -222,6 +227,16 @@ Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures 
      written, the file's materials and textures are ignored, as before.
    - *Size.* A texture larger than 2048 pixels on a side is refused, with a message naming the
      image and its size. The 5,000,000-byte limit per model file stays; textures count in it.
+     *Confirmed 2026-11-26:* the words relayed to step 9's review, "refuse textures", meant
+     textures over 2048 pixels, as built, not every texture.
+   - *A total per file* (the author's answer, 2026-11-26). The images a file's materials use
+     through their textures may have at most 16,777,216 pixels in all, four 2048 × 2048
+     textures' worth (about 90 MB of GPU memory with mipmaps): each image counted once, however
+     many textures or materials use it, and an image no texture of a material uses not at all.
+     Read from the same PNG and JPEG headers; only with `material: file` (a colour leaves the
+     textures out). The message names the file, the total and the limit, and says to use fewer
+     or smaller textures, at the `model:` line, in the build and the panel alike. Without it a
+     5 MB file could hold hundreds of flat 2048-pixel PNGs, gigabytes on the graphics card.
    - *Accepted with them:* PNG and JPEG textures only, inside the `.glb` (no files beside it, as
      step 8 requires); KTX2/Basis (`KHR_texture_basisu`, which needs a decoder in a worker, which
      the `file://` rule forbids), WebP (`EXT_texture_webp`) and anything else refused with a
@@ -229,6 +244,15 @@ Each has a recommendation; the names in 3, 9 and 10 are permanent once lectures 
      fetches, so the released panel (extension 0.4.0, `connect-src` without `blob:`) shows them
      with no extension release, and the student-file check (which fails on `blob:` requests)
      passes.
+   - *Cut-out materials* (the author's answer, 2026-11-26): allowed. A material with alpha mode
+     MASK (Blender's alpha clip) is drawn in the opaque pass, each point shown or left out by its
+     alpha against the cutoff, so a sticker or a sign can have a transparent surround; its shadow
+     is cut out the same (three r185 does it for a textured material; the colour's own alpha is
+     moved into the test so the shadow follows it too). Blended materials (BLEND) stay refused,
+     with a message that names alpha clip for a transparent surround.
+   - *A mesh without a material* (the author's answer, 2026-11-26) is grey, the `grey` preset,
+     which follows the theme, as Blender shows such a mesh; the file's own materials show on the
+     rest. It was refused, as three.js gives it a fully metallic default, near black on the stage.
 
 ## Also checked
 
@@ -317,37 +341,19 @@ For the future:
 ## Proposals from step 9
 
 Not built; each would be its own small change, landed and understood before a lecture uses it.
-The questions (from step 9's review and hands-on test, 2026-11-26) are the author's to answer
-first.
+The author answered step 9's questions on 2026-11-26 (decision 10).
 
-- **Question for the author before the push: decision 10 as recorded.** Decision 10 shows
-  textures with `material: file`, up to 2048 pixels on a side. Step 9's review noted that the
-  author's words relayed to it were "go for material: file and refuse textures". If "refuse
-  textures" meant every texture, step 9 is cut back to the file's own colours: keep 9a (textures
-  freed, the GPU check) and `material: file` for colours; refuse any GLB with images or textures
-  under `material: file`, with a message; and drop the image route in `src/scene/models.ts`
-  (`fileImages`), `pngSize`/`jpegSize`, the demo's `marker.glb`, and the texture parts of
-  `scripts/check-editor.mjs` and `scripts/check-extension.mjs`. Not pushed until confirmed.
-- **Question for the author: a total of texture memory per model.** Each texture is at most 2048
-  pixels on a side, about 22 MB of GPU memory with its mipmaps, but nothing limits how many a file
-  holds. A flat 2048 × 2048 PNG compresses to 12-16 kB (under 1 kB as a 1-bit grey image, which
-  the browser still uploads as 2048 × 2048 colour), so a hand-made 5 MB GLB can hold hundreds to
-  thousands of them, many gigabytes on the graphics card: step 9's review made one of 290 that
-  passes the checks, about 6.5 GB, and each object showing the file holds its own. Exporters don't
-  write such files, but a real one can still be heavy: 5 MB of 2048-pixel JPEG photos is about 5
-  to 15 textures, 110 to 340 MB per object, on a student's laptop whose graphics share its memory.
-  *Recommended:* a limit on the total pixels of the images a file's materials use, read from the
-  same headers, say four 2048 × 2048 textures (about 90 MB), with a message naming the total and
-  the limit. It changes no lecture under it. Not built: it is a new limit, the author's to set.
-- **Question for the author: cut-out materials** (`alphaMode: MASK`, Blender's alpha clip).
-  Refused today with the blended ones. three.js draws a cut-out material in the opaque pass,
-  shadows included, so it would show correctly, and it would allow stickers and decals with a
-  transparent surround (today their surround shows as the colour the pixels hold). *Recommended:
-  allow MASK, keep BLEND refused.*
-- **Question for the author: a mesh without a material in grey.** Refused today, because
-  three.js gives it a fully metallic default, near black on the stage. Blender shows such a mesh
-  grey; lysark could give it the grey preset (its own colours elsewhere in the file kept), as
-  Blender does, instead of stopping the build. *Recommended: grey, as Blender shows it.*
+- **A switch for the size limits** (asked by the author, 2026-11-26: of no use for lectures,
+  but for other kinds of presentations, or for testing). The limits on a model are 5,000,000
+  bytes per file, 2048 pixels on a texture's side and 16,777,216 texture pixels per file; the
+  model's size between 1 mm and 10 m is not one (it catches a file read in the wrong `unit`), and
+  VS Code's own 32 MB per file read is the extension's, which the panel can't lift.
+  *Recommended:* a key in the text the compiler reads, so the build, the panel and course CI
+  agree: `limits: off` at the top of a scene file, for the models in it. The compiler would
+  report it with each model, as it reports its look, and `checkModel` would skip the three
+  limits for those. A command-line flag instead would let `lysark build` pass a file the panel
+  refuses. Not built: a new key, the author's to name, and it lets a student file hold more
+  than a student's laptop may manage.
 - **The build names slides.md for a model problem** (from before step 9). A model problem stops
   the build with Vite's trailer `file: …/slides.md`, though the problem is in a scene file, and a
   compile error starts with "Could not load virtual:lysark-deck (imported by …/src/main.ts)". The

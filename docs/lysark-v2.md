@@ -523,17 +523,21 @@ HTTPS server.
   after the images, with the same checks, and names a model it can't show under "Models not
   shown:". The demo shows a bracket (STL, millimetres, z up) and a tray (GLB) on the table.
   Engine v2.13.0, no extension change. [scene-files.md](scene-files.md#models).
-- Scene files, step 9 (built 2026-11-25, not yet released; decision 10, decided 2026-11-25):
+- Scene files, step 9 (built 2026-11-25, and the author's answers 2026-11-26; not yet released;
+  decision 10, decided 2026-11-25, confirmed 2026-11-26):
   `material: file` shows a GLB model in its own colours and textures. A GLB with textures and no
   `material:` line stops the build at its line, asking for `material: file` or a colour; on an
   STL it is an error; a colour leaves the file's look out, as before. Textures are PNG or JPEG
-  inside the `.glb`, at most 2048 pixels on a side (5 MB per file still); KTX2, WebP and AVIF, a
-  see-through material, one more metallic than the `metal` preset without a metallic texture, and
-  a mesh without a material are refused with a message. The images load from the file itself
+  inside the `.glb`, at most 2048 pixels on a side and 16,777,216 pixels per file in all (5 MB
+  per file still); KTX2, WebP and AVIF, a blended or transmission material, and one more metallic
+  than the `metal` preset without a metallic texture are refused with a message. A cut-out
+  material (alpha clip) is shown, its shadow cut out too, and a mesh without a material is grey.
+  The images load from the file itself
   into `<img>`s through `data:` addresses, with no request and no `blob:` address, so the
   released extension 0.4.0 shows them, and `dispose.ts` frees textures; `lysark check` now
-  checks that every scene's GPU memory is freed (step 9a). The demo shows a textured marker box
-  and the tray in its own colours. Engine v2.14.0, no extension change.
+  checks that every scene's GPU memory is freed (step 9a). The demo shows a textured marker box,
+  a warning sign cut out to a triangle, and the tray in its own colours. Engine v2.14.0, no
+  extension change.
   [scene-files.md](scene-files.md#a-glbs-own-look-material-file).
 - Engine v2.5.1 (2026-11-04): the panel's hint says Ctrl+S updates the preview, and the errors
   for a duplicate slide id and for a scene returning after another scene name the slides, the
@@ -677,6 +681,18 @@ Decided by the author on 2026-11-25 (decision 10 in
 - Accepted with it: PNG and JPEG textures inside the `.glb` only (KTX2, WebP and anything else
   refused), loaded without a network request or a `blob:` fetch, so the released panel shows
   them with no extension release.
+
+Confirmed by the author on 2026-11-26, with answers to step 9's questions (decision 10 in
+[scene-files-proposal.md](scene-files-proposal.md)):
+
+- "Refuse textures" meant textures over 2048 pixels on a side, as built, not every texture.
+- A file's textures may have at most 16,777,216 pixels in all, four 2048 × 2048 textures' worth
+  (about 90 MB of GPU memory): each image its materials use counted once, read from the same
+  headers; the message names the file, the total and the limit.
+- Cut-out materials (alpha mode MASK, Blender's alpha clip) are allowed, their shadows cut out
+  too; blended ones (BLEND) stay refused, with a message that names alpha clip.
+- A mesh without a material is grey, the `grey` preset, as Blender shows it.
+- `--use-angle=swiftshader` for headless Chromium on Windows (scripts/browser.mjs) is approved.
 
 ## 9. Open questions
 

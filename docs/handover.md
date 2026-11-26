@@ -264,11 +264,12 @@ once per unit and look (vite-plugin-slides.ts `readModels`, panel-models.ts). Wi
 `material: file`, src/compiler/model-types.ts (`ownLookProblem`) requires PNG or JPEG images
 inside the file, at most 2048 px a side (read from the PNG's IHDR or the JPEG's frame header,
 `pngSize`/`jpegSize`, in Node without decoding), refuses KTX2, WebP and AVIF, an image at an
-address, a see-through material (BLEND, MASK, transmission and what builds on it), a material
-more metallic than 0.6 without a metallic texture (the stage has no environment map: at
-metalness 1 the demo's tray shows near black), a mesh without a material (three's default is
-fully metallic), a texture the file lacks, and a textured mesh without the texture coordinates
-it uses; a required extension must be one GLTFLoader reads. src/scene/model-check.ts parses the
+address, a see-through material (BLEND, MASK, transmission and what builds on it; MASK allowed
+since the author's answers, below), a material more metallic than 0.6 without a metallic
+texture (the stage has no environment map: at metalness 1 the demo's tray shows near black), a
+mesh without a material (three's default is fully metallic; grey since the answers, below), a
+texture the file lacks, and a textured mesh without the texture coordinates it uses; a required
+extension must be one GLTFLoader reads. src/scene/model-check.ts parses the
 file without its images (Node has no `<img>`) and checks what was built for a see-through
 material too. The route that never fetches (src/scene/models.ts, `fileImages`): a GLTFLoader
 plugin's `beforeRoot` turns each image's bufferView into a `data:` address in the parser's JSON,
@@ -318,15 +319,48 @@ Blender leaves it out at Metallic 1. `lysark check` waited a fixed 450 ms before
 three's lighting table, so a lecture whose only lit scene was on one slide and built slower
 than that failed the GPU check falsely; it now waits until the scene manager isn't busy, in
 both directions (shown on a scratch lecture whose scene builds 1.2 s slower: the old check
-fails, the new one passes). Open for the author, in scene-files-proposal.md "Proposals from step
-9": whether decision 10 as recorded is meant (the words relayed were "refuse textures"), a total
-texture-memory limit per file (the review packed 290 flat 2048-pixel PNGs, about 6.5 GB of GPU
-memory, into a GLB that passes), cut-out (MASK) materials, and grey for a mesh without a
-material. Also the author's: scripts/browser.mjs's `--use-angle=swiftshader` (below, under
-Gotchas), a change outside the step that came with 9b's commit. Next: the author answers those,
-then push, let engine CI pass, tag v2.14.0, and move the course with Update engine (the course
-has no `model:` lines, so the new stop for a textured GLB without `material:` breaks nothing);
-the author can then try a textured GLB from Blender in github.dev.
+fails, the new one passes).
+
+The author answered step 9's questions on 2026-11-26 (decision 10 in scene-files-proposal.md),
+and three more local commits build the answers, still not pushed. "Refuse textures" meant
+textures over 2048 pixels, as built. A file's textures may have at most 16,777,216 pixels in all,
+four 2048 × 2048 (the review had packed 290 flat 2048-pixel PNGs, about 6.5 GB of GPU memory, into
+a GLB that passed): model-types.ts (`ownLookProblem`, `MAX_TEXTURE_TOTAL_PIXELS`) counts each
+image a material's texture uses once, from the same headers, and the message names the file, so
+`checkModel` and `modelBytesProblem` now take the path, which vite-plugin-slides.ts and
+panel-models.ts pass. Cut-out materials (MASK, Blender's alpha clip) are allowed and BLEND stays
+refused, its message (`MODEL_BLEND_ADVICE`) now naming alpha clip: a Math node set to Round
+between the texture's Alpha and the Principled BSDF's Alpha, as the glTF exporter's docs say.
+three r185 cuts the shadow out by itself (WebGLShadowMap's `getDepthMaterial` gives a material
+with a map and an alphaTest a depth material with both), but that depth material leaves out the
+colour's own alpha, so `parseModel` moves it into the alphaTest (models.ts, `shadowedCutOut`;
+a colour cut out entirely is not drawn). Alpha painted on vertices can't be moved so: such a part
+casts its whole shadow (scene-files.md says so). The demo has models/sign.glb, a warning sign on
+the table: one 80 mm square whose 64 × 64 RGBA PNG's surround is cut out (`png()` in
+model-test-files.js writes RGBA with `alpha: true`); check-editor requires a MASK material's
+alphaTest to be the file's cutoff, read from the GLB's own JSON. A mesh without a material is
+grey: `parseModel` marks a mesh whose material isn't one of the file's (no `materials` entry in
+GLTFLoader's `parser.associations`) with `userData[WITHOUT_FILE_MATERIAL]` (object-types.ts), and
+`fitModel` gives it the grey preset, made only then; check-editor requires grey exactly there.
+The author also approved scripts/browser.mjs's `--use-angle=swiftshader` on Windows (Gotchas,
+below), and asked for a switch that lifts the size limits for other kinds of presentations or
+testing: a proposal in scene-files-proposal.md, "Proposals from step 9", not built. Checked:
+vitest (539, from 528), tsc, the extension's build and tsc, check-editor in Chromium and Firefox
+(the sign's material with alphaTest 0.5, its texture an `<img>` from a `data:` address),
+check-extension with this editor and v2.12.0's (extension 0.4.0's panel shows the sign's
+texture), build:demo and check:demo (0 requests, GPU memory back to 0 geometries and 1 texture),
+Baneplanlegging, and the PDF (the objects page shows the sign cut out to a triangle on the white
+page). On scratch lectures in Chromium and Firefox, a 0.6 m cut-out sign casts a triangular
+shadow, next to the same sign opaque casting a square one; and a demo copy whose tray has a mesh
+without a material shows it grey and passes check-editor. With Blender 5.2: a crate whose
+sticker's Alpha goes through a Math node set to Round exports as MASK (cutoff left out, so 0.5)
+and shows the sticker cut out to a disc, its shadow round; of the hands-on test's exports,
+crate-nomat.glb (a cylinder without a material) now builds and shows grey, crate-decal.glb
+(BLEND) gets the new message, and the review's 290-texture file is refused by the total
+(1,216,348,160 pixels). Next: push, let engine CI pass, tag
+v2.14.0, and move the course with Update engine (the course has no `model:` lines, so the new stop
+for a textured GLB without `material:` breaks nothing); the author can then try a textured GLB
+from Blender in github.dev.
 
 Proposals (not built):
 - From step 9's hands-on test: entering the pendulum scene logs about 45 `THREE.WebGLShadowMap:
@@ -518,7 +552,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**528**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**539**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
@@ -567,8 +601,9 @@ See [step-1-split.md](step-1-split.md) for the full `lysark` command.
   890M laptop): with no flags it renders WebGL with ANGLE's SwiftShader but loses every page's
   context once in its first seconds, and three.js logs `Shader Error … VALIDATE_STATUS false` for
   each program linked meanwhile, so a check fails or not by timing. scripts/browser.mjs passes
-  `--use-angle=swiftshader` on Windows, the same renderer without the loss. To see it, load a
-  student file with `chromium.launch()` alone and listen for `webglcontextlost`.
+  `--use-angle=swiftshader` on Windows, the same renderer without the loss (approved by the
+  author on 2026-11-26). To see it, load a student file with `chromium.launch()` alone and listen
+  for `webglcontextlost`.
 
 - **Preview tab rAF pause**: the Claude preview tab is backgrounded → `rAF` paused,
   render loop looks frozen, `preview_screenshot` times out. NOT a bug. Verify via
