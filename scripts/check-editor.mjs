@@ -2074,7 +2074,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
         // Without the line, the first is refused at its line in the build's words, and the second
         // named with VS Code's limit and lysark's advice. With limits: off put at the top, which
         // changes no object, the panel loads afresh (the models are checked again only then): the
-        // first is shown, and the second named with VS Code's limit and that the lecture still builds
+        // first is shown, and the second named with VS Code's limit and that its size doesn't stop the build
         {
           const bigObject = 'lysark-check-big'
           const hugeObject = 'lysark-check-huge'
@@ -2131,7 +2131,7 @@ export async function checkEditor(editorDir, slidesFile, { browser: browserName 
           const lifted = `limits: off   # added by the check\n${limited}`
           const off = await showFresh(lifted, 38, 'limits: off at the top of the scene file')
           if (off.ok === false) return off
-          const hugeOff = `${armPath}, line ${lineOf(lifted, HUGE_MODEL)}: object '${hugeObject}': ${tooLarge} The lecture still builds, because its scene file says limits: off`
+          const hugeOff = `${armPath}, line ${lineOf(lifted, HUGE_MODEL)}: object '${hugeObject}': ${tooLarge} Its size doesn't stop the build, because its scene file says limits: off`
           if (!off.said.includes(hugeOff) || off.said.includes(`object '${bigObject}'`)) {
             return fail(`with limits: off the panel said ${JSON.stringify(off.said)}, expected it to name "${hugeOff}" and not '${bigObject}'`)
           }

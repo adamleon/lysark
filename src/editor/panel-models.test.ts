@@ -129,26 +129,28 @@ describe('loadModels', () => {
     ])
   })
 
-  it('says a file over what VS Code reads can still build with limits: off, at each scene file of the objects that read it (decision 11)', async () => {
+  it("says a file over what VS Code reads isn't held to the size limits with limits: off, once, where the build would stop (decision 11)", async () => {
     const { read } = host({ 'models/part.glb': { error: 'larger than 32 MB' } })
     const preview = "the model 'models/part.glb' is larger than 32 MB: VS Code's editor reads at most 32 MB per file, so the preview can't show it"
     const off = await loadModels([ref('part', 'models/part.glb', 9, 'm', 'file', 'off'), ref('again', 'models/part.glb', 14, 'm', 'file', 'off')], read)
+    // only what the panel knows: it never saw the bytes, so it can't say the rest of the file passes
     expect(off).toEqual({
       files: {},
       leftOut: [],
-      problems: [`scenes/arm.yaml, line 9: object 'part': ${preview}. The lecture still builds, because its scene file says limits: off`],
+      problems: [`scenes/arm.yaml, line 9: object 'part': ${preview}. Its size doesn't stop the build, because its scene file says limits: off`],
     })
-    // read from a scene file without limits: off too: each named, the first of each, in the order they come
+    // read from a scene file without limits: off too: named once, at the first object in a
+    // file that keeps the limits, where the build stops, and never said to build
     const both = await loadModels(
       [
         ref('part', 'models/part.glb', 9, 'm', 'file', 'off'),
         ref('again', 'models/part.glb', 14, 'm', 'file', 'off'),
         ref('kept', 'models/part.glb', 4, 'm', 'file', 'on', 'scenes/agilus.yaml'),
+        ref('also', 'models/part.glb', 6, 'm', 'file', 'on', 'scenes/agilus.yaml'),
       ],
       read,
     )
     expect(both.problems).toEqual([
-      `scenes/arm.yaml, line 9: object 'part': ${preview}. The lecture still builds, because its scene file says limits: off`,
       `scenes/agilus.yaml, line 4: object 'kept': ${preview}. The lecture doesn't build with it either: a model may be at most 5 MB, its textures included. ` +
         "Export it with fewer triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data > Material, Images: JPEG Format) or smaller",
     ])

@@ -63,7 +63,9 @@ const TOO_LARGE = /^larger than (.+)$/
  * VS Code's editor reads at most 32 MB of a file (the extension's own limit,
  * which the panel can't lift), and says only that, not the size. Without
  * limits: off such a file is far over lysark's own limit too, and gets its
- * advice; with it, the build takes the file, and only the preview can't.
+ * advice; with it, its size doesn't stop the build, and only the preview
+ * can't show it. Only that is said: the panel never saw the bytes, so it
+ * can't tell whether the build passes the rest of the file.
  */
 function unreadProblem(ref: ModelRef, error: string, fix: string | undefined): string {
   const hint = fix ? `. Write ${fix}: the path is from the lecture folder, not from scenes/` : ''
@@ -74,7 +76,7 @@ function unreadProblem(ref: ModelRef, error: string, fix: string | undefined): s
   if (tooLarge) {
     const preview = `the model '${ref.src}' is ${error}: VS Code's editor reads at most ${tooLarge[1]} per file, so the preview can't show it`
     return ref.limits === 'off'
-      ? `${preview}. The lecture still builds, because its scene file says limits: off`
+      ? `${preview}. Its size doesn't stop the build, because its scene file says limits: off`
       : `${preview}. The lecture doesn't build with it either: ${modelSizeAdvice(ref.format)}`
   }
   return `the model '${ref.src}': ${error}${hint}`
@@ -183,9 +185,10 @@ export async function loadModels(
       const there = fromScenes(path)
       const fix = notThere(file) && typeof fromThere[there]?.base64 === 'string' ? there : undefined
       const error = file?.error ?? 'not found'
-      // too large for VS Code reads otherwise with limits: off than without: the first object of each is named
-      const named = TOO_LARGE.test(error) ? uses.filter((ref, k) => uses.findIndex((other) => other.limits === ref.limits) === k) : [uses[0]]
-      for (const ref of named) problems.push(`${modelWhere(ref)}: ${unreadProblem(ref, error, fix)}`)
+      // one line for the file, at its first object; for one too large for VS Code, at the
+      // first whose scene file keeps the limits, if any does: that is where the build stops
+      const named = (TOO_LARGE.test(error) && uses.find((ref) => ref.limits === 'on')) || uses[0]
+      problems.push(`${modelWhere(named)}: ${unreadProblem(named, error, fix)}`)
       continue
     }
     const content = await contentProblems(file.base64, uses)

@@ -431,9 +431,10 @@ objects:
 - **VS Code reads at most 32 MB of a file** (the Lysark extension's own limit, which the engine
   can't lift), so the preview can't show a larger model, however the scene file is written.
   The panel shows the rest and names the model under **Models not shown:**, for example
-  `scenes/arm.yaml, line 6: object 'cell': the model 'models/cell.glb' is larger than 32 MB: VS
-  Code's editor reads at most 32 MB per file, so the preview can't show it. The lecture still
-  builds, because its scene file says limits: off`. A model under 32 MB shows in the preview.
+  `scenes/arm.yaml, line 5: object 'cell': the model 'models/cell.glb' is larger than 32 MB: VS
+  Code's editor reads at most 32 MB per file, so the preview can't show it. Its size doesn't
+  stop the build, because its scene file says limits: off`. The panel can't read the file, so
+  the rest of it is checked only by the build. A model under 32 MB shows in the preview.
 - **The student file** holds each model about a third larger than on disk: a 40 MB model makes a
   55 MB student file, which builds, passes `lysark check` and shows from `file://`.
 - **In the editor**, adding or removing the line loads the panel afresh, which checks the models
@@ -712,8 +713,9 @@ words (for a file VS Code won't read, its own reason). For example:
 - In the panel only, for a file over the 32 MB VS Code reads: `scenes/arm.yaml, line 41: object
   'bracket': the model 'models/bracket.stl' is larger than 32 MB: VS Code's editor reads at most
   32 MB per file, so the preview can't show it. The lecture doesn't build with it either: a model
-  may be at most 5 MB. Export it …` (with `limits: off`, `… The lecture still builds, because its
-  scene file says limits: off`)
+  may be at most 5 MB. Export it …` (with `limits: off`, `… Its size doesn't stop the build,
+  because its scene file says limits: off`). Such a file is named once, at its first object in a
+  scene file that keeps the limits, where the build stops, or else at its first object.
 - `scenes/arm.yaml, line 49: object 'tray': the model is a Git LFS pointer, not the model: the
   course build doesn't fetch LFS files. Keep the file in git itself (git lfs untrack, then commit
   it again)`
