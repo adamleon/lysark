@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { describe, expect, it } from 'vitest'
-import { binaryStl, box, cylinder, glb, glbEdits, jpeg, png, textStl, UNIT_CUBE, type Triangle } from './model-test-files.js'
+import { binaryStl, box, cylinder, faceNormal, glb, glbEdits, jpeg, overLimitStl, plate, png, textStl, UNIT_CUBE, type Triangle } from './model-test-files.js'
 
 // The builders are shared by the model tests and the demo's models
 // (scripts/make-demo-models.mjs): this checks that three.js reads what they write.
@@ -63,6 +63,21 @@ describe('model test files', () => {
     }
     // the header doesn't start with 'solid', as a binary STL's must not
     expect(new TextDecoder().decode(new Uint8Array(binaryStl()).slice(0, 5))).not.toBe('solid')
+  })
+
+  it('builds a plate of as many triangles as asked, facing up, and an STL just over 5 MB of one', () => {
+    const triangles = plate({ count: 9, side: 2 })
+    expect(triangles).toHaveLength(9)
+    expect(plate({ cells: 3 })).toHaveLength(18)
+    for (const t of triangles) expect(faceNormal(t)).toEqual([0, 1, 0])
+    const corners = new THREE.Box3().setFromPoints(plate({ cells: 3, side: 2 }).flat().map((v) => new THREE.Vector3(...v)))
+    expect([corners.min.toArray(), corners.max.toArray()]).toEqual([
+      [-1, 0, -1],
+      [1, 0, 1],
+    ])
+    const big = overLimitStl()
+    expect(big.byteLength).toBe(5_000_134)
+    expect(new STLLoader().parse(big).attributes.position.count).toBe(100_001 * 3)
   })
 
   it('writes a GLB that GLTFLoader reads, with its meshes, transforms, lights, cameras and lines', async () => {

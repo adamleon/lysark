@@ -510,10 +510,13 @@ describe('compileLecture — models (scene-files-proposal.md step 8)', () => {
   const slide = (scene?: string) => `---\n${scene ? `scene: ${scene}` : 'layout: center'}\n---\n# x\n`
 
   it('reports the models of the scenes the slides run, and only those', () => {
-    const part = { src: 'models/part.stl', format: 'stl', unit: 'mm', look: 'default', object: 'part', file: 'scenes/celle.yaml', line: 3 }
+    const part = { src: 'models/part.stl', format: 'stl', unit: 'mm', look: 'default', limits: 'on', object: 'part', file: 'scenes/celle.yaml', line: 3 }
     expect(compileLecture(slide('celle'), files).models).toEqual([part])
     // a slide that names the engine scene runs the same scene, with the file's objects
     expect(compileLecture(slide('agilus'), files).models).toEqual([part])
+    // with limits: off in its scene file, which every model of the file carries (decision 11)
+    const off = { ...files, 'scenes/celle.yaml': `limits: off\n${files['scenes/celle.yaml']}` }
+    expect(compileLecture(slide('celle'), off).models).toEqual([{ ...part, limits: 'off', line: 4 }])
     // one for each object, even when two show the same file
     expect(compileLecture(slide('arm') + slide('celle'), files).models.map((m) => `${m.file}:${m.object}`)).toEqual([
       'scenes/arm.yaml:tray',

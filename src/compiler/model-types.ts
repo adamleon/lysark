@@ -14,6 +14,11 @@ import { MAX_METRES, type ModelUnit } from '../engine/object-types'
  * pixels on a side, or takes the file's textures past four such in all; and a
  * material the stage would draw wrong, black or not at all is refused too
  * (decision 10 in scene-files-proposal.md).
+ *
+ * Three of these are resource limits, not correctness: the bytes per file,
+ * the pixels on a texture's side and the texture pixels per file. A scene
+ * file that says `limits: off` lifts those three for its models (decision 11,
+ * ModelLimits); every other check holds whatever it says.
  */
 
 /** the model files, by extension (any case): STL, binary or text, and binary glTF */
@@ -51,6 +56,19 @@ export const MIN_MODEL_METRES = 0.001
  */
 export type ModelLook = 'file' | 'preset' | 'default'
 
+/**
+ * Whether the size limits hold for a model (decision 11 in
+ * scene-files-proposal.md, the author's of 2026-11-26): 'on', unless its
+ * scene file says `limits: off`, which lifts MODEL_MAX_BYTES,
+ * MAX_TEXTURE_PIXELS and MAX_TEXTURE_TOTAL_PIXELS for the models of that
+ * file's objects, for presentations that aren't lectures, or testing. Only
+ * those three: every check that the file can be shown, offline and with its
+ * GPU memory freed, and the extent check (a unit mistake, not a size) hold
+ * either way. The checks take it last, 'on' when not given, so a caller that
+ * leaves it out keeps the limits.
+ */
+export type ModelLimits = 'on' | 'off'
+
 /** a model a lecture uses, as a scene file writes it; the compiler reports them, and the build and the panel read them */
 export interface ModelRef {
   /** the path as written, from the lecture folder (where slides.md is) */
@@ -60,6 +78,8 @@ export interface ModelRef {
   unit: ModelUnit
   /** where its look comes from, for the checks of its textures and materials */
   look: ModelLook
+  /** whether the size limits hold for it: 'off' when its scene file says limits: off */
+  limits: ModelLimits
   /** the object that shows it */
   object: string
   /** the scene file it is written in, `scenes/arm.yaml` */
@@ -85,6 +105,11 @@ export const MAX_TEXTURE_PIXELS = 2048
  */
 export const MAX_TEXTURE_TOTAL_PIXELS = 4 * MAX_TEXTURE_PIXELS * MAX_TEXTURE_PIXELS
 
+/** the three limits `limits: off` lifts, for the messages that name them */
+export const MODEL_LIMITS_LISTED =
+  `${MODEL_MAX_BYTES / 1e6} MB per file, ${MAX_TEXTURE_PIXELS} pixels on a texture's side ` +
+  `and ${grouped(MAX_TEXTURE_TOTAL_PIXELS)} pixels of textures per file`
+
 /**
  * With material: file, a material without a metallic texture may be at most
  * this metallic. The stage has no reflections for a metal to show (no
@@ -106,6 +131,18 @@ export function modelWhere(ref: Pick<ModelRef, 'file' | 'line' | 'object'>): str
  */
 export function modelObjectKey(ref: Pick<ModelRef, 'file' | 'object'>): string {
   return `${ref.file} ${ref.object}`
+}
+
+/**
+ * How an object reads its model file, as the checks see it: its unit, its
+ * look and its scene file's limits. The build (vite-plugin-slides.ts) and
+ * the panel (panel-models.ts) check a file once for each way its objects
+ * read it, and name a problem at the first object that reads it that way, so
+ * one file can pass for an object in a scene file with limits: off and be
+ * refused, at its own line, for one in a file without.
+ */
+export function modelReadWay(ref: Pick<ModelRef, 'unit' | 'look' | 'limits'>): string {
+  return `${ref.unit} ${ref.look} ${ref.limits}`
 }
 
 /**
@@ -179,10 +216,10 @@ export function modelSizeAdvice(format: ModelFormat): string {
 /**
  * What is wrong with a model file of `bytes` bytes, or null. The build
  * asks before reading the file, and the panel from the length of the base64
- * the host sends, before decoding it.
+ * the host sends, before decoding it. Nothing with `limits` off.
  */
-export function modelSizeProblem(bytes: number, format: ModelFormat): string | null {
-  if (bytes <= MODEL_MAX_BYTES) return null
+export function modelSizeProblem(bytes: number, format: ModelFormat, limits: ModelLimits = 'on'): string | null {
+  if (limits === 'off' || bytes <= MODEL_MAX_BYTES) return null
   return `the model is ${megabytes(bytes)} MB; ${modelSizeAdvice(format)}`
 }
 
@@ -321,10 +358,17 @@ function unshownTextures(json: Record<string, unknown>, used: Set<unknown>): str
  * model's look comes from: with `file`, its textures' images (their type and
  * size, read from their headers) and its materials are checked too. `src` is
  * the model's path as the scene file writes it, which a message about all
- * its textures together names.
+ * its textures together names. With `limits` off, the file's size and its
+ * textures' pixels aren't limited; everything else is checked as ever.
  */
-export function modelBytesProblem(buffer: ArrayBuffer, format: ModelFormat, look: ModelLook = 'default', src?: string): string | null {
-  const size = modelSizeProblem(buffer.byteLength, format)
+export function modelBytesProblem(
+  buffer: ArrayBuffer,
+  format: ModelFormat,
+  look: ModelLook = 'default',
+  src?: string,
+  limits: ModelLimits = 'on',
+): string | null {
+  const size = modelSizeProblem(buffer.byteLength, format, limits)
   if (size) return size
   const bytes = new Uint8Array(buffer)
   if (startsWith(bytes, LFS_POINTER)) {
@@ -410,7 +454,7 @@ export function modelBytesProblem(buffer: ArrayBuffer, format: ModelFormat, look
   const instanced = nodes.some((node) => node?.extensions?.EXT_mesh_gpu_instancing !== undefined)
   if (used.has('EXT_mesh_gpu_instancing') || instanced) return MODEL_INSTANCING_PROBLEM
   if (look === 'file') {
-    const own = ownLookProblem(json, used, binary, src)
+    const own = ownLookProblem(json, used, binary, src, limits)
     if (own) return own
   }
   // GLTFLoader only warns about a required extension it doesn't know, and shows the model wrong
@@ -542,9 +586,11 @@ export function jpegSize(data: Uint8Array): { width: number; height: number } | 
  * coordinates its textures use. A mesh without a material is allowed: three
  * would give it a fully metallic default, near black on the stage, and
  * objects.ts makes it grey instead. `src` is the model's path, for the
- * message about all its textures together.
+ * message about all its textures together. With `limits` off, the images'
+ * sides and their total aren't limited; their headers are still read, so a
+ * broken or mislabelled image is still refused.
  */
-function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | undefined, src: string | undefined): string | null {
+function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | undefined, src: string | undefined, limits: ModelLimits): string | null {
   const notGlb = `the model isn't a binary glTF 2.0 file. Export it again as glTF Binary (.glb)`
   const images = listOf(json.images)
   const textures = listOf(json.textures)
@@ -578,7 +624,7 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
     const data = binary.subarray(start as number, (start as number) + (length as number))
     const size = type === 'image/png' ? pngSize(data) : jpegSize(data)
     if (!size) return `the model's image ${name} isn't the ${TEXTURE_IMAGES[type]} the file says it is: export it again`
-    if (size.width > MAX_TEXTURE_PIXELS || size.height > MAX_TEXTURE_PIXELS) {
+    if (limits === 'on' && (size.width > MAX_TEXTURE_PIXELS || size.height > MAX_TEXTURE_PIXELS)) {
       return (
         `the model's image ${name} is ${size.width} x ${size.height} pixels: a texture may be at most ${MAX_TEXTURE_PIXELS} ` +
         `pixels on a side. Scale the image down (in Blender's Image Editor, Image > Resize, then Image > Save) and export ` +
@@ -638,7 +684,7 @@ function ownLookProblem(json: Json, used: Set<unknown>, binary: Uint8Array | und
   const shown = new Set(reads.map((read) => read.image))
   let total = 0
   for (const pixels of copies.values()) total += pixels
-  if (total > MAX_TEXTURE_TOTAL_PIXELS) {
+  if (limits === 'on' && total > MAX_TEXTURE_TOTAL_PIXELS) {
     // about 90 MB: as RGBA, 4 bytes a pixel, and a third more for the smaller copies (mipmaps)
     const held = `${shown.size} image${shown.size === 1 ? '' : 's'}${copies.size > shown.size ? `, held as ${copies.size} copies` : ''}`
     const why =

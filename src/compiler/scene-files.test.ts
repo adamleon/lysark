@@ -483,9 +483,9 @@ objects:
 
   it("reports each model with its scene file and the line of its path, in the file's order", () => {
     expect(readSceneFiles({ 'scenes/arm.yaml': ARM }).get('arm')!.models).toEqual([
-      { src: '../../assets/bracket.stl', format: 'stl', unit: 'mm', look: 'preset', object: 'bracket', file: 'scenes/arm.yaml', line: 8 },
-      { src: 'models/tray.glb', format: 'glb', unit: 'm', look: 'default', object: 'tray', file: 'scenes/arm.yaml', line: 15 },
-      { src: '../../assets/Gripper.STL', format: 'stl', unit: 'cm', look: 'default', object: 'gripper', file: 'scenes/arm.yaml', line: 19 },
+      { src: '../../assets/bracket.stl', format: 'stl', unit: 'mm', look: 'preset', limits: 'on', object: 'bracket', file: 'scenes/arm.yaml', line: 8 },
+      { src: 'models/tray.glb', format: 'glb', unit: 'm', look: 'default', limits: 'on', object: 'tray', file: 'scenes/arm.yaml', line: 15 },
+      { src: '../../assets/Gripper.STL', format: 'stl', unit: 'cm', look: 'default', limits: 'on', object: 'gripper', file: 'scenes/arm.yaml', line: 19 },
     ])
     expect(readSceneFiles({ 'scenes/arm.yaml': 'base: arm\nobjects:\n  b: { box: [1, 1, 1] }\n' }).get('arm')!.models).toEqual([])
     expect(readSceneFiles({ 'scenes/arm.yaml': 'base: arm\n' }).get('arm')!.models).toEqual([])
@@ -641,5 +641,73 @@ describe('material: file (scene-files-proposal.md step 9, decision 10)', () => {
     expect(one('    model: models/tray.glb\n    material: fiel\n')).toMatch(/Did you mean 'file'\?/)
     expect(one('    model: models/bracket.stl\n    material: gold\n')).toBe(`scenes/arm.yaml, line 5: object 'a' material 'gold' isn't one of the colours. ${colours}`)
     expect(one('    box: [1, 1, 1]\n    material: fiel\n')).not.toMatch(/Did you mean 'file'/)
+  })
+})
+
+describe('limits: off (decision 11, the author, 2026-11-26)', () => {
+  const problem = (text: string) => {
+    try {
+      readSceneFiles({ 'scenes/arm.yaml': text })
+      return 'no error'
+    } catch (err) {
+      return (err as Error).message
+    }
+  }
+  const OBJECTS = 'objects:\n  part:\n    model: models/part.stl\n    unit: mm\n  plate:\n    model: models/plate.glb\n    material: file\n'
+  const lifts =
+    "but its one value is off: limits: off lifts the size limits on the models in this file (5 MB per file, 2048 pixels on a texture's side " +
+    'and 16,777,216 pixels of textures per file). To keep the limits, leave the line out'
+
+  it("puts the file's limits on each of its models: on without the line, off with limits: off, wherever it is written", () => {
+    const limitsOf = (text: string) => {
+      const file = readSceneFiles({ 'scenes/arm.yaml': text }).get('arm')!
+      return { file: file.limits, models: file.models.map((ref) => ref.limits) }
+    }
+    expect(limitsOf(`base: arm\n${OBJECTS}`)).toEqual({ file: 'on', models: ['on', 'on'] })
+    expect(limitsOf(`base: arm\nlimits: off\n${OBJECTS}`)).toEqual({ file: 'off', models: ['off', 'off'] })
+    // after the objects, quoted, with a comment
+    expect(limitsOf(`base: arm\n${OBJECTS}limits: "off"   # a test rig, not a lecture\n`)).toEqual({ file: 'off', models: ['off', 'off'] })
+    expect(limitsOf("limits: 'off'\nbase: arm\n")).toEqual({ file: 'off', models: [] })
+    // the rest of the file reads as without it
+    const without = readSceneFiles({ 'scenes/arm.yaml': `base: arm\n${OBJECTS}` }).get('arm')!
+    const withIt = readSceneFiles({ 'scenes/arm.yaml': `base: arm\nlimits: off\n${OBJECTS}` }).get('arm')!
+    expect(withIt.objects).toEqual(without.objects)
+    expect(withIt.models.map(({ limits: _, line, ...rest }) => ({ ...rest, line: line - 1 }))).toEqual(without.models.map(({ limits: _, ...rest }) => rest))
+  })
+
+  it('reads the word off as written, also where YAML 1.1 would make it false', () => {
+    // YAML 1.2, which the compiler reads, takes a bare off as the word; a %YAML 1.1 file gets false for it
+    expect(readSceneFiles({ 'scenes/arm.yaml': `%YAML 1.1\n---\nbase: arm\nlimits: off\n${OBJECTS}` }).get('arm')!.limits).toBe('off')
+  })
+
+  it('refuses any other value, at its line, naming the one value', () => {
+    expect(problem('base: arm\nlimits: on\n')).toBe(`scenes/arm.yaml, line 2: limits is 'on', ${lifts}`)
+    for (const value of ['true', 'false', 'yes', 'no', 'Off', 'OFF', '0', '5000000', '"of"']) {
+      expect(problem(`base: arm\nlimits: ${value}\n`)).toBe(`scenes/arm.yaml, line 2: limits is '${value.replace(/"/g, '')}', ${lifts}`)
+    }
+    for (const value of ['', ' ~', ' null']) expect(problem(`base: arm\nlimits:${value}\n`)).toBe(`scenes/arm.yaml, line 2: limits is empty, ${lifts}`)
+    expect(problem('base: arm\nlimits: [off]\n')).toBe(`scenes/arm.yaml, line 2: limits is a list, ${lifts}`)
+    expect(problem('base: arm\nlimits:\n  - off\n')).toBe(`scenes/arm.yaml, line 3: limits is a list, ${lifts}`)
+    expect(problem('base: arm\nlimits: { models: off }\n')).toBe(`scenes/arm.yaml, line 2: limits is a mapping, ${lifts}`)
+    // a YAML 1.1 false written otherwise than off is still not off
+    expect(problem('%YAML 1.1\n---\nbase: arm\nlimits: no\n')).toBe(`scenes/arm.yaml, line 4: limits is 'no', ${lifts}`)
+  })
+
+  it("lists limits among a scene file's keys, and offers it for a typo", () => {
+    const keys = "A scene file has 'base', 'views', 'poses', 'objects' and 'limits'"
+    expect(problem('base: arm\nlimit: off\n')).toBe(`scenes/arm.yaml, line 2: unknown key 'limit'. Did you mean 'limits'? ${keys}`)
+    expect(problem('base: arm\nLimits: off\n')).toBe(`scenes/arm.yaml, line 2: unknown key 'Limits'. Did you mean 'limits'? ${keys}`)
+    expect(problem('base: arm\nsizes: off\n')).toBe(`scenes/arm.yaml, line 2: unknown key 'sizes'. ${keys}`)
+  })
+
+  it('belongs to the scene file it is in: another file with the same model keeps the limits', () => {
+    const scenes = readSceneFiles({
+      'scenes/arm.yaml': 'base: arm\nlimits: off\nobjects:\n  big:\n    model: ../../assets/big.stl\n',
+      'scenes/agilus.yaml': 'base: agilus\nobjects:\n  big:\n    model: ../../assets/big.stl\n',
+    })
+    expect([...scenes.values()].flatMap((file) => file.models.map(({ file: path, limits }) => ({ path, limits })))).toEqual([
+      { path: 'scenes/agilus.yaml', limits: 'on' },
+      { path: 'scenes/arm.yaml', limits: 'off' },
+    ])
   })
 })

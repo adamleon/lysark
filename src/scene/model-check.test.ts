@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { modelBytesProblem } from '../compiler/model-types'
-import { binaryStl, box, glb, glbEdits, jpeg, lfsPointer, png, textStl, UNIT_CUBE } from './model-test-files.js'
+import { binaryStl, box, glb, glbEdits, jpeg, lfsPointer, overLimitStl, png, textStl, UNIT_CUBE } from './model-test-files.js'
 import { checkModel } from './model-check'
 
 // the bytes' check as it is, but one a test can make pass a file it refuses
@@ -143,6 +143,34 @@ describe('checkModel', () => {
         textures: [{ bytes: png(4, 4, () => [200, 30, 30, 0], { alpha: true }) }],
       })
       expect(await checkModel(sticker, 'glb', ['m'], 'file')).toBeNull()
+    })
+  })
+
+  describe('with limits: off (decision 11)', () => {
+    it('parses and passes a file over 5 MB, and still checks its unit, which is no size limit', async () => {
+      const big = overLimitStl()
+      expect(await checkModel(big, 'stl', ['m'], 'default', 'models/big.stl', 'off')).toBeNull()
+      expect(await checkModel(big, 'stl', ['m'], 'default', 'models/big.stl')).toMatch(/^the model is 5\.0001 MB; a model may be at most 5 MB\. /)
+      // 0.1 across in its units: in mm, a tenth of a millimetre
+      expect(await checkModel(big, 'stl', ['mm'], 'default', 'models/big.stl', 'off')).toBe(
+        'the model is 0.1 mm across, read in mm. Is the file in metres? Leave out unit',
+      )
+    })
+
+    it('passes textures over 2048 pixels on a side and over the total, and still refuses a see-through material', async () => {
+      const sides = [4096, 4096, 2048]
+      const photos = glb({
+        meshes: sides.map((_, k) => ({ uvs: true, material: k })),
+        materials: sides.map((_, k) => ({ pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0 } })),
+        textures: sides.map((side) => ({ bytes: jpeg(side, side), mimeType: 'image/jpeg' })),
+      })
+      expect(await checkModel(photos, 'glb', ['m'], 'file', 'models/photos.glb')).toMatch(/^the model's image number 1 is 4096 x 4096 pixels/)
+      expect(await checkModel(photos, 'glb', ['m'], 'file', 'models/photos.glb', 'off')).toBeNull()
+      const glass = glb({ meshes: [{ name: 'pane', material: 0 }], materials: [{ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }] })
+      expect(await checkModel(glass, 'glb', ['m'], 'file', 'models/glass.glb', 'off')).toMatch(/^the model's material 'glass' is see-through \(blended/)
+      // and in what the loader built, made to pass the bytes' check
+      vi.mocked(modelBytesProblem).mockReturnValueOnce(null)
+      expect(await checkModel(glass, 'glb', ['m'], 'file', 'models/glass.glb', 'off')).toMatch(/^the model's material 'glass' is see-through, which the stage draws wrong/)
     })
   })
 

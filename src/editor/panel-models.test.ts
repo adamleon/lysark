@@ -1,19 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { modelFormat, modelWhere, type ModelLook, type ModelRef } from '../compiler/model-types'
+import { modelFormat, modelWhere, type ModelLimits, type ModelLook, type ModelRef } from '../compiler/model-types'
 import type { ModelUnit } from '../engine/object-types'
 import { checkModel } from '../scene/model-check'
 import { binaryStl, box, glb, glbEdits, jpeg, lfsPointer, png } from '../scene/model-test-files.js'
 import type { HostFile } from './host'
 import { base64Bytes, loadModels } from './panel-models'
 
-/** a model as the compiler reports it, in scenes/arm.yaml */
-const ref = (object: string, src: string, line: number, unit: ModelUnit = 'm', look: ModelLook = 'default'): ModelRef => ({
+/** a model as the compiler reports it, in scenes/arm.yaml unless `file` says another scene file */
+const ref = (
+  object: string,
+  src: string,
+  line: number,
+  unit: ModelUnit = 'm',
+  look: ModelLook = 'default',
+  limits: ModelLimits = 'on',
+  file = 'scenes/arm.yaml',
+): ModelRef => ({
   src,
   format: modelFormat(src)!,
   unit,
   look,
+  limits,
   object,
-  file: 'scenes/arm.yaml',
+  file,
   line,
 })
 

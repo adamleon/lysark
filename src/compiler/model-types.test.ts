@@ -7,6 +7,7 @@ import {
   glbEdits,
   jpeg,
   lfsPointer,
+  overLimitStl,
   png,
   textStl,
   withExtraByte,
@@ -21,6 +22,7 @@ import {
   MAX_TEXTURE_PIXELS,
   MAX_TEXTURE_TOTAL_PIXELS,
   MIN_MODEL_METRES,
+  MODEL_LIMITS_LISTED,
   MODEL_MAX_BYTES,
   MODEL_TEXTURES_UNCHOSEN,
   MODEL_UNITS,
@@ -29,6 +31,7 @@ import {
   modelFormat,
   modelObjectKey,
   modelPathProblem,
+  modelReadWay,
   modelSizeAdvice,
   modelSizeProblem,
   modelWhere,
@@ -672,6 +675,80 @@ describe('material: file, a GLB in its own colours and textures (step 9, decisio
     )
     // with a preset, any material extension is replaced
     expect(modelBytesProblem(textureBox({}, glbEdits.extension('KHR_materials_pbrSpecularGlossiness')), 'glb', 'preset')).toBeNull()
+  })
+})
+
+describe('limits: off lifts the three size limits and nothing else (decision 11, the author, 2026-11-26)', () => {
+  const big = overLimitStl()
+  const textured = (bytes: ArrayBuffer, mimeType = 'image/png') => textureBox({ name: 'label', bytes, mimeType })
+  /** a box for each image, its material showing it: JPEGs, a few kB in the file at any size */
+  const photos = (sides: number[]) =>
+    glb({
+      meshes: sides.map((_, k): GlbMesh => ({ uvs: true, material: k, translation: [2 * k, 0, 0] })),
+      materials: sides.map((_, k) => ({ pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0 } })),
+      textures: sides.map((side) => ({ bytes: jpeg(side, side), mimeType: 'image/jpeg' })),
+    })
+
+  it('names the three limits', () => {
+    expect(MODEL_LIMITS_LISTED).toBe("5 MB per file, 2048 pixels on a texture's side and 16,777,216 pixels of textures per file")
+  })
+
+  it('takes a file over 5 MB with limits off, and refuses it with them on, the default', () => {
+    expect(big.byteLength).toBe(5_000_134)
+    expect(modelSizeProblem(big.byteLength, 'stl', 'off')).toBeNull()
+    expect(modelSizeProblem(1e9, 'glb', 'off')).toBeNull()
+    expect(modelSizeProblem(big.byteLength, 'stl', 'on')).toMatch(/^the model is 5\.0001 MB; a model may be at most 5 MB\. /)
+    expect(modelSizeProblem(big.byteLength, 'stl')).toBe(modelSizeProblem(big.byteLength, 'stl', 'on'))
+    expect(modelBytesProblem(big, 'stl', 'default', 'models/big.stl', 'off')).toBeNull()
+    expect(modelBytesProblem(big, 'stl', 'default', 'models/big.stl')).toMatch(/^the model is 5\.0001 MB; /)
+  })
+
+  it('takes a texture over 2048 pixels on a side with limits off', () => {
+    for (const image of [textured(png(4096, 1)), textured(jpeg(4096, 4096), 'image/jpeg')]) {
+      expect(modelBytesProblem(image, 'glb', 'file')).toMatch(/^the model's image 'label' is 4096 x \d+ pixels: a texture may be at most 2048 pixels on a side/)
+      expect(modelBytesProblem(image, 'glb', 'file', 'models/label.glb', 'off')).toBeNull()
+    }
+  })
+
+  it("takes a file's textures over 16,777,216 pixels in all with limits off", () => {
+    const over = photos([2048, 2048, 2048, 2048, 1])
+    expect(modelBytesProblem(over, 'glb', 'file', 'models/photos.glb')).toMatch(/^the model 'models\/photos\.glb' has 16,777,217 pixels of textures in all/)
+    expect(modelBytesProblem(over, 'glb', 'file', 'models/photos.glb', 'off')).toBeNull()
+    // both at once: eight 4096-pixel photos, 134,217,728 pixels
+    expect(modelBytesProblem(photos(new Array(8).fill(4096)), 'glb', 'file', 'models/photos.glb', 'off')).toBeNull()
+  })
+
+  it('still refuses what is wrong with the file, whatever its size', () => {
+    const off = (file: ArrayBuffer, look: 'default' | 'file' = 'file') => modelBytesProblem(file, 'glb', look, 'models/x.glb', 'off')
+    // a file that isn't what its name says, over 5 MB
+    expect(modelBytesProblem(new ArrayBuffer(MODEL_MAX_BYTES + 1), 'stl', 'default', 'models/x.stl', 'off')).toMatch(/^the model isn't an STL file/)
+    expect(modelBytesProblem(new ArrayBuffer(MODEL_MAX_BYTES + 1), 'glb', 'default', 'models/x.glb', 'off')).toMatch(/^the model isn't a binary glTF 2\.0 file/)
+    expect(modelBytesProblem(lfsPointer(), 'stl', 'default', 'models/x.stl', 'off')).toMatch(/^the model is a Git LFS pointer/)
+    // an image outside the file, at an address, or a data: address
+    expect(off(textureBox({ name: 'label', bytes: png(4096, 1) }, (json) => (json.images[0] = { name: 'label', uri: 'https://example.com/label.png' })))).toMatch(
+      /^the model keeps its image 'label' outside the \.glb/,
+    )
+    expect(off(glb({ edits: [glbEdits.bufferUri()] }), 'default')).toMatch(/^the model keeps data outside the \.glb/)
+    // a broken or mislabelled image, however large its header says it is
+    expect(off(textured(new Uint8Array(64).buffer))).toBe("the model's image 'label' isn't the PNG the file says it is: export it again")
+    expect(off(textured(png(4096, 1), 'image/jpeg'))).toBe("the model's image 'label' isn't the JPEG the file says it is: export it again")
+    expect(off(textured(jpeg(4096, 4096, { frame: 0x00 }), 'image/jpeg'))).toMatch(/isn't the JPEG the file says it is/)
+    expect(off(textured(png(8, 8), 'image/webp'))).toMatch(/^the model's image 'label' is 'image\/webp': a lecture shows PNG and JPEG textures only/)
+    expect(off(textureBox({}, glbEdits.extension('KHR_texture_basisu')))).toMatch(/^the model's textures are KTX2/)
+    // see-through and metallic materials, and compression, bones and instancing
+    const coloured = (material: Record<string, unknown>) => glb({ meshes: [{ material: 0 }], materials: [material] })
+    expect(off(coloured({ name: 'glass', alphaMode: 'BLEND', pbrMetallicRoughness: { metallicFactor: 0 } }))).toMatch(/^the model's material 'glass' is see-through \(blended/)
+    expect(off(coloured({ name: 'glass', pbrMetallicRoughness: { metallicFactor: 0 }, extensions: { KHR_materials_transmission: {} } }))).toMatch(/is see-through \(KHR_materials_transmission\)/)
+    expect(off(coloured({ name: 'steel', pbrMetallicRoughness: { metallicFactor: 0.9 } }))).toMatch(/^the model's material 'steel' is metallic/)
+    expect(off(glb({ edits: [glbEdits.extension('KHR_draco_mesh_compression')] }), 'default')).toMatch(/^the model is compressed/)
+    expect(off(glb({ edits: [glbEdits.skin()] }), 'default')).toMatch(/^the model has bones/)
+    // and a textured GLB without a material: line still asks how it looks
+    expect(off(textured(png(4096, 1)), 'default')).toBe(MODEL_TEXTURES_UNCHOSEN)
+  })
+
+  it('reads a file once for each way objects read it: unit, look and limits', () => {
+    expect(modelReadWay({ unit: 'mm', look: 'file', limits: 'off' })).toBe('mm file off')
+    expect(modelReadWay({ unit: 'mm', look: 'file', limits: 'on' })).not.toBe(modelReadWay({ unit: 'mm', look: 'file', limits: 'off' }))
   })
 })
 

@@ -7,6 +7,7 @@ import {
   modelBytesProblem,
   modelExtentProblem,
   type ModelFormat,
+  type ModelLimits,
   type ModelLook,
 } from '../compiler/model-types'
 import type { ModelUnit } from '../engine/object-types'
@@ -84,8 +85,10 @@ function readAsText(buffer: ArrayBuffer): boolean {
  * file's bytes; `units` are those of every object that shows it, as each
  * reads the file in its own unit; `look` is where its look comes from (its
  * object's material: line); `src` is its path as the scene file writes it,
- * which a message about all its textures together names. Never rejects:
- * what three.js throws on is a file that couldn't be read.
+ * which a message about all its textures together names; `limits` is 'off'
+ * when its scene file says limits: off, which lifts the size limits and only
+ * them (model-types.ts, ModelLimits). Never rejects: what three.js throws on
+ * is a file that couldn't be read.
  *
  * With material: file, the textures' images are not loaded here (the build
  * runs in Node, which has no <img>): their type and size are read from their
@@ -98,8 +101,9 @@ export async function checkModel(
   units: readonly ModelUnit[],
   look: ModelLook = 'default',
   src?: string,
+  limits: ModelLimits = 'on',
 ): Promise<string | null> {
-  const bytes = modelBytesProblem(buffer, format, look, src)
+  const bytes = modelBytesProblem(buffer, format, look, src, limits)
   if (bytes) return bytes
   let largest: number
   // all of it in the try: a file laid out as no exporter writes it can make

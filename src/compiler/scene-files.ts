@@ -15,7 +15,7 @@ import { SCENE_ANCHORS } from '../scenes/anchors'
 import { SCENE_JOINTS } from '../scenes/joints'
 import { SCENE_NAMES } from '../scenes/registry'
 import { closest } from './closest'
-import { modelFormat, modelPathProblem, MODEL_UNITS, type ModelLook, type ModelRef } from './model-types'
+import { modelFormat, modelPathProblem, MODEL_LIMITS_LISTED, MODEL_UNITS, type ModelLimits, type ModelLook, type ModelRef } from './model-types'
 
 // kept here too, where the editor's handles have always found it
 export { MAX_METRES }
@@ -48,6 +48,8 @@ export interface SceneFile {
   objects: SceneObject[]
   /** the model files its objects show, in the file's order, one for each model object (docs/scene-files.md, "Models") */
   models: ModelRef[]
+  /** 'off' when the file says `limits: off`, which lifts the size limits on its models (docs/scene-files.md, "limits: off") */
+  limits: ModelLimits
 }
 
 /** a named pose: the joints it sets, by name; a list in the file sets them all, in order */
@@ -75,7 +77,7 @@ function suggestName(name: string): string {
   return plain || 'scene'
 }
 type SceneName = (typeof SCENE_NAMES)[number]
-const TOP_KEYS = ['base', 'views', 'poses', 'objects']
+const TOP_KEYS = ['base', 'views', 'poses', 'objects', 'limits']
 const VIEW_KEYS = ['lookAt', 'offset', 'spring']
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -158,7 +160,7 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
     const key = isScalar(p.key) ? p.key.value : undefined
     if (typeof key !== 'string' || !TOP_KEYS.includes(key)) {
       const guess = typeof key === 'string' ? closest(key, TOP_KEYS) : undefined
-      fail(p.key, `unknown key '${String(key)}'.${guess ? ` Did you mean '${guess}'?` : ''} A scene file has 'base', 'views', 'poses' and 'objects'`)
+      fail(p.key, `unknown key '${String(key)}'.${guess ? ` Did you mean '${guess}'?` : ''} A scene file has 'base', 'views', 'poses', 'objects' and 'limits'`)
     }
   }
 
@@ -264,11 +266,39 @@ function readSceneFile(path: string, name: string, text: string): SceneFile {
       poses.set(poseName as string, { joints: set, line: lineOf(p.key) })
     }
   }
-  const { objects, models } = readObjects(pair(root, 'objects'), base as SceneName, fail, lineOf, path)
-  return { path, name, base: base as string, views, poses, objects, models }
+  const limits = readLimits(pair(root, 'limits'), fail)
+  const { objects, models } = readObjects(pair(root, 'objects'), base as SceneName, fail, lineOf, path, limits)
+  return { path, name, base: base as string, views, poses, objects, models, limits }
 }
 
 type Fail = (node: unknown, message: string) => never
+
+/**
+ * The file's `limits:` line (decision 11 in scene-files-proposal.md): `off`
+ * lifts the size limits on the models of its objects, and without the line
+ * they hold. `off` is its one value, taken as written: YAML 1.2, which the
+ * compiler reads, takes a bare off as the word, but a file that starts with
+ * `%YAML 1.1` gets false for it, and the word written is still off. Any
+ * other value is an error at its line, so `limits: on` or `false` can't be
+ * read as something it doesn't say.
+ */
+function readLimits(limitsPair: Pair<Node, Node> | undefined, fail: Fail): ModelLimits {
+  if (!limitsPair) return 'on'
+  const node = limitsPair.value
+  if (isScalar(node) && node.source === 'off') return 'off'
+  const written = isSeq(node)
+    ? 'a list'
+    : isMap(node)
+      ? 'a mapping'
+      : !isScalar(node) || node.value === null || node.source === ''
+        ? 'empty'
+        : `'${node.source ?? String(node.value)}'`
+  return fail(
+    node ?? limitsPair.key,
+    `limits is ${written}, but its one value is off: limits: off lifts the size limits on the models in this file ` +
+      `(${MODEL_LIMITS_LISTED}). To keep the limits, leave the line out`,
+  )
+}
 
 /** what each shape's size is, for its error */
 const SIZE_OF: Record<(typeof OBJECT_SHAPES)[number], string> = {
@@ -308,13 +338,14 @@ function unitGuess(word: string): ModelUnit | undefined {
   return closest(word, MODEL_UNIT_NAMES) as ModelUnit | undefined
 }
 
-/** the file's `objects:`, checked, parents before the objects on them, with the model files they show */
+/** the file's `objects:`, checked, parents before the objects on them, with the model files they show and the file's `limits` on each */
 function readObjects(
   objectsPair: Pair<Node, Node> | undefined,
   base: SceneName,
   fail: Fail,
   lineOf: (node: unknown) => number,
   file: string,
+  limits: ModelLimits,
 ): { objects: SceneObject[]; models: ModelRef[] } {
   if (!objectsPair || objectsPair.value === null || (isScalar(objectsPair.value) && objectsPair.value.value === null)) return { objects: [], models: [] }
   const map = objectsPair.value
@@ -491,7 +522,7 @@ function readObjects(
     }
     if (model) {
       const look: ModelLook = material === MATERIAL_FILE ? 'file' : material ? 'preset' : 'default'
-      models.push({ src: model.src, format: modelFormat(model.src)!, unit: model.unit, look, object: name, file, line: modelLine })
+      models.push({ src: model.src, format: modelFormat(model.src)!, unit: model.unit, look, limits, object: name, file, line: modelLine })
     }
 
     let parent: string | undefined

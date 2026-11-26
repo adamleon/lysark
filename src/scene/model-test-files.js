@@ -94,6 +94,42 @@ export function cylinder({ radius, height, base = [0, 0, 0], axis = 'y', segment
   return out
 }
 
+/**
+ * A plate lying on y = 0, `side` across in x and z and centred on the
+ * origin, of `cells` x `cells` squares, each two triangles facing up: a part
+ * with as many triangles as a large file has, at least `count` of them (all
+ * when not given). Its corners meet six triangles at most, as a CAD mesh's
+ * do, so creasing its normals takes as long as a real part's (a pile of
+ * triangles at one point would take far longer).
+ * @param {{ count?: number, cells?: number, side?: number }} options `cells`: as few as `count` needs, without it
+ * @returns {Triangle[]}
+ */
+export function plate({ count, cells = Math.ceil(Math.sqrt((count ?? 2) / 2)), side = 1 }) {
+  const step = side / cells
+  /** @type {(i: number, j: number) => Vec3} */
+  const at = (i, j) => [-side / 2 + i * step, 0, -side / 2 + j * step]
+  /** @type {Triangle[]} */
+  const out = []
+  for (let i = 0; i < cells; i++) {
+    for (let j = 0; j < cells; j++) {
+      // counter-clockwise seen from above (+y)
+      out.push([at(i, j), at(i, j + 1), at(i + 1, j + 1)], [at(i, j), at(i + 1, j + 1), at(i + 1, j)])
+    }
+  }
+  return count === undefined ? out : out.slice(0, count)
+}
+
+/**
+ * A binary STL just over the 5 MB a model may be (MODEL_MAX_BYTES in
+ * src/compiler/model-types.ts) without limits: off: 100,001 triangles,
+ * 5,000,134 bytes, a plate 0.1 across in its units (100 mm read in m), as
+ * a CAD export of a detailed part might be.
+ * @returns {ArrayBuffer}
+ */
+export function overLimitStl() {
+  return binaryStl(plate({ count: 100_001, side: 0.1 }))
+}
+
 /** @param {string} text */
 const ascii = (text) => new TextEncoder().encode(text)
 /**
