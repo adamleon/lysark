@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   bytesToBase64,
+  editorShowing,
   editorUrl,
   fileProblem,
   includePatterns,
@@ -11,7 +12,85 @@ import {
   isWritablePath,
   notificationText,
   resolveInside,
+  startingSlide,
 } from './logic'
+
+describe('startingSlide', () => {
+  // two blank lines, then three slides; slide 2 has a body with a code block holding a ---
+  const lines = [
+    '', // 0
+    '', // 1
+    '---', // 2  slide 0 opens
+    'id: first', // 3
+    '---', // 4
+    '# One', // 5
+    '', // 6
+    '---', // 7  slide 1 opens
+    'id: second', // 8
+    'scene: arm', // 9
+    '---', // 10
+    '## Two', // 11
+    '```yaml', // 12
+    '---', // 13  inside a code block: not a separator
+    '```', // 14
+    '---  ', // 15  slide 2 opens (trailing spaces allowed)
+    '---', // 16  an empty settings block
+    '## Three', // 17
+    '', // 18
+  ]
+  const text = lines.join('\n')
+
+  it('is the slide the cursor is in: its settings, its separator lines or its body', () => {
+    expect(startingSlide(text, 5)).toBe(0)
+    expect([7, 8, 9, 10, 11].map((line) => startingSlide(text, line))).toEqual([1, 1, 1, 1, 1])
+    // a --- in a code block belongs to the slide's body
+    expect([12, 13, 14].map((line) => startingSlide(text, line))).toEqual([1, 1, 1])
+    expect([15, 16, 17, 18].map((line) => startingSlide(text, line))).toEqual([2, 2, 2, 2])
+  })
+
+  it("is the first slide in the first slide's settings, and above the first slide", () => {
+    expect([2, 3, 4].map((line) => startingSlide(text, line))).toEqual([0, 0, 0])
+    // the blank lines before the first --- are in no slide
+    expect([0, 1].map((line) => startingSlide(text, line))).toEqual([0, 0])
+  })
+
+  it('is the last slide past the end of the text', () => {
+    expect(startingSlide(text, 40)).toBe(2)
+  })
+
+  it("is the first slide with no cursor, or a text that doesn't split into slides", () => {
+    expect(startingSlide(text, null)).toBe(0)
+    // a new slide half typed: its --- pairs with the next slide's, and the text ends in a settings block
+    expect(startingSlide(`${text}\n---\nid: fourth\n`, 18)).toBe(0)
+    // text before the first ---
+    expect(startingSlide(`# Notes\n${text}`, 12)).toBe(0)
+    expect(startingSlide('', 0)).toBe(0)
+  })
+
+  it('counts lines the same with \\r\\n line endings and a byte order mark', () => {
+    const crlf = `﻿${lines.join('\r\n')}`
+    expect([0, 3, 7, 13, 15, 18].map((line) => startingSlide(crlf, line))).toEqual([0, 0, 1, 1, 2, 2])
+  })
+})
+
+describe('editorShowing', () => {
+  const doc = { name: 'slides.md' }
+  const other = { name: 'README.md' }
+  const active = { document: doc, id: 'active' }
+  const beside = { document: doc, id: 'beside' }
+  const readme = { document: other, id: 'readme' }
+
+  it('prefers the active editor, else the first visible one that shows the document', () => {
+    expect(editorShowing(doc, active, [readme, beside, active])).toBe(active)
+    expect(editorShowing(doc, readme, [readme, beside, active])).toBe(beside)
+    expect(editorShowing(doc, undefined, [beside])).toBe(beside)
+  })
+
+  it('is none when no editor shows it (opened from the Explorer)', () => {
+    expect(editorShowing(doc, readme, [readme])).toBeUndefined()
+    expect(editorShowing(doc, undefined, [])).toBeUndefined()
+  })
+})
 
 describe('notificationText', () => {
   // VS Code's link parser for extension messages (workbench notifications)

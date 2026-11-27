@@ -9,8 +9,8 @@ be fixed from any browser.
 1. Open a lecture's `slides.md` in a Lysark course repository.
 2. Click the ▷ button in the editor's title bar, or run **Open Lysark Preview** from the Command
    Palette (F1).
-3. The preview follows the cursor to the slide you are editing, and shows your changes each time
-   you save.
+3. The preview opens on the slide the cursor is in, follows the cursor to the slide you are
+   editing, and shows your changes each time you save.
 4. On a slide with a 3D scene, move the camera with the mouse, click in it, and press **V** (or
    click the camera button in the panel's title bar). The view is written into that slide's
    `camera:` frontmatter as a normal text change, ready to commit.

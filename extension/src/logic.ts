@@ -3,7 +3,35 @@
  * tests can run them.
  */
 
+import { slideAtLine, slideRanges } from '../../src/compiler/slide-ranges'
+
 export { matchSlide, singleEdit } from '../../src/editor/slide-match'
+
+/**
+ * The editor whose cursor a new preview of `document` opens at (0.4.1): the
+ * active editor if it shows the document, else the first visible one that
+ * does; none when no editor shows it (the preview opened from the
+ * Explorer's context menu on a file that isn't open).
+ */
+export function editorShowing<E extends { document: unknown }>(document: unknown, active: E | undefined, visible: readonly E[]): E | undefined {
+  return active?.document === document ? active : visible.find((editor) => editor.document === document)
+}
+
+/**
+ * The slide a new preview opens on (0-based): the one the cursor is in at
+ * `line` (0-based) of `text`, counted as the compiler splits slides, so the
+ * first text the preview gets names it and the deck starts there. Slide 0
+ * when there is no cursor (`null`), the cursor is above the first slide, or
+ * the text doesn't split into slides right now (the preview then says why).
+ */
+export function startingSlide(text: string, line: number | null): number {
+  if (line === null) return 0
+  try {
+    return Math.max(0, slideAtLine(slideRanges(text), line))
+  } catch {
+    return 0
+  }
+}
 
 /**
  * Text for a VS Code notification. VS Code turns `[label](command:…)` (or

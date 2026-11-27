@@ -4,6 +4,7 @@ import { setCameraView, type CameraView } from '../../src/editor/camera-edit'
 import { EDITOR_PROTOCOL, editorAssets, editorProtocol, messagePage, panelPage } from '../../src/editor/panel-page.js'
 import {
   bytesToBase64,
+  editorShowing,
   editorUrl,
   fileProblem,
   includePatterns,
@@ -16,6 +17,7 @@ import {
   notificationText,
   resolveInside,
   singleEdit,
+  startingSlide,
 } from './logic'
 import { registerNavigation, type NavigationExports } from './navigation'
 
@@ -33,6 +35,7 @@ import { registerNavigation, type NavigationExports } from './navigation'
  * From 0.4.0 it also helps find one's way in a lecture's slides.md (navigation.ts):
  * folded settings blocks, a separator on each slide, and an outline of the
  * slides' own headings, through a plugin for VS Code's Markdown extension.
+ * From 0.4.1 the preview opens on the slide the cursor is in.
  */
 
 /** the message versions this extension speaks */
@@ -87,7 +90,9 @@ export function activate(context: vscode.ExtensionContext): NavigationExports {
       }
       if (preview?.document === document) {
         // ▷ again: show the current text, or load the panel afresh (and retry
-        // a preview that didn't load)
+        // a preview that didn't load), on the slide it shows. Not the cursor's:
+        // the panel follows every move of the cursor, so it shows another slide
+        // only when you went there in the panel, and reloading shouldn't undo that
         preview.panel.reveal(vscode.ViewColumn.Beside, true)
         preview.refresh(true)
         return
@@ -110,7 +115,10 @@ export function activate(context: vscode.ExtensionContext): NavigationExports {
       }
       if (site.fromWorkspace && !(await confirmSite(context, site.url))) return
       preview?.panel.dispose()
-      const opened: Preview = new Preview(document, site.url, site.courseDir, () => {
+      // it opens on the slide the cursor is in (from 0.4.1), as it is now, after any question
+      const editor = editorShowing(document, vscode.window.activeTextEditor, vscode.window.visibleTextEditors)
+      const slide = startingSlide(document.getText(), editor ? editor.selection.active.line : null)
+      const opened: Preview = new Preview(document, site.url, site.courseDir, slide, () => {
         if (preview === opened) preview = null
       })
       preview = opened
@@ -243,8 +251,12 @@ class Preview {
   /** the files besides slides.md the page asked for in 'ready' (version 3) */
   private include = includePatterns([])
   private includeKey = '[]'
-  /** the slide the runtime shows, counted in the text it shows */
-  private slide = 0
+  /**
+   * the slide the runtime shows, counted in the text it shows; before the
+   * first 'shown', the slide to start on (the first 'source' names it, and the
+   * deck starts there), which follows the cursor meanwhile
+   */
+  private slide: number
   private seq = 0
   private readonly texts = new Map<number, Files>()
   /** the last text sent, the last one the runtime accepted, and the one it shows */
@@ -302,8 +314,11 @@ class Preview {
     private base: string,
     /** the course's folder, if found: the panel may read its assets/ */
     private readonly courseDir: vscode.Uri | null,
+    /** the slide to open on, counted in the document's text (startingSlide) */
+    slide: number,
     onClose: () => void,
   ) {
+    this.slide = slide
     this.lectureDir = vscode.Uri.joinPath(document.uri, '..')
     const folder = document.uri.path.split('/').slice(-2, -1)[0] ?? 'slides'
     this.panel = vscode.window.createWebviewPanel(

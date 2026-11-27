@@ -161,6 +161,38 @@ the command.
 - `editor.foldingImportsByDefault` is on for every Markdown file. An extension that made
   "imports" folding ranges in Markdown would get them folded too; none is known.
 
+## The preview opens on the cursor's slide (extension 0.4.1)
+
+The hands-on test of 0.4.0 found that the Lysark preview opened on slide 1 even with the cursor
+in slide 4, and went to slide 4 only once the cursor moved. The author asked for the change on
+2026-11-27, and it is in extension 0.4.1, with no engine change.
+
+**What you see.** ▷ (or Open Lysark Preview) opens the preview on the slide the cursor is in,
+directly: slide 1 is never shown first. A cursor above the first slide's `---`, a file that
+doesn't split into slides at that moment (a slide half typed), or a preview opened from the
+Explorer's context menu on a file no editor shows, opens on slide 1, as before. ▷ on a preview
+that is already open loads it again on the slide it shows, not the cursor's (below).
+
+**How it is chosen.** `startingSlide` in `extension/src/logic.ts` (unit-tested in
+`logic.test.ts`): the cursor's line, in the document's text as it is when the preview opens,
+through the compiler's own `slideRanges` and `slideAtLine` (`src/compiler/slide-ranges.ts`),
+the same rules the cursor-following and the separators use, so a `---` in a code block or a
+slide's closing `---` counts as that slide. The cursor is the primary cursor of the editor
+showing the document: the active editor if it does, else the first visible one
+(`editorShowing`). It is read after the question whether to load the course's site, so a
+cursor moved meanwhile counts. The preview keeps that slide as the one to show
+(`Preview.slide`) and names it in the first files it sends (`lysark:source`'s `slide`); the
+panel puts it into the page's address before the deck starts, and the deck starts on the slide
+in the address. A cursor moved while the panel loads still changes the slide it starts on, as
+before. Every engine from v2.3.0 does this with the first files, so it needs no engine change.
+
+**▷ again keeps the slide the panel shows.** The panel already follows every move of the cursor,
+so it shows a slide other than the cursor's only when you went there in the panel itself (its
+arrow keys, a click). ▷ on an open preview is how you load it again (to read the images again,
+say), and taking you back to the cursor would undo where you went; a click in the text does
+that. A preview that never loaded starts, when ▷ retries it, on the cursor's slide, since the
+cursor-following kept that slide while it waited.
+
 ## Not built
 
 Proposals for the author; none of these is in 0.4.0.
@@ -179,10 +211,7 @@ Proposals for the author; none of these is in 0.4.0.
 - **The plugin in Remote windows.** With `"extensionKind": ["workspace", "ui"]` Lysark would run
   beside the Markdown extension on the remote side, and the plugin would reach it; the preview
   would then fetch the course site from the remote machine. Not tried.
-- **The preview opening on the cursor's slide.** The hands-on test found that the Lysark preview
-  opens on slide 1 even with the cursor in slide 4, and follows the cursor only once it moves
-  (`Preview.slide` in `extension/src/extension.ts` starts at 0). Opening on the cursor's slide
-  is a small change to the preview, outside this work.
+- The preview opening on the cursor's slide, listed here for 0.4.0, is built in 0.4.1 (above).
 
 ## How to check it
 
@@ -205,9 +234,14 @@ Proposals for the author; none of these is in 0.4.0.
   `README.md` with a heading between two `---` lines, and a `slides.md` at the top of the course
   that splits by Lysark's rules, both keeping all their headings, with nothing folded and no
   separator; and the first slide typed into an empty `lectures/new/slides.md` staying open, with
-  the cursor where it was typed and its separator drawn.
+  the cursor where it was typed and its separator drawn. Then (0.4.1) it puts the cursor into the
+  body of the demo's slide `objects`, opens the preview, and requires the deck to start on that
+  slide with no navigation before or after its start (the engine counts them), and the preview to
+  follow the cursor back to slide 1. With the v2.12.0 editor too: it starts on the slide the
+  first files name, as every engine from v2.3.0 does.
 - **By hand, in github.dev on Baneplanlegging** (done for 0.4.0 on 2026-11-14): open
   `slides.md`. Every settings block is folded and each slide starts with its separator. The
   Outline view (in the Explorer) lists `# Baneplanlegging` and the 15 slide titles. Try the
   command, a click on a ⋯, V in the preview on a slide with its block folded (the block stays
-  folded), and a new slide typed between two others (the blocks after it stay folded).
+  folded), and a new slide typed between two others (the blocks after it stay folded). For
+  0.4.1: close the preview, put the cursor in slide 4, and press ▷: the preview opens on slide 4.
