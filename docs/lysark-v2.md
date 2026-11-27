@@ -561,8 +561,9 @@ HTTPS server.
   reports it once in the console and goes on. And while a view or pose is being saved, a second
   V, P, Shift+V, Shift+P or Scene Actions save says "A save is still on its way; try again in a
   moment." instead of nothing. No format change, no extension change.
-- Extension 0.4.1 and engine v2.14.1 (built 2026-11-27, not yet released; the author asked for
-  both changes the same day). The preview opens on the slide the cursor is in, directly, instead
+- Extension 0.4.1 and engine v2.14.1 (built 2026-11-27, the engine tagged `v2.14.1` the same
+  day; the extension is out once the author uploads CI's `.vsix`; the author asked for both
+  changes the same day). The preview opens on the slide the cursor is in, directly, instead
   of slide 1; ▷ on a preview already open keeps the slide it shows. Works with every engine from
   v2.3.0. A model over the 32 MB VS Code's editor reads is answered with its size, which the
   v2.14.1 panel says ("is 41.2 MB, more than the 32 MB VS Code's editor reads per file");
