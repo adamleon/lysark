@@ -15,7 +15,7 @@ handles for objects (v2.12.0). Step 8, models from STL and untextured GLB files,
 [scene-files.md](scene-files.md#models). Its proposals are [below](#proposals-from-step-8).
 **Decision 10, textured models, decided 2026-11-25**, confirmed by the author on 2026-11-26 with
 answers to step 9's questions. Step 9 is built (2026-11-25, and the answers 2026-11-26, engine
-v2.14.0, no extension change), not yet released: `material: file` shows a GLB in its own colours
+v2.14.0, no extension change), released 2026-11-27: `material: file` shows a GLB in its own colours
 and textures ([scene-files.md](scene-files.md#a-glbs-own-look-material-file)). Its proposals are
 [below](#proposals-from-step-9). **Decision 11, `limits: off`, decided by the author 2026-11-26**
 and built the same day with step 9 (engine v2.14.0, no extension change), lifts the size limits
