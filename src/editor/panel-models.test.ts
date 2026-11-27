@@ -185,8 +185,11 @@ describe('loadModels', () => {
 
   it("says what v2.14.0 says without the size (extension 0.4.0), or with one that isn't a size over the limit", async () => {
     const words = "the model 'models/part.stl' is larger than 32 MB: VS Code's editor reads at most 32 MB per file, so the preview can't show it"
-    // left out, not a number, negative, not finite, not over the 32 MB the error names
-    for (const bytes of [undefined, '41234567', null, -41_234_567, Number.NaN, Number.POSITIVE_INFINITY, 32_000_000, 1000]) {
+    // left out, not a number, negative, not finite, not a whole number (32,000,000.4 would read
+    // "32.000000 MB, more than the 32 MB"), past what a number counts exactly, not over the 32 MB
+    // the error names
+    const odd = [undefined, '41234567', null, -41_234_567, Number.NaN, Number.POSITIVE_INFINITY, 32_000_000.4, 2 ** 53, 32_000_000, 1000]
+    for (const bytes of odd) {
       const { read } = host({ 'models/part.stl': { error: 'larger than 32 MB', ...(bytes === undefined ? {} : { bytes: bytes as number }) } })
       const off = await loadModels([ref('part', 'models/part.stl', 9, 'm', 'default', 'off')], read)
       expect(off.problems, String(bytes)).toEqual([`scenes/arm.yaml, line 9: object 'part': ${words}. Its size doesn't stop the build, because its scene file says limits: off`])

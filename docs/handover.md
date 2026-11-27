@@ -479,7 +479,7 @@ VS Code's editor reads per file, so the preview can't show it.`, in the build's 
 (`megabytes` in model-types.ts, now exported with the limit to show the size is over: 32,000,001
 bytes is 32.000001 MB), then `Its size doesn't stop the build, because its scene file says limits:
 off` or `The lecture doesn't build with it either:` and the advice. Without `bytes` (extension
-0.4.0), or with anything but a finite number over the limit, the v2.14.0 words stay. `bytes` is
+0.4.0), or with anything but a whole number over the limit, the v2.14.0 words stay. `bytes` is
 optional, so the messages stay version 3 ([editor-host.md](editor-host.md) says why) and the two
 can be released in either order. lysark-v2.md's step 9 entry no longer says "not yet released".
 Checked: vitest (585, from 576), tsc, the extension's build and tsc (it has no `npm test`; its

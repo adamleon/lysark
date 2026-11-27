@@ -84,7 +84,7 @@ file over 32 MB, read as text or as bytes, with `{ error: 'larger than 32 MB', b
 the error exactly as 0.3.0 and 0.4.0 write it, and `bytes`, the file's size on disk
 (`stat.size`; for a text read of a document with unsaved typing, the size of the saved file). The
 field is optional. The panel of engine v2.14.1 (`src/editor/panel-models.ts`) says the size when
-`bytes` is a finite number over the limit the error names, in the build's MB format
+`bytes` is a whole number over the limit the error names, in the build's MB format
 (`megabytes` in `src/compiler/model-types.ts`, as in "the model is 40.1 MB"): `the model
 'models/part.glb' is 41.2 MB, more than the 32 MB VS Code's editor reads per file, so the preview
 can't show it.` Without it, or with something else there, it says what v2.14.0 says: `the model

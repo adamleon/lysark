@@ -21,7 +21,7 @@ export interface HostFile {
   /**
    * with the error for a file too large to read, `larger than 32 MB`: its
    * size on disk. From extension 0.4.1; an older one leaves it out, and a
-   * reader checks it is a number, as for any field the host sends
+   * reader checks it is a whole number, as for any field the host sends
    */
   bytes?: number
 }

@@ -72,7 +72,7 @@ function limitBytes(limit: string): number | null {
  * VS Code's editor reads at most 32 MB of a file (the extension's own limit,
  * which the panel can't lift). Extension 0.4.0 says only that; from 0.4.1 it
  * gives the file's size too (`bytes`), said in the build's MB format when it
- * is a number over that limit. Without limits: off such a file is far over
+ * is a whole number over that limit. Without limits: off such a file is far over
  * lysark's own limit too, and gets its advice; with it, its size doesn't
  * stop the build, and only the preview can't show it. Only that is said: the
  * panel never saw the bytes, so it can't tell whether the build passes the
@@ -87,7 +87,8 @@ function unreadProblem(ref: ModelRef, error: string, fix: string | undefined, by
   if (tooLarge) {
     const limit = tooLarge[1]
     const most = limitBytes(limit)
-    const size = most !== null && typeof bytes === 'number' && Number.isFinite(bytes) && bytes > most ? megabytes(bytes, most) : null
+    // a byte count: a whole number (a fraction would read "32.000000 MB, more than the 32 MB")
+    const size = most !== null && typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes > most ? megabytes(bytes, most) : null
     const preview =
       size === null
         ? `the model '${ref.src}' is ${error}: VS Code's editor reads at most ${limit} per file, so the preview can't show it`
