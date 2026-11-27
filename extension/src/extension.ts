@@ -35,7 +35,8 @@ import { registerNavigation, type NavigationExports } from './navigation'
  * From 0.4.0 it also helps find one's way in a lecture's slides.md (navigation.ts):
  * folded settings blocks, a separator on each slide, and an outline of the
  * slides' own headings, through a plugin for VS Code's Markdown extension.
- * From 0.4.1 the preview opens on the slide the cursor is in.
+ * From 0.4.1 the preview opens on the slide the cursor is in, and a file too
+ * large to read is answered with its size.
  */
 
 /** the message versions this extension speaks */
@@ -212,6 +213,12 @@ interface HostFile {
   version?: number
   base64?: string
   error?: string
+  /**
+   * with the error for a file over MAX_READ_BYTES (from 0.4.1): its size on
+   * disk, so the panel can say how large it is. Optional for the panel, so
+   * no new message version (docs/editor-host.md)
+   */
+  bytes?: number
   /** not read in this request (it would have been too large together): ask again */
   later?: boolean
 }
@@ -918,20 +925,23 @@ class Preview {
       }
       try {
         const stat = await vscode.workspace.fs.stat(target.uri)
+        // the words the panels of engine v2.14.0 on read (panel-models.ts, TOO_LARGE); from
+        // 0.4.1 with the file's size on disk, which newer panels say
+        const tooLarge = { error: `larger than ${MAX_READ_BYTES / 1e6} MB`, bytes: stat.size }
         if (stat.type !== vscode.FileType.File) {
           out[path] = { error: 'not a file' }
         } else if (as === 'text') {
           // the document, unsaved typing included; its version guards an edit made from it
           const document = await vscode.workspace.openTextDocument(target.uri)
           const text = document.getText()
-          if (text.length > MAX_READ_BYTES) out[path] = { error: `larger than ${MAX_READ_BYTES / 1e6} MB` }
+          if (text.length > MAX_READ_BYTES) out[path] = tooLarge
           else if (total > 0 && total + text.length > MAX_READ_TOTAL) out[path] = { later: true }
           else {
             out[path] = { text, version: this.versionOf(document) }
             total += text.length
           }
         } else if (stat.size > MAX_READ_BYTES) {
-          out[path] = { error: `larger than ${MAX_READ_BYTES / 1e6} MB` }
+          out[path] = tooLarge
         } else if (total > 0 && total + stat.size > MAX_READ_TOTAL) {
           out[path] = { later: true }
         } else {
