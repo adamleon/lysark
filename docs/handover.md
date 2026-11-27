@@ -5,7 +5,7 @@ are in [docs/lysark-v2.md](lysark-v2.md); how the runtime works is in
 [docs/lysark-design.md](lysark-design.md); working style and the working agreement
 are in the repo-root [CLAUDE.md](../CLAUDE.md).
 
-## Where the project is (2026-11-26)
+## Where the project is (2026-11-27)
 
 **v2 is under way.** Step 0 of [lysark-v2.md](lysark-v2.md) is done, and the author
 confirmed the section 8 decisions. **Step 1 (the split) is done (2026-10-14):**
@@ -460,6 +460,42 @@ counting copies (decision 10) and saw the review's additions to `limits: off` (d
 it is tagged `v2.14.0`. Next: the author moves the course with Update engine (the course has no
 `model:` lines, so nothing in it changes) and tries a textured GLB from Blender in github.dev.
 
+**Extension 0.4.1 and engine v2.14.1, built 2026-11-27** in five local commits (d921a00, d750a20,
+89ec7be, 71e908a and the version commit), not pushed or tagged. The author asked for both
+changes the same day ("yes, build extension 0.4.1"). The preview opens on the slide the cursor is
+in ([slide-navigation.md](slide-navigation.md), "The preview opens on the cursor's slide"):
+`startingSlide` and `editorShowing` (extension/src/logic.ts) find the cursor's slide with the
+compiler's `slideRanges` and `slideAtLine`, in the editor showing the document (the active one,
+else a visible one); no such editor, a cursor above the first slide or a text that doesn't split
+gives slide 1, as before. The Preview starts with that slide and the first `lysark:source` names
+it, which every engine from v2.3.0 puts into the page's address before the deck starts, so slide 1
+is never shown first and no engine change is needed. ▷ on a preview already open keeps the slide
+the panel shows (the panel follows every cursor move, so it shows another only where the author
+went in the panel, and a reload shouldn't undo that). A model over the 32 MB VS Code's editor
+reads: the extension answers `{ error: 'larger than 32 MB', bytes }` (`stat.size`, for text and
+bytes reads; the error unchanged, so the released v2.14.0 panel reads it as before), and the
+v2.14.1 panel (panel-models.ts) says `the model 'models/part.glb' is 41.2 MB, more than the 32 MB
+VS Code's editor reads per file, so the preview can't show it.`, in the build's MB format
+(`megabytes` in model-types.ts, now exported with the limit to show the size is over: 32,000,001
+bytes is 32.000001 MB), then `Its size doesn't stop the build, because its scene file says limits:
+off` or `The lecture doesn't build with it either:` and the advice. Without `bytes` (extension
+0.4.0), or with anything but a finite number over the limit, the v2.14.0 words stay. `bytes` is
+optional, so the messages stay version 3 ([editor-host.md](editor-host.md) says why) and the two
+can be released in either order. lysark-v2.md's step 9 entry no longer says "not yet released".
+Checked: vitest (585, from 576), tsc, the extension's build and tsc (it has no `npm test`; its
+unit tests run in vitest), check-editor in Chromium (63 s) and Firefox (58 s), whose stand-in host
+answers one model over 32 MB without its size and one with it, check-extension with this editor
+(183 s: the preview opens on slide 7 where the cursor is, with one navigation, and a
+32,000,001-byte model made in the course is named as 32.000001 MB) and v2.12.0's (182 s: it opens
+on slide 7 too; that editor has no models), build:demo (4,276.47 kB) and check:demo (12 slides,
+0 errors, 0 requests, GPU memory back to 0 geometries and 1 texture), Baneplanlegging (15 slides,
+0 and 0; the course repo unchanged), and `npm run package` in extension/ as CI runs it (vsce
+3.9.2: lysark-0.4.1.vsix, 6 files, 47.66 KB, written outside the repo). Next: with the author's
+yes, push; engine CI must pass, and its extension job builds the `.vsix`; the author uploads that
+`lysark-0.4.1.vsix` to the Marketplace, and after their yes tags `v2.14.1` and moves the course
+with Update engine. To try by hand: close the preview, put the cursor in slide 4 of
+Baneplanlegging's `slides.md`, and press ▷.
+
 Proposals (not built):
 - From step 9's hands-on test: entering the pendulum scene logs about 45 `THREE.WebGLShadowMap:
   … has no shadow` warnings (in the demo too). src/scenes/pendulum.ts sets `castShadow` on every
@@ -650,7 +686,7 @@ keep it green.
 
 See [step-1-split.md](step-1-split.md) for the full `lysark` command.
 
-- `npm run dev` — preview the demo · `npm test` — vitest (**576**) · `npm run typecheck`
+- `npm run dev` — preview the demo · `npm test` — vitest (**585**) · `npm run typecheck`
   (a worktree under `.claude/worktrees/` adds its own copy of the tests to the count; leave it
   out with `npx vitest run --exclude ".claude/**"`)
 - `npm run build:demo` → `dist/demo.html` · `npm run check:demo` — Playwright
