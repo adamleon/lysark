@@ -175,7 +175,9 @@ engine v2.14.1's panel says. Neither needs the other first.
   editor: V writing the view, and Scene Actions… saying to update the engine. For extension 0.4.1
   (2026-11-27): the preview opening on the cursor's slide with this editor and v2.12.0's, and a
   model of 32,000,001 bytes it makes in the course named as 32.000001 MB by engine v2.14.1's
-  panel. Not in CI: its first run downloads VS Code (about 55 MB),
+  panel; and with v2.14.0's, the release courses run until they update: the preview opening on
+  the cursor's slide, and that model named in v2.14.0's words (`is larger than 32 MB: VS Code's
+  editor reads at most 32 MB per file`). Not in CI: its first run downloads VS Code (about 55 MB),
   and the workbench's markup changes between VS Code builds. Run it before an extension release.
 - Unit tests for the extension's path rules, image paths and loading, and the view change.
 

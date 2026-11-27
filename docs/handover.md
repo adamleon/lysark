@@ -461,7 +461,8 @@ it is tagged `v2.14.0`. Next: the author moves the course with Update engine (th
 `model:` lines, so nothing in it changes) and tries a textured GLB from Blender in github.dev.
 
 **Extension 0.4.1 and engine v2.14.1, built 2026-11-27** in five local commits (d921a00, d750a20,
-89ec7be, 71e908a and the version commit), not pushed or tagged. The author asked for both
+89ec7be, 71e908a and the version commit) and four after their review (6cbb7e6, 1afd23e, 593e629
+and the one with this sentence), not pushed or tagged. The author asked for both
 changes the same day ("yes, build extension 0.4.1"). The preview opens on the slide the cursor is
 in ([slide-navigation.md](slide-navigation.md), "The preview opens on the cursor's slide"):
 `startingSlide` and `editorShowing` (extension/src/logic.ts) find the cursor's slide with the
@@ -484,15 +485,21 @@ off` or `The lecture doesn't build with it either:` and the advice. Without `byt
 0.4.0), or with anything but a whole number over the limit, the v2.14.0 words stay. `bytes` is
 optional, so the messages stay version 3 ([editor-host.md](editor-host.md) says why) and the two
 can be released in either order. lysark-v2.md's step 9 entry no longer says "not yet released".
-Checked: vitest (585, from 576), tsc, the extension's build and tsc (it has no `npm test`; its
-unit tests run in vitest), check-editor in Chromium (63 s) and Firefox (58 s), whose stand-in host
-answers one model over 32 MB without its size and one with it, check-extension with this editor
-(183 s: the preview opens on slide 7 where the cursor is, with one navigation, and a
-32,000,001-byte model made in the course is named as 32.000001 MB) and v2.12.0's (182 s: it opens
-on slide 7 too; that editor has no models), build:demo (4,276.47 kB) and check:demo (12 slides,
-0 errors, 0 requests, GPU memory back to 0 geometries and 1 texture), Baneplanlegging (15 slides,
-0 and 0; the course repo unchanged), and `npm run package` in extension/ as CI runs it (vsce
-3.9.2: lysark-0.4.1.vsix, 6 files, 47.66 KB, written outside the repo). Next: with the author's
+The review found no correctness bug. Its fixes: the panel says a size only for a whole number
+of bytes (32,000,000.4 read "32.000000 MB, more than the 32 MB"); the reason for ▷ again, which
+first said the panel differs from the cursor only where the author went in the panel; and
+scene-files-proposal.md no longer calls step 9 "not yet released". Checked after the fixes:
+vitest (585, from 576), tsc, the extension's build (131.3 kB) and tsc (it has no `npm test`; its
+unit tests run in vitest), check-editor in Chromium (53 s) and Firefox (49 s), whose stand-in
+host answers one model over 32 MB without its size and one with it, check-extension (543 s for
+three editors) with this editor (the preview opens on slide 7 where the cursor is, with one
+navigation, and a 32,000,001-byte model made in the course is named as 32.000001 MB), v2.12.0's
+(it opens on slide 7 too; that editor has no models) and v2.14.0's, built from its tag, the
+release the course runs until it updates (slide 7 too, and the model in v2.14.0's words),
+build:demo (4,276.47 kB) and check:demo (12 slides, 0 errors, 0 requests, GPU memory back to 0
+geometries and 1 texture), Baneplanlegging (4,258.44 kB; 15 slides, 0 and 0; the course repo
+unchanged), and `npm run package` in extension/ as CI runs it (vsce 3.9.2: lysark-0.4.1.vsix, 6
+files, 47.66 KB, written outside the repo). Next: with the author's
 yes, push; engine CI must pass, and its extension job builds the `.vsix`; the author uploads that
 `lysark-0.4.1.vsix` to the Marketplace, and after their yes tags `v2.14.1` and moves the course
 with Update engine. To try by hand: close the preview, put the cursor in slide 4 of
