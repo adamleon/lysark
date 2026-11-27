@@ -92,8 +92,10 @@ export function activate(context: vscode.ExtensionContext): NavigationExports {
       if (preview?.document === document) {
         // ▷ again: show the current text, or load the panel afresh (and retry
         // a preview that didn't load), on the slide it shows. Not the cursor's:
-        // the panel follows every move of the cursor, so it shows another slide
-        // only when you went there in the panel, and reloading shouldn't undo that
+        // the panel shows another slide where you went in the panel, which a
+        // reload shouldn't undo, or when the cursor is in a slide the panel
+        // didn't have (just typed), until the cursor moves again
+        // (docs/slide-navigation.md, "▷ again keeps the slide the panel shows")
         preview.panel.reveal(vscode.ViewColumn.Beside, true)
         preview.refresh(true)
         return

@@ -470,8 +470,10 @@ else a visible one); no such editor, a cursor above the first slide or a text th
 gives slide 1, as before. The Preview starts with that slide and the first `lysark:source` names
 it, which every engine from v2.3.0 puts into the page's address before the deck starts, so slide 1
 is never shown first and no engine change is needed. ▷ on a preview already open keeps the slide
-the panel shows (the panel follows every cursor move, so it shows another only where the author
-went in the panel, and a reload shouldn't undo that). A model over the 32 MB VS Code's editor
+the panel shows: it shows another where the author went in the panel, which a reload shouldn't
+undo, or, as in 0.4.0 and also after Ctrl+S, when the cursor is in a slide the panel didn't have
+yet (just typed), until the cursor moves again; slide-navigation.md's "Not built" has a proposal
+for that case, from the review. A model over the 32 MB VS Code's editor
 reads: the extension answers `{ error: 'larger than 32 MB', bytes }` (`stat.size`, for text and
 bytes reads; the error unchanged, so the released v2.14.0 panel reads it as before), and the
 v2.14.1 panel (panel-models.ts) says `the model 'models/part.glb' is 41.2 MB, more than the 32 MB

@@ -186,16 +186,20 @@ panel puts it into the page's address before the deck starts, and the deck start
 in the address. A cursor moved while the panel loads still changes the slide it starts on, as
 before. Every engine from v2.3.0 does this with the first files, so it needs no engine change.
 
-**▷ again keeps the slide the panel shows.** The panel already follows every move of the cursor,
-so it shows a slide other than the cursor's only when you went there in the panel itself (its
-arrow keys, a click). ▷ on an open preview is how you load it again (to read the images again,
-say), and taking you back to the cursor would undo where you went; a click in the text does
-that. A preview that never loaded starts, when ▷ retries it, on the cursor's slide, since the
-cursor-following kept that slide while it waited.
+**▷ again keeps the slide the panel shows.** The panel follows each move of the cursor to a slide
+it has, so it shows a slide other than the cursor's in two cases. One: you went there in the
+panel itself (its arrow keys, a click). ▷ on an open preview is how you load it again (to read
+the images again, say), and taking you back to the cursor would undo where you went. Two: the
+cursor is in a slide the panel doesn't have yet, one you have just typed or are still typing.
+The panel stays on the slide it showed, also after Ctrl+S or ▷ give it the new slide, as in
+0.4.0. In both cases, moving the cursor once (an arrow key, a click in the text) brings the panel
+to the cursor's slide. A proposal for the second case is under "Not built". A preview that never
+loaded starts, when ▷ retries it, on the cursor's slide, since the cursor-following kept that
+slide while it waited.
 
 ## Not built
 
-Proposals for the author; none of these is in 0.4.0.
+Proposals for the author; none of these is in 0.4.0 or 0.4.1.
 
 - **Fold every block each time the file opens.** Today VS Code folds the blocks the first time a
   lecture opens in an editor and then keeps the folds as you left them, which the prototype
@@ -211,6 +215,17 @@ Proposals for the author; none of these is in 0.4.0.
 - **The plugin in Remote windows.** With `"extensionKind": ["workspace", "ui"]` Lysark would run
   beside the Markdown extension on the remote side, and the plugin would reach it; the preview
   would then fetch the course site from the remote machine. Not tried.
+- **Following the cursor into a slide just typed** (from the review of 0.4.1). Today the panel
+  stays on the slide it showed when the cursor is in a slide it doesn't have yet, also after
+  Ctrl+S or ▷, until the cursor moves again (above). The extension could remember a cursor move
+  it couldn't follow and follow it once the panel has the slide, so that Ctrl+S and ▷ show the
+  new slide and the panel differs from the cursor's slide only where you went in the panel. A
+  sketch: `followCursor` notes a move into a slide the panel's text lacks; a move it does follow,
+  or a slide chosen in the panel (`lysark:slide`), clears the note; while the note stands, files
+  sent with the document's text as it is now name the cursor's slide in that text, if it splits
+  (`startingSlide`), instead of the panel's, so the deck starts there without showing the old
+  slide first. Not built: it changes what Ctrl+S does, which the request for 0.4.1 didn't ask
+  for, so it is the author's call.
 - The preview opening on the cursor's slide, listed here for 0.4.0, is built in 0.4.1 (above).
 
 ## How to check it
