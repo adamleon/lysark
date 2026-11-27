@@ -377,7 +377,7 @@ the count matched three's WebGL textures in eight cases and was one over in the 
 map through a turned copy of the base colour's texture, which three happens to copy after
 setting sRGB); never under. The message adds "held as 5 copies" and why, naming Blender's
 Interpolation and Extension. This changes how the author's limit is counted, not the limit:
-decision 10 says so, for the author to confirm. check-editor's "grey exactly where the file
+decision 10 says so, and the author confirmed it on 2026-11-27. check-editor's "grey exactly where the file
 gives a mesh no material" never saw such a mesh (no demo model has one): it now makes a GLB of
 a red box with a box without a material on it, serves it as if it were in the lecture folder
 (`host.made`), shows it with `material: file` beside the marker's grey copy, and requires the
@@ -454,6 +454,11 @@ v2.12.0's, build:demo (4,276.47 kB) and check:demo (12 slides, 0 errors, 0 reque
 back to 0 geometries and 1 texture), Baneplanlegging (15 slides, 0 and 0), and the PDF (12
 pages at 3200 × 1800, as before). Hands-on with `lysark build`: a 410 MB file under `limits: off`
 stops in 140 ms at its line, and a misplaced line and one under an object give their messages.
+
+**Step 9 released (2026-11-27).** All of it was pushed, engine CI passed, the author confirmed
+counting copies (decision 10) and saw the review's additions to `limits: off` (decision 11), and
+it is tagged `v2.14.0`. Next: the author moves the course with Update engine (the course has no
+`model:` lines, so nothing in it changes) and tries a textured GLB from Blender in github.dev.
 
 Proposals (not built):
 - From step 9's hands-on test: entering the pendulum scene logs about 45 `THREE.WebGLShadowMap:

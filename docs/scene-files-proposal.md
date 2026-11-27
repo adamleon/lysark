@@ -241,7 +241,8 @@ Each has a recommendation; the names in 3, 9, 10 and 11 are permanent once lectu
      and the limit, and says to use fewer or smaller textures, at the `model:` line, in the
      build and the panel alike. Without it a 5 MB file could hold hundreds of flat 2048-pixel
      PNGs, gigabytes on the graphics card.
-     *Counted as copies, after the answers' review (2026-11-26), for the author to confirm:*
+     *Counted as copies, after the answers' review (2026-11-26); the author confirmed it on
+     2026-11-27 ("keep it"):*
      it first counted each image once, however many textures or materials used it. But three
      uploads an image again for each filter and wrap its textures read it with (glTF's sampler;
      Blender's Interpolation and Extension), and again without sRGB where a normal map or other
@@ -293,7 +294,8 @@ Each has a recommendation; the names in 3, 9, 10 and 11 are permanent once lectu
    - *VS Code's 32 MB stays.* The extension reads at most 32 MB per file and isn't changed: the
      panel names such a model under "Models not shown:", saying that VS Code's editor reads at
      most 32 MB per file, and, with `limits: off`, that its size doesn't stop the build.
-   - *From the review (2026-11-26), for the author to see; the rule above is unchanged.* (1) The
+   - *From the review (2026-11-26), which the author saw before the release (2026-11-27); the
+     rule above is unchanged.* (1) The
      32 MB line with `limits: off` said "The lecture still builds", which the panel can't know: it
      never reads the file, so the build may still refuse it (a see-through material, say), and
      another scene file showing the same file may keep the limits, where the build stops. It now

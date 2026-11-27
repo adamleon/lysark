@@ -696,7 +696,8 @@ Confirmed by the author on 2026-11-26, with answers to step 9's questions (decis
   (about 90 MB of GPU memory), read from the same headers; the message names the file, the total
   and the limit. Built first counting each image its materials use once; after the answers'
   review, each copy the graphics card holds counts (an image read with other filters or wraps,
-  or as data apart from a colour, is uploaded again): decision 10, for the author to confirm.
+  or as data apart from a colour, is uploaded again): decision 10, confirmed by the author on
+  2026-11-27. Released as engine `v2.14.0` (2026-11-27).
 - Cut-out materials (alpha mode MASK, Blender's alpha clip) are allowed, their shadows cut out
   too; blended ones (BLEND) stay refused, with a message that names alpha clip.
 - A mesh without a material is grey, the `grey` preset, as Blender shows it.
