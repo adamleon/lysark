@@ -10,14 +10,18 @@
 // separator, Lysark: Fold or Unfold Slide Settings opens and folds them, a
 // slide typed between two others leaves the blocks after it folded, a
 // README.md and a slides.md at the course's top keep their own headings, and
-// the first slide typed into a new lecture stays open), opens the preview and,
-// by the runtime's message version:
+// the first slide typed into a new lecture stays open), puts the cursor in a
+// later slide and opens the preview, which must start on that slide with no
+// slide shown before it (extension 0.4.1), and, by the runtime's message
+// version:
 //
 //   3  images shown from both folders, and with models (v2.13.0) models from
 //      both folders shown in the scene, and from v2.14.0 those with material:
 //      file in their files' own look, a texture's image loaded from a data:
 //      address with no blob: address asked for (this panel's connect-src has
-//      none); saving a scene file sends the files
+//      none); a model just over the 32 MB VS Code's editor reads, made in the
+//      course at run time, named in the banner, from engine v2.14.1 with its
+//      size (extension 0.4.1 says it); saving a scene file sends the files
 //      again; V and Scene Actions… write the view into slides.md; undoing that
 //      edit reaches the panel; and with an engine that has named views
 //      (v2.5.0), V on a slide that names one writes it into the scene file,
@@ -115,6 +119,22 @@ function knowsModels(editorDir) {
 function knowsTextures(editorDir) {
   return buildSays(editorDir, 'write material: file to show them')
 }
+
+/** true if the editor build names the size of a model VS Code won't read (engine v2.14.1): its words for one are in its files */
+function knowsModelSize(editorDir) {
+  return buildSays(editorDir, "VS Code's editor reads per file")
+}
+
+/**
+ * A model just over the 32 MB VS Code's editor reads per file (MAX_READ_BYTES
+ * in extension/src/extension.ts), made in the course at run time (never
+ * committed; the course is deleted after), and the object that shows it. The
+ * extension sends the panel no bytes of it, only that it is too large, and
+ * from 0.4.1 its size.
+ */
+const OVERSIZED_MODEL = 'models/oversized.stl'
+const OVERSIZED_OBJECT = 'oversized part'
+const OVERSIZED_BYTES = 32_000_001
 
 /** the demo's scene file comment that starts its models, which come last (lectures/demo/scenes/arm.yaml) */
 const MODELS_MARK = /\r?\n[ \t]*# models \(from v2\.13\.0\)[\s\S]*$/
@@ -243,7 +263,11 @@ function makeCourse(editorUrl, namedViews, poses, objects, models, textures) {
     }
     // a model from the course's assets/ too: its bytes as they are (the extension reads any file's)
     writeFileSync(join(dir, 'assets/bracket.stl'), readFileSync(join(ROOT, 'lectures/demo/models/bracket.stl')))
-    arm = `${arm.replace(/\s*$/, '\n')}  shelf bracket:\n    model: ${ASSETS_MODEL}\n    unit: mm\n    up: z\n    at: [0.12, 0.3, -0.12]\n    parent: table\n`
+    // and one too large for VS Code's editor: never read, so its bytes don't matter
+    writeFileSync(join(lecture, OVERSIZED_MODEL), Buffer.alloc(OVERSIZED_BYTES))
+    arm =
+      `${arm.replace(/\s*$/, '\n')}  shelf bracket:\n    model: ${ASSETS_MODEL}\n    unit: mm\n    up: z\n    at: [0.12, 0.3, -0.12]\n    parent: table\n` +
+      `  ${OVERSIZED_OBJECT}:\n    model: ${OVERSIZED_MODEL}\n    at: [-0.6, 0, 0.6]\n`
   }
   let slides = readFileSync(join(ROOT, 'lectures/demo/slides.md'), 'utf8')
   // what an older editor doesn't know is written out as numbers
@@ -265,6 +289,15 @@ function makeCourse(editorUrl, namedViews, poses, objects, models, textures) {
   mkdirSync(join(dir, 'lectures/new'))
   writeFileSync(join(dir, 'lectures/new/slides.md'), '')
   return dir
+}
+
+/** move the cursor of the active editor to line `n` (1-based) with Go to Line */
+async function goToLine(page, n) {
+  await page.keyboard.press('Control+G')
+  await page.waitForSelector('.quick-input-widget input', { timeout: 10_000 })
+  await page.keyboard.type(String(n), { delay: 10 })
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(400)
 }
 
 function freePort() {
@@ -507,20 +540,13 @@ async function checkNavigation(page, course, { check, tab, quickOpen }) {
   // (slide-blocks.ts, SlideTracker); its own block stays open, since VS Code folds "imports"
   // ranges once per editor, and the separators after it count on. Then the typed lines are
   // deleted again and the file saved, so the steps after this see the text as it was.
-  const goToLine = async (n) => {
-    await page.keyboard.press('Control+G')
-    await page.waitForSelector('.quick-input-widget input', { timeout: 10_000 })
-    await page.keyboard.type(String(n), { delay: 10 })
-    await page.keyboard.press('Enter')
-    await page.waitForTimeout(400)
-  }
   // the first slide with a body line just above its opening ---
   const at = parts.findIndex((p, k) => k > 0 && p.open - 1 > parts[k - 1].close)
   let typedWrong = at > 0 ? '' : '; no slide has a body line above it'
   if (at > 0) {
     // the typed lines go at the slide's opening line (0-based), which moves down by 3
     const where = parts[at].open
-    await goToLine(where)
+    await goToLine(page, where)
     await page.keyboard.press('End')
     for (const text of ['---', 'id: typed', '---']) {
       await page.keyboard.press('Enter')
@@ -535,7 +561,7 @@ async function checkNavigation(page, course, { check, tab, quickOpen }) {
       misshown(seen, lineCount + 3, hidden) +
       label(where + 1, `slide ${at + 1} · typed`) +
       label(where + 4, labels[at].replace(`slide ${at + 1}`, `slide ${at + 2}`))
-    await goToLine(where + 1)
+    await goToLine(page, where + 1)
     for (let k = 0; k < 3; k++) await page.keyboard.press('Shift+ArrowDown')
     await page.keyboard.press('Delete')
     await page.keyboard.press('Control+S')
@@ -611,7 +637,7 @@ async function checkNavigation(page, course, { check, tab, quickOpen }) {
 }
 
 /** the workbench steps; returns the lines of the report and whether all passed */
-async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, models, textures, course, lines) {
+async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, objectHandles, models, textures, modelSize, course, lines) {
   let ok = true
   // a blob: address, which extension 0.4.0's panel can't fetch (its connect-src), asked for or
   // refused, with the frame that asked (VS Code's own workbench and webview host use blob: too)
@@ -689,6 +715,11 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
   await page.waitForSelector('.monaco-editor .view-lines', { timeout: 20_000 })
   await page.waitForTimeout(1500)
   await checkNavigation(page, course, { check, tab, quickOpen })
+  // the preview opens on the slide the cursor is in (extension 0.4.1): the cursor goes into the
+  // body of the demo's slide 'objects', a slide of the arm scene, as the first slide is
+  const startAt = demoSlide('objects')
+  const startLine = slideParts(readFileSync(join(course, 'lectures/demo/slides.md'), 'utf8'))[startAt].close + 2
+  await goToLine(page, startLine)
   await page.keyboard.press('F1')
   await page.waitForSelector('.quick-input-widget input', { timeout: 10_000 })
   await page.keyboard.type('Open Lysark Preview', { delay: 10 })
@@ -701,6 +732,29 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
   let frame = await panelFrame()
   check(!!frame, 'the preview started the deck')
   if (!frame) return false
+  // started there: the deck's first navigation (its start) went to that slide, and none came
+  // after it (the engine counts them, navSeq), so slide 1 was never shown first
+  const started = await frame
+    .waitForFunction(() => {
+      const L = window.__lysark
+      return L.engine.currentIndex >= 0 && !L.sceneManager.busy ? { slide: L.engine.currentIndex + 1, navigations: L.engine.navSeq } : null
+    }, null, { timeout: 30_000 })
+    .then((handle) => handle.jsonValue(), () => null)
+  check(
+    started?.slide === startAt + 1 && started?.navigations === 1,
+    `with the cursor on line ${startLine}, in slide ${startAt + 1}, the preview opened on that slide and showed no other first: ${JSON.stringify(started)}`,
+  )
+  // back to the first slide by moving the cursor (the preview follows it), as the steps after this expect
+  await tab('slides.md').click()
+  await page.waitForTimeout(400)
+  await page.keyboard.press('Control+Home')
+  const followed = await frame
+    .waitForFunction(() => {
+      const L = window.__lysark
+      return L.engine.currentIndex === 0 && !L.sceneManager.busy && !L.cameraCtl.active
+    }, null, { timeout: 20_000 })
+    .then(() => true, () => false)
+  check(followed, 'the cursor moved to the first slide, and the preview went there')
 
   if (protocol >= 3) {
     const images = await frame.evaluate(() => Object.keys(window.__LYSARK_IMAGES__ ?? {}).sort())
@@ -727,8 +781,8 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
           return { files: Object.keys(window.__LYSARK_MODELS__ ?? {}).sort(), meshes }
         }, null, { timeout: 30_000 })
         .then((handle) => handle.jsonValue(), () => null)
-      // the course's scene file has the one from assets/ too (makeCourse)
-      const srcs = courseModels(course)
+      // the course's scene file has the one from assets/ too (makeCourse), and the one too large to show
+      const srcs = courseModels(course).filter((src) => src !== OVERSIZED_MODEL)
       const expected = [...new Set(srcs)].sort()
       const built = Object.values(shown?.meshes ?? {})
       check(
@@ -777,7 +831,27 @@ async function drive(page, protocol, namedViews, saveAs, posePanel, savePoseAs, 
             (panelBlobs.length > 0 ? `; blob: ${JSON.stringify(panelBlobs)}` : ''),
         )
       } else lines.push("(models in their files' own look not checked: this editor has none)")
-    } else lines.push('(models not checked: this editor has none)')
+
+      // the model over VS Code's 32 MB: named in the banner at its line; from engine v2.14.1 with
+      // its size in MB, which only extension 0.4.1's answer gives (one byte over: 32.000001 MB)
+      const arm = readFileSync(join(course, 'lectures/demo/scenes/arm.yaml'), 'utf8')
+      const where = `scenes/arm.yaml, line ${arm.split(/\r?\n/).findIndex((l) => l.trim() === `model: ${OVERSIZED_MODEL}`) + 1}: object '${OVERSIZED_OBJECT}'`
+      const said = await frame
+        .waitForFunction((object) => {
+          const el = [...document.querySelectorAll('div')].find((d) => d.style.position === 'fixed' && d.style.bottom === '12px')
+          return el?.textContent.includes(`object '${object}'`) ? el.textContent : null
+        }, OVERSIZED_OBJECT, { timeout: 20_000 })
+        .then((handle) => handle.jsonValue(), () => null)
+      const named = (said ?? '').split('\n').find((l) => l.startsWith(where)) ?? said
+      if (modelSize) {
+        const words =
+          `${where}: the model '${OVERSIZED_MODEL}' is 32.000001 MB, more than the 32 MB VS Code's editor reads per file, ` +
+          "so the preview can't show it. The lecture doesn't build with it either: a model may be at most 5 MB."
+        check(!!said?.includes(words), `a model of ${OVERSIZED_BYTES} bytes, more than VS Code's editor reads, named with its size: ${JSON.stringify(named)}`)
+      } else {
+        check(!!said?.includes(where), `a model of ${OVERSIZED_BYTES} bytes, more than VS Code's editor reads, named (this editor doesn't say its size): ${JSON.stringify(named)}`)
+      }
+    } else lines.push('(models not checked: this editor has none, nor a model over 32 MB)')
     await frame.evaluate(() => {
       window.__received = []
       window.addEventListener('message', (e) => window.__received.push(e.data))
@@ -1077,7 +1151,20 @@ async function checkExtension(editorDir) {
     browser = await launchBrowser('chromium')
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
     await page.goto(`http://localhost:${port}/`)
-    ok = await drive(page, protocol, namedViews, knowsSaveAs(editorDir), knowsPosePanel(editorDir), knowsSavePoseAs(editorDir), knowsObjectHandles(editorDir), models, textures, course, lines)
+    ok = await drive(
+      page,
+      protocol,
+      namedViews,
+      knowsSaveAs(editorDir),
+      knowsPosePanel(editorDir),
+      knowsSavePoseAs(editorDir),
+      knowsObjectHandles(editorDir),
+      models,
+      textures,
+      knowsModelSize(editorDir),
+      course,
+      lines,
+    )
   } catch (err) {
     lines.push(`✗ check failed: ${String(err?.message ?? err).split('\n')[0]}`)
   } finally {

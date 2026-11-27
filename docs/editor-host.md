@@ -172,7 +172,10 @@ engine v2.14.1's panel says. Neither needs the other first.
   folder and `assets/`), the files sent again on saving a scene file, V and Scene Actions… writing
   the view, and undo reaching the panel. From engine v2.5.0 also V on a slide that names a view,
   saved into the scene file and taken by both slides that name it (2026-11-04). With the v2.3.1
-  editor: V writing the view, and Scene Actions… saying to update the engine. Not in CI: its first run downloads VS Code (about 55 MB),
+  editor: V writing the view, and Scene Actions… saying to update the engine. For extension 0.4.1
+  (2026-11-27): the preview opening on the cursor's slide with this editor and v2.12.0's, and a
+  model of 32,000,001 bytes it makes in the course named as 32.000001 MB by engine v2.14.1's
+  panel. Not in CI: its first run downloads VS Code (about 55 MB),
   and the workbench's markup changes between VS Code builds. Run it before an extension release.
 - Unit tests for the extension's path rules, image paths and loading, and the view change.
 
