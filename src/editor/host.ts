@@ -18,6 +18,12 @@ export interface HostFile {
   version?: number
   base64?: string
   error?: string
+  /**
+   * with the error for a file too large to read, `larger than 32 MB`: its
+   * size on disk. From extension 0.4.1; an older one leaves it out, and a
+   * reader checks it is a number, as for any field the host sends
+   */
+  bytes?: number
 }
 
 /** one change to a file: replace characters start…end of `version`, or create the file */

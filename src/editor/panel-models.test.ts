@@ -161,6 +161,49 @@ describe('loadModels', () => {
     ])
   })
 
+  it("says the size of a file over what VS Code reads when the host gives it (extension 0.4.1), in the build's MB format", async () => {
+    const { read } = host({
+      'models/part.glb': { error: 'larger than 32 MB', bytes: 41_234_567 },
+      'models/edge.stl': { error: 'larger than 32 MB', bytes: 32_000_001 },
+    })
+    const sized = (src: string, mb: string) =>
+      `the model '${src}' is ${mb} MB, more than the 32 MB VS Code's editor reads per file, so the preview can't show it`
+    const off = await loadModels([ref('part', 'models/part.glb', 9, 'm', 'file', 'off'), ref('edge', 'models/edge.stl', 12, 'm', 'default', 'off')], read)
+    expect(off.problems).toEqual([
+      `scenes/arm.yaml, line 9: object 'part': ${sized('models/part.glb', '41.2')}. Its size doesn't stop the build, because its scene file says limits: off`,
+      // one byte over: as many decimals as it takes to show it is over, as the build's "the model is 5.000001 MB"
+      `scenes/arm.yaml, line 12: object 'edge': ${sized('models/edge.stl', '32.000001')}. Its size doesn't stop the build, because its scene file says limits: off`,
+    ])
+    const on = await loadModels([ref('part', 'models/part.glb', 9, 'm', 'file'), ref('edge', 'models/edge.stl', 12)], read)
+    expect(on.problems).toEqual([
+      `scenes/arm.yaml, line 9: object 'part': ${sized('models/part.glb', '41.2')}. The lecture doesn't build with it either: a model may be at most 5 MB, its textures included. ` +
+        "Export it with fewer triangles, or its textures as JPEG rather than PNG (in Blender's glTF export, under Data > Material, Images: JPEG Format) or smaller",
+      `scenes/arm.yaml, line 12: object 'edge': ${sized('models/edge.stl', '32.000001')}. The lecture doesn't build with it either: a model may be at most 5 MB. ` +
+        'Export it with fewer triangles, or as binary STL rather than text STL (about five times smaller)',
+    ])
+  })
+
+  it("says what v2.14.0 says without the size (extension 0.4.0), or with one that isn't a size over the limit", async () => {
+    const words = "the model 'models/part.stl' is larger than 32 MB: VS Code's editor reads at most 32 MB per file, so the preview can't show it"
+    // left out, not a number, negative, not finite, not over the 32 MB the error names
+    for (const bytes of [undefined, '41234567', null, -41_234_567, Number.NaN, Number.POSITIVE_INFINITY, 32_000_000, 1000]) {
+      const { read } = host({ 'models/part.stl': { error: 'larger than 32 MB', ...(bytes === undefined ? {} : { bytes: bytes as number }) } })
+      const off = await loadModels([ref('part', 'models/part.stl', 9, 'm', 'default', 'off')], read)
+      expect(off.problems, String(bytes)).toEqual([`scenes/arm.yaml, line 9: object 'part': ${words}. Its size doesn't stop the build, because its scene file says limits: off`])
+      const on = await loadModels([ref('part', 'models/part.stl', 9)], read)
+      expect(on.problems, String(bytes)).toEqual([
+        `scenes/arm.yaml, line 9: object 'part': ${words}. The lecture doesn't build with it either: a model may be at most 5 MB. ` +
+          'Export it with fewer triangles, or as binary STL rather than text STL (about five times smaller)',
+      ])
+    }
+    // a limit not written `<n> MB`, as no extension writes it: its words as they are, without the size
+    const { read } = host({ 'models/part.stl': { error: 'larger than 32 MiB', bytes: 41_234_567 } })
+    expect((await loadModels([ref('part', 'models/part.stl', 9, 'm', 'default', 'off')], read)).problems).toEqual([
+      "scenes/arm.yaml, line 9: object 'part': the model 'models/part.stl' is larger than 32 MiB: VS Code's editor reads at most 32 MiB per file, " +
+        "so the preview can't show it. Its size doesn't stop the build, because its scene file says limits: off",
+    ])
+  })
+
   it('measures a file from its base64, and refuses one over the limit without decoding it', async () => {
     expect([base64Bytes(''), base64Bytes('AA=='), base64Bytes('AAA='), base64Bytes('AAAA')]).toEqual([0, 1, 2, 3])
     expect(base64Bytes(base64(binaryStl()))).toBe(binaryStl().byteLength)

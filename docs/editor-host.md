@@ -51,7 +51,7 @@ the extension's):
 | panel | `shown`, `accepted`, `error`, `slide` | as in version 2 |
 | extension | `goto`, `request-view` | as in version 2 |
 | extension | `request-actions` | Scene Actions… was clicked |
-| panel | `read` | send these files, as text with their document version, or as bytes |
+| panel | `read` | send these files, as text with their document version, or as bytes (or why not; for a file over 32 MB, from extension 0.4.1, also its size) |
 | panel | `list` | list this folder |
 | panel | `edit` | apply these changes as one edit |
 | panel | `ask` | show a list to pick from, or a box to type in |
@@ -78,6 +78,26 @@ the build and the panel agree. Its limit, 32 MB per file, is far above the engin
 model, so a model that is too large gets the engine's advice; one over 32 MB, which VS Code won't
 send, gets the same. Creating, deleting or renaming a model file in VS Code loads the panel
 afresh, as for an image; a file overwritten in place outside VS Code doesn't, so press ▷.
+
+**A file over 32 MB names its size** (extension 0.4.1 and engine v2.14.1). The host answers a
+file over 32 MB, read as text or as bytes, with `{ error: 'larger than 32 MB', bytes: 41234567 }`:
+the error exactly as 0.3.0 and 0.4.0 write it, and `bytes`, the file's size on disk
+(`stat.size`; for a text read of a document with unsaved typing, the size of the saved file). The
+field is optional. The panel of engine v2.14.1 (`src/editor/panel-models.ts`) says the size when
+`bytes` is a finite number over the limit the error names, in the build's MB format
+(`megabytes` in `src/compiler/model-types.ts`, as in "the model is 40.1 MB"): `the model
+'models/part.glb' is 41.2 MB, more than the 32 MB VS Code's editor reads per file, so the preview
+can't show it.` Without it, or with something else there, it says what v2.14.0 says: `the model
+'models/part.glb' is larger than 32 MB: VS Code's editor reads at most 32 MB per file, so the
+preview can't show it.` Either is followed by `Its size doesn't stop the build, because its scene
+file says limits: off`, or by `The lecture doesn't build with it either:` and the build's advice.
+
+The message version stays 3. A version names the messages each side must understand to work at
+all, and the extension refuses a panel of another version ("Update the Lysark extension"). Here
+every pair works as it is: the v2.14.0 panel reads only the error, which is unchanged, and
+ignores a field it doesn't know; the v2.14.1 panel with extension 0.4.0 gets no `bytes` and says
+what v2.14.0 says. A new version would only make extension 0.4.0 refuse engine v2.14.1 over one
+sentence, and the extension and the engine can be released in either order.
 
 **What the panel may touch.** The panel runs code from the course's site, so the extension, not
 the panel, decides what it may do:
@@ -132,6 +152,11 @@ changes nothing above. It adds finding one's way in a lecture's `slides.md`: fol
 blocks, a separator on each slide, and an outline of the slides' own headings
 ([slide-navigation.md](slide-navigation.md)). It needs no engine change.
 
+Extension 0.4.1 (built 2026-11-27, not yet released) speaks the same messages too. The preview
+opens on the slide the cursor is in ([slide-navigation.md](slide-navigation.md)), with every
+engine from v2.3.0, and a file over 32 MB is answered with its size (`bytes`, above), which
+engine v2.14.1's panel says. Neither needs the other first.
+
 ## Tested
 
 - **Engine CI**, in Chromium and Firefox: `scripts/check-editor.mjs` plays the extension's side
@@ -139,7 +164,9 @@ blocks, a separator on each slide, and an outline of the slides' own headings
   besides everything it required before: the images shown; a view saved by V but computed on an
   older version refused, with the panel saying so; a view saved through Scene Actions… written as
   one small change inside the first slide's frontmatter; and no file asked for outside the
-  lecture folder.
+  lecture folder. From engine v2.14.1 its stand-in host answers two models as over 32 MB, one
+  without its size (extension 0.4.0) and one with it (0.4.1), and the banner must give each its
+  words, with and without `limits: off`.
 - **The real extension in VS Code for the web** (2026-10-19), `node scripts/check-extension.mjs
   <editor dir> …`, with isolation on as in github.dev. With this engine: both images (lecture
   folder and `assets/`), the files sent again on saving a scene file, V and Scene Actions… writing

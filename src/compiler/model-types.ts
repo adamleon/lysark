@@ -189,12 +189,16 @@ export function modelPathProblem(src: string): string | null {
   return null
 }
 
-/** a byte count in MB, with as many decimals as it takes to show it is over the limit */
-function megabytes(bytes: number): string {
-  const limit = MODEL_MAX_BYTES / 1e6
+/**
+ * A byte count in MB as the size messages write it ("the model is 40.1 MB"),
+ * with as many decimals as it takes to show it is over `limit` bytes: the
+ * build's 5 MB unless another is named, as the editor panel names VS Code's
+ * 32 MB (panel-models.ts).
+ */
+export function megabytes(bytes: number, limit = MODEL_MAX_BYTES): string {
   for (let decimals = 1; decimals < 6; decimals++) {
     const shown = (bytes / 1e6).toFixed(decimals)
-    if (Number(shown) > limit) return shown
+    if (Number(shown) > limit / 1e6) return shown
   }
   return (bytes / 1e6).toFixed(6)
 }

@@ -1,6 +1,6 @@
 import type { ModelRef } from '../compiler/compile-slides'
 import type { SceneFile } from '../compiler/scene-files'
-import { modelObjectKey, modelReadWay, modelSizeAdvice, modelSizeProblem, modelWhere } from '../compiler/model-types'
+import { megabytes, modelObjectKey, modelReadWay, modelSizeAdvice, modelSizeProblem, modelWhere } from '../compiler/model-types'
 import { checkModel } from '../scene/model-check'
 import { decodeBase64, firstLine } from '../scene/models'
 import type { HostFile } from './host'
@@ -51,8 +51,17 @@ function notThere(file: HostFile | undefined): boolean {
   return error === 'not found' || error.startsWith('outside')
 }
 
-/** the host's answer for a file over what VS Code's editor reads, `larger than 32 MB` (extension 0.3.0 and 0.4.0, MAX_READ_BYTES) */
+/**
+ * the host's answer for a file over what VS Code's editor reads, `larger than 32 MB` (extension
+ * 0.3.0 on, MAX_READ_BYTES), the limit after the words; from 0.4.1 with the file's size, `bytes`
+ */
 const TOO_LARGE = /^larger than (.+)$/
+
+/** the limit in a `larger than` answer as bytes, when it is written `<n> MB` as the extension writes it */
+function limitBytes(limit: string): number | null {
+  const mb = /^(\d+(?:\.\d+)?) MB$/.exec(limit)
+  return mb ? Number(mb[1]) * 1e6 : null
+}
 
 /**
  * Why a file VS Code didn't give can't be shown, in the build's words where
@@ -61,20 +70,28 @@ const TOO_LARGE = /^larger than (.+)$/
  * read from scenes/.
  *
  * VS Code's editor reads at most 32 MB of a file (the extension's own limit,
- * which the panel can't lift), and says only that, not the size. Without
- * limits: off such a file is far over lysark's own limit too, and gets its
- * advice; with it, its size doesn't stop the build, and only the preview
- * can't show it. Only that is said: the panel never saw the bytes, so it
- * can't tell whether the build passes the rest of the file.
+ * which the panel can't lift). Extension 0.4.0 says only that; from 0.4.1 it
+ * gives the file's size too (`bytes`), said in the build's MB format when it
+ * is a number over that limit. Without limits: off such a file is far over
+ * lysark's own limit too, and gets its advice; with it, its size doesn't
+ * stop the build, and only the preview can't show it. Only that is said: the
+ * panel never saw the bytes, so it can't tell whether the build passes the
+ * rest of the file.
  */
-function unreadProblem(ref: ModelRef, error: string, fix: string | undefined): string {
+function unreadProblem(ref: ModelRef, error: string, fix: string | undefined, bytes: unknown): string {
   const hint = fix ? `. Write ${fix}: the path is from the lecture folder, not from scenes/` : ''
   if (error === 'not found') {
     return `the model '${ref.src}' was not found. Paths in scene files are from the lecture folder, where slides.md is, as for images${hint}`
   }
   const tooLarge = TOO_LARGE.exec(error)
   if (tooLarge) {
-    const preview = `the model '${ref.src}' is ${error}: VS Code's editor reads at most ${tooLarge[1]} per file, so the preview can't show it`
+    const limit = tooLarge[1]
+    const most = limitBytes(limit)
+    const size = most !== null && typeof bytes === 'number' && Number.isFinite(bytes) && bytes > most ? megabytes(bytes, most) : null
+    const preview =
+      size === null
+        ? `the model '${ref.src}' is ${error}: VS Code's editor reads at most ${limit} per file, so the preview can't show it`
+        : `the model '${ref.src}' is ${size} MB, more than the ${limit} VS Code's editor reads per file, so the preview can't show it`
     return ref.limits === 'off'
       ? `${preview}. Its size doesn't stop the build, because its scene file says limits: off`
       : `${preview}. The lecture doesn't build with it either: ${modelSizeAdvice(ref.format)}`
@@ -188,7 +205,7 @@ export async function loadModels(
       // one line for the file, at its first object; for one too large for VS Code, at the
       // first whose scene file keeps the limits, if any does: that is where the build stops
       const named = (TOO_LARGE.test(error) && uses.find((ref) => ref.limits === 'on')) || uses[0]
-      problems.push(`${modelWhere(named)}: ${unreadProblem(named, error, fix)}`)
+      problems.push(`${modelWhere(named)}: ${unreadProblem(named, error, fix, file?.bytes)}`)
       continue
     }
     const content = await contentProblems(file.base64, uses)
