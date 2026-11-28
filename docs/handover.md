@@ -507,7 +507,11 @@ Baneplanlegging's `slides.md`, and press ▷.
 
 **0.4.1 and v2.14.1 released (2026-11-27).** Pushed, engine CI passed (run 46028298914, whose
 extension job built `lysark-0.4.1.vsix`), and tagged `v2.14.1` on the author's yes ("tag it").
-Next: the author uploads that `.vsix` to the Marketplace and moves the course with Update engine.
+On 2026-11-28 the author uploaded it (the Marketplace lists 0.4.1) and moved the course with
+Update engine (course commit b8197ec, published green). They tried 0.4.1 by hand. The preview
+opens on the cursor's slide, and on slide 1 from slide 1. A panel on slide 6 stays there when
+focus goes to the editor without the cursor moving, and goes to slide 4 when they click into
+slide 4.
 The course's PDF publish had failed on 2026-11-25 and 11-27 (the HTML went out, the PDFs
 didn't). In the PDF job, deploy-pages couldn't find the artifact uploaded a second earlier: "No
 artifacts named "pages-full-1" were found". This is a GitHub bug, [actions/deploy-pages#451](https://github.com/actions/deploy-pages/issues/451),
@@ -518,7 +522,7 @@ yes ("fix the publish too"), the course's `build.yml` now tries each publish aga
 and after 60 s, in both jobs (course commit 91fd68f, with a line in its README). A try that
 can't find the artifact publishes nothing. Its first run (46060881505) passed: the PDF job's
 first try failed the same way and the second published, so the site's PDF now matches its
-HTML. The retries can go once the upstream fix (actions/deploy-pages#455) is in a release the
+HTML. The v2.14.1 publish (46120458896) needed the second try too. The retries can go once the upstream fix (actions/deploy-pages#455) is in a release the
 course uses.
 
 Proposals (not built):
